@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Realtime BPM (mic)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font:14px/1.5 system-ui;margin:24px;color:#111}
+    button{padding:8px 14px;margin-right:8px}
+    .bpm-row{display:flex;align-items:center;gap:12px;margin-top:16px}
+    .bpm-info{display:flex;flex-direction:column;gap:4px}
+    .bpm{font-size:32px}
+    .row{display:flex;gap:16px;align-items:center;margin-top:12px}
+    .meter-wrap{width:260px;height:16px;background:#eee;border-radius:8px;overflow:hidden}
+    .meter{height:100%;width:0;background:#2aa245}
+    .log{margin-top:12px;padding:8px;background:#f7f7f7;border:1px solid #ddd;max-height:180px;overflow:auto;font-family:ui-monospace, SFMono-Regular, Menlo, monospace;font-size:12px}
+    .hint{color:#666}
+    .beat{width:20px;height:20px;border-radius:50%;background:#bbb;opacity:0.3;transform:scale(1);transition:transform 120ms ease,opacity 120ms ease,background 120ms ease}
+    .beat.flash{opacity:1;background:#ff4d4f;transform:scale(1.5)}
+    .level-info{display:flex;flex-direction:column;font-size:12px;line-height:1.2;color:#444}
+    .meter-max{font-size:11px;color:#777}
+    .confidence{font-size:12px;color:#666}
+    .confidence span{font-weight:600;color:#333}
+  </style>
+</head>
+<body>
+  <h1>Realtime BPM (mic)</h1>
+  <div class="row">
+    <button id="start">Start</button>
+    <button id="stop" disabled>Stop</button>
+    <span class="hint">Allow mic; clap/tap or play a beat.</span>
+  </div>
+
+  <div class="row">
+    <div>Level:</div>
+    <div class="meter-wrap"><div id="meter" class="meter"></div></div>
+    <div class="level-info">
+      <div id="lvlText">— dBFS</div>
+      <div class="meter-max">max <span id="lvlMax">— dBFS</span></div>
+    </div>
+  </div>
+
+  <div class="bpm-row">
+    <div class="beat" id="beat"></div>
+    <div class="bpm-info">
+      <div class="bpm" id="bpm">—</div>
+      <div class="confidence">conf <span id="confidence">—</span></div>
+    </div>
+  </div>
+  <div class="log" id="log"></div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PatchToy - GLSL Node Editor</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/editor/editor.main.min.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Floating UI Controls -->
+        <div id="floatingControls">
+            <!-- Top-left: Logo and Project Menu -->
+            <div id="topLeftControls">
+                <img src="patchtoy.png" alt="PatchToy" class="patchtoy-logo">
+                <button id="projectMenuBtn" class="project-title-btn">
+                    <span id="projectTitleDisplay">Untitled Project</span>
+                    <span class="dropdown-arrow">▾</span>
+                </button>
+                <button id="saveCloudBtn" class="icon-btn" title="Save to Cloud" style="display: none;">💾</button>
+                <button id="playStopBtn" class="icon-btn active" title="Playing - auto-compile enabled">▶️</button>
+                <button id="cameraBtn" class="icon-btn" title="Toggle Camera">📷</button>
+                <button id="micBtn" class="icon-btn" title="Enable Microphone">🎤</button>
+                <button id="addNodeBtn" class="icon-btn" title="Add Node">➕</button>
+            </div>
+
+            <!-- Top-right: Account -->
+            <div id="topRightControls">
+                <button id="accountBtn" class="floating-btn" title="Account">👤</button>
+            </div>
+        </div>
+
+        <!-- Hidden file input -->
+        <input type="file" id="loadFileInput" accept=".json" style="display: none;">
+
+        <!-- Main editing area -->
+        <div id="container">
+            <canvas id="nodeCanvas"></canvas>
+            <video id="cameraVideo" autoplay playsinline style="display: none;"></video>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    <script type="module" src="main.js"></script>
+</body>
+</html>

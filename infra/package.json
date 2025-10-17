@@ -1,0 +1,29 @@
+{
+  "name": "patchtoy-infra",
+  "version": "0.1.0",
+  "bin": {
+    "patchtoy": "bin/patchtoy.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:lambda": "cd lambda && npm install && npx tsc",
+    "watch": "tsc -w",
+    "cdk": "cdk",
+    "build:site": "npm run build --prefix ..",
+    "bootstrap": "npx cdk bootstrap",
+    "deploy": "npm run build:site && npm run build:lambda && npm run build && npx cdk deploy --all",
+    "deploy:no-approval": "npm run build:site && npm run build:lambda && npm run build && npx cdk deploy --all --require-approval never"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.4.0",
+    "aws-cdk": "^2.133.0"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.133.0",
+    "constructs": "^10.3.0",
+    "dotenv": "^16.4.5",
+    "esbuild": "^0.20.0"
+  }
+}
