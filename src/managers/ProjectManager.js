@@ -1,4 +1,5 @@
 import { NodeDefinitions } from '../core/NodeDefinitions.js';
+import { FloatingCodeEditor } from '../ui/FloatingCodeEditor.js';
 
 export class ProjectManager {
     constructor(nodeGraph, apiClient) {
@@ -7,6 +8,18 @@ export class ProjectManager {
         this.projectTitle = 'Untitled Project';
         this.currentProjectId = null;
         this.viewingSharedProject = null; // { id, name, username, isOwner }
+
+        // Enhanced project state
+        this.projectState = {
+            projectId: null,      // Cloud project ID (if exists)
+            ownerId: null,        // Owner's user ID
+            ownerUsername: null,  // Owner's username (for display)
+            isOwner: false,       // Whether current user owns it
+            isDirty: false,       // Has unsaved changes
+            source: 'new',        // 'new', 'file', 'cloud'
+            lastModified: null,   // Timestamp of last modification
+            title: 'Untitled Project'
+        };
     }
 
     saveGraph() {
@@ -14,7 +27,9 @@ export class ProjectManager {
             const data = {
                 graph: this.nodeGraph.serialize(),
                 projectTitle: this.projectTitle,
-                currentProjectId: this.currentProjectId
+                currentProjectId: this.currentProjectId,
+                editorStates: FloatingCodeEditor.getAllStates(),
+                projectState: this.projectState
             };
             localStorage.setItem('patchtoy_graph', JSON.stringify(data));
         } catch (e) {
@@ -34,16 +49,69 @@ export class ProjectManager {
                     this.projectTitle = data.projectTitle || 'Untitled Project';
                     this.currentProjectId = data.currentProjectId || null;
                     document.getElementById('projectTitleDisplay').textContent = this.projectTitle;
+
+                    // Restore project state if present
+                    if (data.projectState) {
+                        this.projectState = { ...data.projectState };
+                        this.updateOwnershipDisplay();
+                    } else {
+                        // Migrate old data to new format
+                        this.projectState.title = this.projectTitle;
+                        this.projectState.projectId = this.currentProjectId;
+                        if (this.currentProjectId) {
+                            this.projectState.source = 'cloud';
+                            this.projectState.isOwner = true; // Assume ownership for old data
+                        }
+                    }
+
+                    // Return editor states if present (caller will restore them)
+                    return data.editorStates || [];
                 } else {
                     // Old format - just the graph data
                     this.nodeGraph.deserialize(data);
+                    return [];
                 }
-                return true;
+            } else {
+                // No saved data - initialize with bare minimum
+                console.log('No saved graph found, initializing empty project');
+                this.initializeEmptyProject();
             }
         } catch (e) {
             console.error('Failed to load graph:', e);
+            // On error, initialize with bare minimum
+            this.initializeEmptyProject();
         }
-        return false;
+        return [];
+    }
+
+    /**
+     * Initialize an empty project with bare minimum data
+     */
+    initializeEmptyProject() {
+        this.projectTitle = 'Untitled Project';
+        this.currentProjectId = null;
+        this.viewingSharedProject = null;
+
+        this.projectState = {
+            projectId: null,
+            ownerId: null,
+            ownerUsername: null,
+            isOwner: false,
+            isDirty: false,
+            source: 'new',
+            lastModified: null,
+            title: 'Untitled Project'
+        };
+
+        const titleElement = document.getElementById('projectTitleDisplay');
+        if (titleElement) {
+            titleElement.textContent = this.projectTitle;
+        }
+
+        this.updateOwnershipDisplay();
+
+        // Save initial empty state
+        this.saveGraph();
     }
 
     saveProjectToFile() {
@@ -66,6 +134,7 @@ export class ProjectManager {
                 version: '1.0',
                 graph: this.nodeGraph.serialize(),
                 customNodes: customNodes,
+                editorStates: FloatingCodeEditor.getAllStates(),
                 timestamp: new Date().toISOString()
             };
 
@@ -130,12 +199,33 @@ export class ProjectManager {
             // Load the graph
             this.nodeGraph.deserialize(projectData.graph);
 
-            // Save to localStorage
+            // Update project state - loaded from file has no cloud ID
+            this.projectState = {
+                projectId: null,
+                ownerId: null,
+                ownerUsername: null,
+                isOwner: false,
+                isDirty: false,
+                source: 'file',
+                lastModified: new Date().toISOString(),
+                title: this.projectTitle
+            };
+
+            // Clear URL since this is a local file
+            this.clearProjectUrl();
+            this.updateOwnershipDisplay();
+
+            // Save to localStorage (skip project copy since loaded from file)
             this.saveGraph();
             onSaveCustomNodes();
 
             console.log('Project loaded from file');
-            return true;
+
+            // Return editor states for restoration
+            return {
+                success: true,
+                editorStates: projectData.editorStates || []
+            };
         } catch (e) {
             console.error('Failed to load project from file:', e);
             alert('Failed to load project: ' + e.message);
@@ -261,26 +351,48 @@ export class ProjectManager {
                 version: '1.0',
                 graph: this.nodeGraph.serialize(),
                 customNodes: customNodes,
+                editorStates: FloatingCodeEditor.getAllStates(),
                 timestamp: new Date().toISOString()
             };
 
-            // Check if viewing someone else's shared project
-            if (this.viewingSharedProject && !this.viewingSharedProject.isOwner) {
-                // Fork: Always create new project
-                return { needsName: true, projectData, isFork: true, originalName: this.viewingSharedProject.name };
-            }
+            const { source, isOwner, projectId } = this.projectState;
 
-            if (this.currentProjectId) {
+            // Determine save behavior based on project state
+            if (source === 'new' || source === 'file') {
+                // Create new cloud project
+                return { needsName: true, projectData };
+            } else if (source === 'cloud' && isOwner) {
                 // Update existing project
-                await this.apiClient.updateProject(this.currentProjectId, {
+                await this.apiClient.updateProject(projectId, {
                     name: this.projectTitle,
                     data: projectData
                 });
+
+                // Update state
+                this.projectState.lastModified = projectData.timestamp;
+                this.markClean();
+
+                // Save both to localStorage and project-specific copy
+                this.saveGraph();
+                this.saveLocalProjectCopy(projectId, {
+                    graph: projectData.graph,
+                    projectTitle: this.projectTitle,
+                    currentProjectId: projectId,
+                    editorStates: projectData.editorStates,
+                    projectState: this.projectState,
+                    customNodes: projectData.customNodes
+                });
+
                 console.log('Project updated:', this.projectTitle);
                 return { success: true };
-            } else {
-                // Create new project - caller should show dialog
-                return { needsName: true, projectData };
+            } else if (source === 'cloud' && !isOwner) {
+                // Fork: Create copy of someone else's project
+                return {
+                    needsName: true,
+                    projectData,
+                    isFork: true,
+                    originalName: this.projectState.title
+                };
             }
         } catch (err) {
             alert('Failed to save project: ' + err.message);
@@ -290,11 +402,36 @@ export class ProjectManager {
 
     async saveNewProject(name, projectData) {
         try {
+            const currentUser = this.apiClient.getCurrentUser();
             const result = await this.apiClient.saveProject(name, projectData);
+
+            // Update legacy fields
             this.currentProjectId = result.id;
             this.projectTitle = name;
+            this.viewingSharedProject = null;
+
+            // Update project state - now it's our cloud project
+            this.projectState = {
+                projectId: result.id,
+                ownerId: currentUser?.userId || null,
+                ownerUsername: currentUser?.username || null,
+                isOwner: true,
+                isDirty: false,
+                source: 'cloud',
+                lastModified: projectData.timestamp || new Date().toISOString(),
+                title: name
+            };
+
+            // Update UI
             document.getElementById('projectTitleDisplay').textContent = name;
+            this.updateOwnershipDisplay();
+
+            // Set URL to new project
+            this.setProjectUrl(result.id);
+
+            // Save to localStorage
             this.saveGraph();
+
             return true;
         } catch (err) {
             throw err;
@@ -303,29 +440,116 @@ export class ProjectManager {
 
     async loadCloudProject(projectId, onCreateCustomNode) {
         try {
+            // IMPORTANT: Save current project's local copy before switching
+            // This must happen BEFORE we change projectState
+            if (this.projectState.projectId && this.projectState.isDirty) {
+                const currentData = {
+                    graph: this.nodeGraph.serialize(),
+                    projectTitle: this.projectTitle,
+                    currentProjectId: this.currentProjectId,
+                    editorStates: FloatingCodeEditor.getAllStates(),
+                    projectState: this.projectState
+                };
+                this.saveLocalProjectCopy(this.projectState.projectId, currentData);
+                console.log(`Saved local copy of project ${this.projectState.projectId} before switching`);
+            }
+
             const project = await this.apiClient.getProject(projectId);
+            console.log('Loaded project from API:', project);
+            const currentUser = this.apiClient.getCurrentUser();
+
+            // Check if we have a local copy
+            const localCopy = this.getLocalProjectCopy(projectId);
+
+            // Compare timestamps if both exist
+            let useLocalCopy = false;
+            let dataToLoad = project.data;
+
+            if (localCopy && localCopy.localTimestamp && project.data.timestamp) {
+                const localTime = new Date(localCopy.localTimestamp);
+                const cloudTime = new Date(project.data.timestamp);
+
+                if (localTime > cloudTime) {
+                    useLocalCopy = true;
+                    console.log('Using local copy (more recent than cloud version)');
+
+                    // Local copy has the full localStorage structure, extract the project data
+                    // Need to reconstruct it in the same format as project.data
+                    dataToLoad = {
+                        version: '1.0',
+                        graph: localCopy.graph,
+                        customNodes: localCopy.customNodes || {},
+                        editorStates: localCopy.editorStates || [],
+                        timestamp: localCopy.localTimestamp
+                    };
+                }
+            }
 
             // Handle new format (with version, graph, customNodes)
-            if (project.data.version && project.data.graph) {
+            if (dataToLoad.graph) {
+                // New format: {version, graph, customNodes, ...}
                 // Load custom nodes first
-                if (project.data.customNodes) {
-                    for (const [nodeName, nodeData] of Object.entries(project.data.customNodes)) {
+                if (dataToLoad.customNodes) {
+                    for (const [nodeName, nodeData] of Object.entries(dataToLoad.customNodes)) {
                         onCreateCustomNode(nodeName, nodeData.customGLSL);
                     }
                 }
 
                 // Then deserialize the graph
-                this.nodeGraph.deserialize(project.data.graph);
+                this.nodeGraph.deserialize(dataToLoad.graph);
+            } else if (dataToLoad.nodes) {
+                // Very old format - graph data directly with nodes/connections
+                this.nodeGraph.deserialize(dataToLoad);
             } else {
-                // Old format - just the graph data directly
-                this.nodeGraph.deserialize(project.data);
+                throw new Error('Invalid project data format');
             }
 
+            // Update legacy fields
             this.projectTitle = project.name;
             this.currentProjectId = projectId;
+
+            // Update project state
+            const isOwner = project.isOwner || (currentUser && project.userId === currentUser.userId);
+            this.projectState = {
+                projectId: projectId,
+                ownerId: project.userId,
+                ownerUsername: project.username,
+                isOwner: isOwner,
+                isDirty: useLocalCopy, // Mark as dirty if using local (newer) copy
+                source: 'cloud',
+                lastModified: useLocalCopy ? localCopy.localTimestamp : (project.data.timestamp || new Date().toISOString()),
+                title: project.name
+            };
+
+            // Update legacy viewingSharedProject for compatibility
+            if (!isOwner) {
+                this.viewingSharedProject = {
+                    id: projectId,
+                    name: project.name,
+                    username: project.username,
+                    isOwner: false
+                };
+            } else {
+                this.viewingSharedProject = null;
+            }
+
+            // Update UI
             document.getElementById('projectTitleDisplay').textContent = project.name;
-            console.log(`Loaded project: ${project.name}`);
-            return true;
+            this.updateOwnershipDisplay();
+
+            // Set URL
+            this.setProjectUrl(projectId);
+
+            // Save to localStorage (but skip project copy to avoid overwriting)
+            this.saveGraph();
+
+            console.log(`Loaded project: ${project.name}${useLocalCopy ? ' (from local copy)' : ''}`);
+
+            // Return editor states if present
+            return {
+                success: true,
+                editorStates: dataToLoad.editorStates || []
+            };
         } catch (err) {
             console.error('Load error:', err);
             alert('Failed to load project: ' + err.message);
@@ -335,14 +559,131 @@ export class ProjectManager {
 
     setProjectTitle(title) {
         this.projectTitle = title || 'Untitled Project';
+        this.projectState.title = this.projectTitle;
         document.getElementById('projectTitleDisplay').textContent = this.projectTitle;
-        this.saveGraph();
+        // Mark as dirty since title changed
+        this.markDirty();
     }
 
     clearProject() {
         this.currentProjectId = null;
         this.projectTitle = 'Untitled Project';
         document.getElementById('projectTitleDisplay').textContent = this.projectTitle;
+
+        // Reset project state
+        this.projectState = {
+            projectId: null,
+            ownerId: null,
+            ownerUsername: null,
+            isOwner: false,
+            isDirty: false,
+            source: 'new',
+            lastModified: null,
+            title: 'Untitled Project'
+        };
+
+        this.clearProjectUrl();
+        // Save to localStorage only (no project copy for cleared project)
         this.saveGraph();
+    }
+
+    /**
+     * Set URL to reflect current project
+     */
+    setProjectUrl(projectId) {
+        if (!projectId) return;
+        const url = new URL(window.location);
+        url.searchParams.set('project', projectId);
+        window.history.replaceState({}, '', url);
+    }
+
+    /**
+     * Clear project from URL
+     */
+    clearProjectUrl() {
+        window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    /**
+     * Mark project as dirty (has unsaved changes)
+     */
+    markDirty() {
+        this.projectState.isDirty = true;
+        this.projectState.lastModified = new Date().toISOString();
+        this.saveGraph(); // Auto-save to localStorage
+    }
+
+    /**
+     * Mark project as clean (saved)
+     */
+    markClean() {
+        this.projectState.isDirty = false;
+    }
+
+    /**
+     * Get local copy of a project by ID
+     */
+    getLocalProjectCopy(projectId) {
+        try {
+            const key = `patchtoy_project_${projectId}`;
+            const saved = localStorage.getItem(key);
+            if (saved) {
+                return JSON.parse(saved);
+            }
+        } catch (e) {
+            console.error('Failed to get local project copy:', e);
+        }
+        return null;
+    }
+
+    /**
+     * Save local copy of a project by ID
+     */
+    saveLocalProjectCopy(projectId, projectData) {
+        try {
+            const key = `patchtoy_project_${projectId}`;
+            const data = {
+                ...projectData,
+                localTimestamp: new Date().toISOString()
+            };
+            localStorage.setItem(key, JSON.stringify(data));
+        } catch (e) {
+            console.error('Failed to save local project copy:', e);
+        }
+    }
+
+    /**
+     * Update ownership display in UI
+     */
+    updateOwnershipDisplay() {
+        const titleElement = document.getElementById('projectTitleDisplay');
+
+        // Guard against missing DOM elements (e.g., during initialization)
+        if (!titleElement) {
+            return;
+        }
+
+        let ownershipElement = document.getElementById('projectOwnershipDisplay');
+
+        if (!ownershipElement && titleElement.parentElement) {
+            // Create ownership display element if it doesn't exist
+            const container = titleElement.parentElement;
+            const newElement = document.createElement('div');
+            newElement.id = 'projectOwnershipDisplay';
+            newElement.style.cssText = 'font-size: 11px; color: #888; margin-top: 2px;';
+            container.appendChild(newElement);
+            ownershipElement = newElement;
+        }
+
+        if (!ownershipElement) {
+            return;
+        }
+
+        if (this.projectState && this.projectState.ownerUsername && !this.projectState.isOwner) {
+            ownershipElement.textContent = `by @${this.projectState.ownerUsername}`;
+            ownershipElement.style.display = 'block';
+        } else {
+            ownershipElement.style.display = 'none';
+        }
     }
 }

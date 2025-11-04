@@ -56,11 +56,12 @@ export class CompilationManager {
 
             // Log compiled shader for debugging
             if (shader && shader.fragment) {
-                console.log('='.repeat(60));
-                console.log(`Compiled shader for Preview Node ${previewNode.id}:`);
-                console.log('='.repeat(60));
-                console.log(shader.fragment);
-                console.log('='.repeat(60));
+                // Uncomment to debug shaders:
+                // console.log('='.repeat(60));
+                // console.log(`Compiled shader for Preview Node ${previewNode.id}:`);
+                // console.log('='.repeat(60));
+                // console.log(shader.fragment);
+                // console.log('='.repeat(60));
             }
 
             // Inject feedback textures if feedbackRenderer is available
@@ -69,8 +70,10 @@ export class CompilationManager {
             }
 
             if (shader && previewNode.previewInstance) {
+                // Store shader source for code inspection (even if compilation fails)
+                previewNode.lastCompiledShader = shader;
+
                 const success = previewNode.previewInstance.loadShader(shader);
-                console.log('[CompilationManager] loadShader success:', success, 'shader:', shader);
 
                 // If this preview node is the background, update background renderer too
                 if (success && this.backgroundRenderer && previewNode.isBackground) {
@@ -80,13 +83,10 @@ export class CompilationManager {
                 // If shader compilation failed, try to find error node
                 if (!success) {
                     anyErrors = true;
-                    console.log('[CompilationManager] Shader compilation failed!');
-                    console.log('[CompilationManager] shader.webglErrors:', shader.webglErrors);
 
                     // Check for WebGL errors
                     if (shader.webglErrors && shader.webglErrors.length > 0) {
                         const errorString = shader.webglErrors.join('\n');
-                        console.log('[CompilationManager] About to call showError with:', errorString);
 
                         // Display error message
                         this.showError(errorString);
@@ -98,8 +98,6 @@ export class CompilationManager {
                                 errorNode.hasError = true;
                             }
                         }
-                    } else {
-                        console.log('[CompilationManager] No webglErrors found, but shader failed');
                     }
                     // Also mark the preview node itself
                     previewNode.hasError = true;
@@ -114,8 +112,49 @@ export class CompilationManager {
         }
     }
 
+    updateUniformsForNode(changedNode) {
+        // Optimized: Only update the specific uniform for the changed node
+        if (!changedNode.data || !changedNode.data.useUniform || !changedNode.definition) {
+            return;
+        }
+
+        // Get the uniform info for this specific node
+        const glslResult = changedNode.definition.glsl(changedNode, {});
+        if (!glslResult || !glslResult.uniforms || glslResult.uniforms.length === 0) {
+            return;
+        }
+
+        const updatedUniforms = glslResult.uniforms;
+
+        // Update in main preview
+        if (this.shaderPreview && this.shaderPreview.customUniformValues) {
+            for (const uniform of this.shaderPreview.customUniformValues) {
+                const updated = updatedUniforms.find(u => u.name === uniform.name);
+                if (updated) {
+                    uniform.value = updated.value;
+                }
+            }
+        }
+
+        // Update in all preview nodes
+        const previewNodes = this.nodeGraph.nodes.filter(n => n.isPreviewNode);
+        for (const previewNode of previewNodes) {
+            if (previewNode.previewInstance && previewNode.previewInstance.customUniformValues) {
+                for (const uniform of previewNode.previewInstance.customUniformValues) {
+                    const updated = updatedUniforms.find(u => u.name === uniform.name);
+                    if (updated) {
+                        uniform.value = updated.value;
+                    }
+                }
+            }
+        }
+
+        // No need to trigger render - ShaderPreview has its own animation loop
+        // that will pick up the updated uniform values automatically
+    }
+
     updateUniforms() {
-        // Update uniforms in the main shader preview without recompiling
+        // Full update - used when necessary (less frequent)
         // Build a map of current uniform values from constant nodes in uniform mode
         const uniformValueMap = new Map();
 
@@ -130,8 +169,6 @@ export class CompilationManager {
                 }
             }
         }
-
-        console.log('Uniform value map:', Array.from(uniformValueMap.entries()));
 
         // Update uniforms in main preview - only update existing uniforms, don't replace array
         if (this.shaderPreview && this.shaderPreview.customUniformValues) {
@@ -156,8 +193,8 @@ export class CompilationManager {
             }
         }
 
-        // Trigger a render (no recompilation)
-        this.nodeGraph.render();
+        // No need to trigger render - ShaderPreview has its own animation loop
+        // that will pick up the updated uniform values automatically
     }
 
     setAutoCompile(enabled) {
@@ -176,7 +213,6 @@ export class CompilationManager {
     }
 
     showError(errorString) {
-        console.log('[CompilationManager] showError called:', errorString);
         this.showErrors([errorString]);
     }
 
@@ -210,7 +246,6 @@ export class CompilationManager {
         closeBtn.onclick = () => errorDiv.style.display = 'none';
         errorDiv.appendChild(closeBtn);
 
-        console.log('[CompilationManager] Error banner should be visible now');
         // Errors don't auto-hide - user must dismiss or fix
     }
 
