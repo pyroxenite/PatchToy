@@ -5,6 +5,7 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 
 export interface PatchToyBackendStackProps extends StackProps {
@@ -114,6 +115,23 @@ export class PatchToyBackendStack extends Stack {
       handler: 'handler',
     });
 
+    const requestPasswordResetFn = new NodejsFunction(this, 'RequestPasswordResetFunction', {
+      ...commonLambdaProps,
+      entry: 'lambda/auth/request-password-reset.ts',
+      handler: 'handler',
+      environment: {
+        ...commonLambdaProps.environment,
+        FROM_EMAIL: 'noreply@patchtoy.com', // TODO: Update with verified SES email
+        FRONTEND_URL: 'https://patchtoy.com', // TODO: Update with actual frontend URL
+      },
+    });
+
+    const resetPasswordFn = new NodejsFunction(this, 'ResetPasswordFunction', {
+      ...commonLambdaProps,
+      entry: 'lambda/auth/reset-password.ts',
+      handler: 'handler',
+    });
+
     // Project functions
     const listProjectsFn = new NodejsFunction(this, 'ListProjectsFunction', {
       ...commonLambdaProps,
@@ -154,6 +172,16 @@ export class PatchToyBackendStack extends Stack {
     // Grant DynamoDB permissions
     this.usersTable.grantReadWriteData(registerFn);
     this.usersTable.grantReadData(loginFn);
+    this.usersTable.grantReadData(requestPasswordResetFn);
+    this.usersTable.grantReadWriteData(resetPasswordFn);
+
+    // Grant SES permissions for sending password reset emails
+    requestPasswordResetFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+        resources: ['*'],
+      })
+    );
 
     this.projectsTable.grantReadData(listProjectsFn);
     this.projectsTable.grantReadData(getProjectFn);
@@ -221,6 +249,12 @@ export class PatchToyBackendStack extends Stack {
       apiKeyRequired: requireApiKey,
     });
     auth.addResource('verify').addMethod('GET', new apigateway.LambdaIntegration(verifyFn), {
+      apiKeyRequired: requireApiKey,
+    });
+    auth.addResource('request-password-reset').addMethod('POST', new apigateway.LambdaIntegration(requestPasswordResetFn), {
+      apiKeyRequired: requireApiKey,
+    });
+    auth.addResource('reset-password').addMethod('POST', new apigateway.LambdaIntegration(resetPasswordFn), {
       apiKeyRequired: requireApiKey,
     });
 

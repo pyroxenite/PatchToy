@@ -41,3 +41,17 @@ export function extractToken(authHeader?: string): string | null {
 
   return parts[1];
 }
+
+/**
+ * Generate JWT token with custom expiry (for password reset tokens)
+ */
+export function signToken(payload: object, expiresIn: string | number): string {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: expiresIn as any });
+}
+
+/**
+ * Verify token and throw error if invalid (for password reset)
+ */
+export function verifyToken(token: string): any {
+  return jwt.verify(token, JWT_SECRET);
+}
