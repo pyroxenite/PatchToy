@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="patchtoy.png" alt="PatchToy" width="200" style="image-rendering: pixelated; image-rendering: crisp-edges;"/>
+</p>
+
 # PatchToy
 
 A node-based visual editor for creating GLSL shaders in real-time.
