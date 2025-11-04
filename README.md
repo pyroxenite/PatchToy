@@ -6,12 +6,17 @@ A node-based visual editor for creating GLSL shaders in real-time.
 
 ## Development
 
+Option 1: Use Vite dev server
 ```bash
 npm install
 npm run dev
 ```
 
-Open `http://localhost:8080` in your browser.
+Option 2: Use VSCode Live Server extension
+- Install "Live Server" extension in VSCode
+- Click on "Go Live" on the bottom right
+
+The project is vanilla JS with no build step required for development.
 
 ## Architecture
 
