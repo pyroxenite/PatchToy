@@ -8,6 +8,7 @@ export class ProjectDialogs {
      * @param {string} options.projectTitle - Current project title
      * @param {string} options.currentProjectId - Current project ID (if any)
      * @param {Function} options.onProjectTitleChange - Callback when project title changes (newTitle)
+     * @param {Function} options.onNewProject - Callback when New Project button is clicked
      * @param {Function} options.onLoadLocalClick - Callback when Load Local button is clicked
      * @param {Function} options.onLoadCloudProject - Callback when cloud project is clicked (projectId)
      * @param {Function} options.onShowCurrentProjectMenu - Callback to show current project menu (anchorBtn)
@@ -18,6 +19,7 @@ export class ProjectDialogs {
         projectTitle,
         currentProjectId,
         onProjectTitleChange,
+        onNewProject,
         onLoadLocalClick,
         onLoadCloudProject,
         onShowCurrentProjectMenu,
@@ -89,13 +91,42 @@ export class ProjectDialogs {
 
         menu.appendChild(header);
 
-        // Projects header with Load Local button (below divider)
+        // Projects header with New Project and Load Local buttons (below divider)
         const projectsHeader = document.createElement('div');
         projectsHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;';
 
         const projectsTitle = document.createElement('div');
         projectsTitle.textContent = 'Projects';
         projectsTitle.style.cssText = 'color: #fff; font-size: 14px; font-weight: 600;';
+
+        const buttonsContainer = document.createElement('div');
+        buttonsContainer.style.cssText = 'display: flex; gap: 8px;';
+
+        const newProjectBtn = document.createElement('button');
+        newProjectBtn.textContent = 'New';
+        newProjectBtn.style.cssText = `
+            padding: 6px 12px;
+            background: transparent;
+            border: 1px solid #444;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 12px;
+        `;
+        newProjectBtn.addEventListener('mouseover', () => {
+            newProjectBtn.style.background = 'rgba(0, 122, 204, 0.2)';
+            newProjectBtn.style.borderColor = '#007acc';
+        });
+        newProjectBtn.addEventListener('mouseout', () => {
+            newProjectBtn.style.background = 'transparent';
+            newProjectBtn.style.borderColor = '#444';
+        });
+        newProjectBtn.addEventListener('click', () => {
+            overlay.remove();
+            if (onNewProject) {
+                onNewProject();
+            }
+        });
 
         const loadLocalBtn = document.createElement('button');
         loadLocalBtn.textContent = 'Load Local';
@@ -123,8 +154,11 @@ export class ProjectDialogs {
             }
         });
 
+        buttonsContainer.appendChild(newProjectBtn);
+        buttonsContainer.appendChild(loadLocalBtn);
+
         projectsHeader.appendChild(projectsTitle);
-        projectsHeader.appendChild(loadLocalBtn);
+        projectsHeader.appendChild(buttonsContainer);
         menu.appendChild(projectsHeader);
 
         // Cloud projects list (if logged in)

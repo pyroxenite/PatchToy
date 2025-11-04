@@ -5,6 +5,10 @@ import { CodeEditor } from './CodeEditor.js';
  * Can have multiple instances open simultaneously
  */
 export class FloatingCodeEditor {
+    // Initialize static properties
+    static instances = [];
+    static nextZIndex = 10000;
+
     constructor(options = {}) {
         this.title = options.title || 'Code Editor';
         this.language = options.language || 'glsl';
@@ -13,11 +17,16 @@ export class FloatingCodeEditor {
         this.onSave = options.onSave || null;
         this.onClose = options.onClose || null;
 
-        // Track all open editors
-        if (!FloatingCodeEditor.instances) {
-            FloatingCodeEditor.instances = [];
-            FloatingCodeEditor.nextZIndex = 10000;
-        }
+        // Track node type for deduplication (e.g., "Edit MyCustomNode")
+        this.nodeType = options.nodeType || null;
+
+        // Track dirty state
+        this.isDirty = false;
+        this.originalValue = this.value;
+
+        // Track position and size for persistence
+        this.position = options.position || null; // { left, top }
+        this.size = options.size || { width: 600, height: 500 };
 
         this.create();
         FloatingCodeEditor.instances.push(this);
@@ -29,8 +38,8 @@ export class FloatingCodeEditor {
         this.window.className = 'floating-code-editor';
         this.window.style.cssText = `
             position: fixed;
-            width: 600px;
-            height: 500px;
+            width: ${this.size.width}px;
+            height: ${this.size.height}px;
             background: #2d2d2d;
             border: 1px solid #444;
             border-radius: 8px;
@@ -40,10 +49,23 @@ export class FloatingCodeEditor {
             z-index: ${FloatingCodeEditor.nextZIndex++};
         `;
 
-        // Center the window initially with slight offset for each new instance
-        const offset = (FloatingCodeEditor.instances.length * 30) % 200;
-        this.window.style.left = `calc(50% - 300px + ${offset}px)`;
-        this.window.style.top = `calc(50% - 250px + ${offset}px)`;
+        // Position the window
+        if (this.position) {
+            // Use stored position, but ensure it's within viewport
+            const adjusted = this.adjustPositionToViewport(
+                this.position.left,
+                this.position.top,
+                this.size.width,
+                this.size.height
+            );
+            this.window.style.left = adjusted.left + 'px';
+            this.window.style.top = adjusted.top + 'px';
+        } else {
+            // Center the window initially with slight offset for each new instance
+            const offset = (FloatingCodeEditor.instances.length * 30) % 200;
+            this.window.style.left = `calc(50% - ${this.size.width / 2}px + ${offset}px)`;
+            this.window.style.top = `calc(50% - ${this.size.height / 2}px + ${offset}px)`;
+        }
 
         // Title bar
         const titleBar = document.createElement('div');
@@ -64,14 +86,32 @@ export class FloatingCodeEditor {
         titleText.textContent = this.title;
         titleText.style.cssText = 'color: #fff; font-size: 14px; font-weight: 600;';
 
-        const buttonGroup = document.createElement('div');
-        buttonGroup.style.cssText = 'display: flex; gap: 8px;';
+        this.buttonGroup = document.createElement('div');
+        this.buttonGroup.style.cssText = 'display: flex; gap: 8px;';
 
-        // Add Save and Close buttons for editable editors
+        // Create button references for editable editors
         if (this.onSave && !this.readOnly) {
-            const saveBtn = document.createElement('button');
-            saveBtn.textContent = 'Save';
-            saveBtn.style.cssText = `
+            // Create Revert button
+            this.revertBtn = document.createElement('button');
+            this.revertBtn.textContent = 'Revert';
+            this.revertBtn.style.cssText = `
+                background: #444;
+                border: none;
+                color: #fff;
+                font-size: 13px;
+                cursor: pointer;
+                padding: 6px 12px;
+                border-radius: 4px;
+                display: none;
+            `;
+            this.revertBtn.addEventListener('mouseenter', () => this.revertBtn.style.background = '#555');
+            this.revertBtn.addEventListener('mouseleave', () => this.revertBtn.style.background = '#444');
+            this.revertBtn.addEventListener('click', () => this.revert());
+
+            // Create Save button
+            this.saveBtn = document.createElement('button');
+            this.saveBtn.textContent = 'Save';
+            this.saveBtn.style.cssText = `
                 background: #007acc;
                 border: none;
                 color: #fff;
@@ -79,18 +119,16 @@ export class FloatingCodeEditor {
                 cursor: pointer;
                 padding: 6px 12px;
                 border-radius: 4px;
+                display: none;
             `;
-            saveBtn.addEventListener('mouseenter', () => saveBtn.style.background = '#005a9e');
-            saveBtn.addEventListener('mouseleave', () => saveBtn.style.background = '#007acc');
-            saveBtn.addEventListener('click', () => {
-                if (this.onSave) {
-                    this.onSave(this.editor.getValue());
-                }
-            });
+            this.saveBtn.addEventListener('mouseenter', () => this.saveBtn.style.background = '#005a9e');
+            this.saveBtn.addEventListener('mouseleave', () => this.saveBtn.style.background = '#007acc');
+            this.saveBtn.addEventListener('click', () => this.save());
 
-            const closeBtn = document.createElement('button');
-            closeBtn.textContent = 'Close';
-            closeBtn.style.cssText = `
+            // Create Close button
+            this.closeBtn = document.createElement('button');
+            this.closeBtn.textContent = 'Close';
+            this.closeBtn.style.cssText = `
                 background: #444;
                 border: none;
                 color: #fff;
@@ -99,12 +137,13 @@ export class FloatingCodeEditor {
                 padding: 6px 12px;
                 border-radius: 4px;
             `;
-            closeBtn.addEventListener('mouseenter', () => closeBtn.style.background = '#555');
-            closeBtn.addEventListener('mouseleave', () => closeBtn.style.background = '#444');
-            closeBtn.addEventListener('click', () => this.close());
+            this.closeBtn.addEventListener('mouseenter', () => this.closeBtn.style.background = '#555');
+            this.closeBtn.addEventListener('mouseleave', () => this.closeBtn.style.background = '#444');
+            this.closeBtn.addEventListener('click', () => this.close());
 
-            buttonGroup.appendChild(saveBtn);
-            buttonGroup.appendChild(closeBtn);
+            this.buttonGroup.appendChild(this.revertBtn);
+            this.buttonGroup.appendChild(this.saveBtn);
+            this.buttonGroup.appendChild(this.closeBtn);
         } else {
             // For read-only editors, just show close button
             const closeBtn = document.createElement('button');
@@ -122,11 +161,11 @@ export class FloatingCodeEditor {
             closeBtn.addEventListener('mouseleave', () => closeBtn.style.background = '#444');
             closeBtn.addEventListener('click', () => this.close());
 
-            buttonGroup.appendChild(closeBtn);
+            this.buttonGroup.appendChild(closeBtn);
         }
 
         titleBar.appendChild(titleText);
-        titleBar.appendChild(buttonGroup);
+        titleBar.appendChild(this.buttonGroup);
 
         // Editor container
         const editorContainer = document.createElement('div');
@@ -140,7 +179,8 @@ export class FloatingCodeEditor {
         this.editor = new CodeEditor({
             language: this.language,
             value: this.value,
-            readOnly: this.readOnly
+            readOnly: this.readOnly,
+            onChange: () => this.updateDirtyState()
         });
         this.editor.mount(editorContainer);
 
@@ -158,6 +198,48 @@ export class FloatingCodeEditor {
 
         // Bring to front initially
         this.bringToFront();
+
+        // Update button visibility
+        this.updateButtonVisibility();
+    }
+
+    updateDirtyState() {
+        const currentValue = this.editor.getValue();
+        this.isDirty = currentValue !== this.originalValue;
+        this.updateButtonVisibility();
+    }
+
+    updateButtonVisibility() {
+        if (!this.onSave || this.readOnly) return;
+
+        if (this.isDirty) {
+            // Show [Revert] [Save], hide [Close]
+            this.revertBtn.style.display = '';
+            this.saveBtn.style.display = '';
+            this.closeBtn.style.display = 'none';
+        } else {
+            // Hide [Revert] [Save], show [Close]
+            this.revertBtn.style.display = 'none';
+            this.saveBtn.style.display = 'none';
+            this.closeBtn.style.display = '';
+        }
+    }
+
+    revert() {
+        this.editor.setValue(this.originalValue);
+        this.isDirty = false;
+        this.updateButtonVisibility();
+    }
+
+    save() {
+        if (this.onSave) {
+            const result = this.onSave(this.editor.getValue());
+
+            // If onSave returns updated code (e.g., with magic comments), update the editor
+            if (typeof result === 'string') {
+                this.setValue(result);
+            }
+        }
     }
 
     makeDraggable(handle) {
@@ -251,6 +333,60 @@ export class FloatingCodeEditor {
 
     setValue(value) {
         this.editor.setValue(value);
+        this.originalValue = value;
+        this.isDirty = false;
+        this.updateButtonVisibility();
+    }
+
+    /**
+     * Adjust position to ensure window is within viewport
+     * At least the title bar should be visible
+     */
+    adjustPositionToViewport(left, top, width, height) {
+        const titleBarHeight = 40; // Approximate title bar height
+        const minVisibleHeight = titleBarHeight;
+
+        // Get viewport dimensions
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        // Ensure left edge is not completely off screen (allow partial left overflow)
+        const minLeft = -(width - 100); // Allow up to width-100px to be off-screen left
+        const maxLeft = viewportWidth - 100; // At least 100px visible on the right
+
+        // Ensure top is visible (at least title bar)
+        const minTop = 0;
+        const maxTop = viewportHeight - minVisibleHeight;
+
+        return {
+            left: Math.max(minLeft, Math.min(left, maxLeft)),
+            top: Math.max(minTop, Math.min(top, maxTop))
+        };
+    }
+
+    /**
+     * Get current state for serialization
+     */
+    getState() {
+        const state = {
+            nodeType: this.nodeType,
+            position: {
+                left: parseInt(this.window.style.left) || 0,
+                top: parseInt(this.window.style.top) || 0
+            },
+            size: {
+                width: parseInt(this.window.style.width) || 600,
+                height: parseInt(this.window.style.height) || 500
+            }
+        };
+
+        // Include dirty state for restoration (but not saved to node definition)
+        if (this.isDirty) {
+            state.isDirty = true;
+            state.dirtyValue = this.editor.getValue();
+        }
+
+        return state;
     }
 
     close() {
@@ -269,7 +405,32 @@ export class FloatingCodeEditor {
         this.window.remove();
     }
 
+    /**
+     * Find an existing editor for a specific node type
+     */
+    static findByNodeType(nodeType) {
+        if (!FloatingCodeEditor.instances) {
+            return null;
+        }
+        return FloatingCodeEditor.instances.find(editor => editor.nodeType === nodeType);
+    }
+
+    /**
+     * Get states of all open editors for serialization
+     */
+    static getAllStates() {
+        if (!FloatingCodeEditor.instances) {
+            return [];
+        }
+        return FloatingCodeEditor.instances
+            .filter(editor => editor.nodeType) // Only serialize editors with node types
+            .map(editor => editor.getState());
+    }
+
     static closeAll() {
+        if (!FloatingCodeEditor.instances || FloatingCodeEditor.instances.length === 0) {
+            return;
+        }
         const instances = [...FloatingCodeEditor.instances];
         instances.forEach(editor => editor.close());
     }

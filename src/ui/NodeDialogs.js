@@ -14,27 +14,17 @@ export class NodeDialogs {
         title.textContent = 'Create Custom GLSL Node';
         title.style.cssText = 'margin: 0; color: #fff; font-size: 18px;';
 
-        // Node name input
-        const nameLabel = document.createElement('label');
-        nameLabel.textContent = 'Node Name:';
-        nameLabel.style.cssText = 'color: #fff; font-size: 14px;';
-
-        const nameInput = document.createElement('input');
-        nameInput.type = 'text';
-        nameInput.placeholder = 'MyCustomNode';
-        nameInput.style.cssText = 'padding: 8px; background: #1e1e1e; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 14px;';
-
         // GLSL code editor container
         const codeLabel = document.createElement('label');
         codeLabel.textContent = 'GLSL Function:';
         codeLabel.style.cssText = 'color: #fff; font-size: 14px;';
 
         const editorContainer = document.createElement('div');
-        editorContainer.style.cssText = 'height: 300px; border: 1px solid #444; border-radius: 4px; overflow: hidden;';
+        editorContainer.style.cssText = 'height: 400px; border: 1px solid #444; border-radius: 4px; overflow: hidden;';
 
         // Help text
         const helpText = document.createElement('div');
-        helpText.innerHTML = 'Enter a GLSL function. The function signature will be parsed to create inputs and outputs.<br>Example: <code>vec3 mix(vec3 a, vec3 b, float t)</code>';
+        helpText.innerHTML = 'Use magic comments to customize your node. The function name will be used as the node name.<br>Example: <code>// @title My Custom Node</code>';
         helpText.style.cssText = 'color: #888; font-size: 12px; font-style: italic;';
 
         // Buttons
@@ -57,8 +47,6 @@ export class NodeDialogs {
         buttonContainer.appendChild(createBtn);
 
         dialog.appendChild(title);
-        dialog.appendChild(nameLabel);
-        dialog.appendChild(nameInput);
         dialog.appendChild(codeLabel);
         dialog.appendChild(editorContainer);
         dialog.appendChild(helpText);
@@ -73,22 +61,43 @@ export class NodeDialogs {
         overlay.addEventListener('keyup', stopPropagation, true);
         overlay.addEventListener('keypress', stopPropagation, true);
 
+        // Template with magic comments
+        const template = `// @title My Custom Node
+/* @category custom
+ * @input uv "UV"
+ * @input time "Time"
+ * @description
+ * This is a custom node.
+ */
+
+vec3 myFunction(vec2 uv, float time) {
+    return vec3(uv, sin(time));
+}`;
+
         // Initialize Code Editor
         const editor = new CodeEditor({
             language: 'glsl',
-            value: 'vec3 myFunction(vec2 uv, float time) {\n    return vec3(uv, sin(time));\n}'
+            value: template
         });
         editor.mount(editorContainer);
 
         // Add click handler to create button
         createBtn.addEventListener('click', () => {
-            const nodeName = nameInput.value.trim();
             const glslCode = editor.getValue().trim();
 
-            if (!nodeName || !glslCode) {
-                alert('Please provide both a name and GLSL code.');
+            if (!glslCode) {
+                alert('Please provide GLSL code.');
                 return;
             }
+
+            // Extract function name to use as node name
+            const funcMatch = glslCode.match(/(\w+)\s+(\w+)\s*\(/);
+            if (!funcMatch) {
+                alert('Could not parse function name. Please ensure your code has a valid GLSL function.');
+                return;
+            }
+
+            const nodeName = funcMatch[2];
 
             const success = onCreateNode(nodeName, glslCode);
             if (success) {
@@ -97,8 +106,8 @@ export class NodeDialogs {
             }
         });
 
-        // Focus the name input
-        setTimeout(() => nameInput.focus(), 0);
+        // Focus the editor
+        setTimeout(() => editor.focus(), 0);
 
         // Close on escape
         const escapeHandler = (e) => {
@@ -114,24 +123,50 @@ export class NodeDialogs {
         document.addEventListener('keydown', escapeHandler);
     }
 
-    static showEditNodeDialog(node, nodeDefinition, onSave) {
+    static showEditNodeDialog(node, nodeDefinition, onSave, editorState = null) {
         if (!nodeDefinition || !nodeDefinition.customGLSL) return;
 
+        // Check if an editor for this node type is already open
+        const existingEditor = FloatingCodeEditor.findByNodeType(node.type);
+        if (existingEditor) {
+            // Bring existing editor to front instead of opening a new one
+            existingEditor.bringToFront();
+            return existingEditor;
+        }
+
+        // Determine initial value: use dirty value if available, otherwise node definition
+        const initialValue = editorState?.isDirty && editorState?.dirtyValue
+            ? editorState.dirtyValue
+            : nodeDefinition.customGLSL;
+
         // Create floating code editor
-        new FloatingCodeEditor({
+        const editor = new FloatingCodeEditor({
             title: `Edit ${node.type}`,
             language: 'glsl',
-            value: nodeDefinition.customGLSL,
+            value: initialValue,
+            nodeType: node.type, // Track the node type for deduplication
+            position: editorState?.position,
+            size: editorState?.size,
             onSave: (code) => {
                 const glslCode = code.trim();
                 if (!glslCode) {
                     alert('Please provide GLSL code.');
-                    return;
+                    return null;
                 }
 
-                onSave(node.type, glslCode);
+                // Call onSave and return the result (potentially updated code)
+                return onSave(node.type, glslCode);
             }
         });
+
+        // If restoring dirty state, mark as dirty (but keep original value from definition)
+        if (editorState?.isDirty) {
+            editor.originalValue = nodeDefinition.customGLSL;
+            editor.isDirty = true;
+            editor.updateButtonVisibility();
+        }
+
+        return editor;
     }
 
     static showGeneratedCode(shaderSource) {

@@ -90,6 +90,17 @@ export class UIHelpers {
         const btn = document.getElementById('accountBtn');
         const saveBtn = document.getElementById('saveCloudBtn');
 
+        // Add null checks for buttons
+        if (!btn) {
+            console.warn('Account button not found');
+            return;
+        }
+
+        if (!saveBtn) {
+            console.warn('Save button not found in DOM');
+            return;
+        }
+
         if (!apiClient.isEnabled()) {
             btn.disabled = true;
             btn.title = 'Backend not configured';
@@ -168,43 +179,151 @@ export class UIHelpers {
     }
 
     static showPreviewNodeFullscreen(node, onClose) {
-        if (!node.previewInstance || !node.previewInstance.canvas) return;
+        if (!node.previewInstance) return;
 
         const previewInstance = node.previewInstance;
-        const srcCanvas = previewInstance.canvas;
 
-        // Store original size
-        const originalWidth = srcCanvas.width;
-        const originalHeight = srcCanvas.height;
+        // Get the display canvas (handles both legacy and shared context modes)
+        const srcCanvas = node.getDisplayCanvas ? node.getDisplayCanvas() : previewInstance.canvas;
+        if (!srcCanvas) return;
+
+        // Store original size for restoration
+        const originalWidth = previewInstance.width || srcCanvas.width;
+        const originalHeight = previewInstance.height || srcCanvas.height;
+
+        // Pause all other preview nodes to maximize performance
+        const nodeGraph = node.graph;
+        const otherPreviewNodes = nodeGraph ? nodeGraph.nodes.filter(n => n.isPreviewNode && n !== node) : [];
+        const pausedAnimations = [];
+
+        // Stop rendering other preview nodes
+        for (const otherNode of otherPreviewNodes) {
+            if (otherNode.previewInstance && otherNode.previewInstance.animationId) {
+                pausedAnimations.push({
+                    node: otherNode,
+                    animationId: otherNode.previewInstance.animationId
+                });
+                otherNode.previewInstance.stopRendering();
+            }
+        }
+
+        // Pause background renderer if active
+        let backgroundWasPaused = false;
+        if (nodeGraph && nodeGraph.backgroundRenderer && nodeGraph.backgroundRenderer.shaderPreview) {
+            const bgShaderPreview = nodeGraph.backgroundRenderer.shaderPreview;
+            if (bgShaderPreview.animationId) {
+                backgroundWasPaused = true;
+                bgShaderPreview.stopRendering();
+            }
+        }
+
+        // IMPORTANT: Pause the NodeGraph rendering itself!
+        let nodeGraphWasPaused = false;
+        if (nodeGraph) {
+            nodeGraphWasPaused = true;
+            // Store the original render function
+            nodeGraph._originalRender = nodeGraph.render;
+            // Replace with a no-op during fullscreen
+            nodeGraph.render = () => {};
+        }
 
         // Create fullscreen overlay
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; z-index: 10000; display: flex; align-items: center; justify-content: center;';
 
-        // Add the actual preview canvas to the overlay
-        overlay.appendChild(srcCanvas);
-        srcCanvas.style.maxWidth = '100%';
-        srcCanvas.style.maxHeight = '100%';
-        srcCanvas.style.objectFit = 'contain';
+        // Create a dedicated ShaderPreview for fullscreen rendering (avoids framebuffer copy overhead)
+        const displayCanvas = document.createElement('canvas');
+        displayCanvas.style.maxWidth = '100%';
+        displayCanvas.style.maxHeight = '100%';
+        displayCanvas.style.objectFit = 'contain';
+        overlay.appendChild(displayCanvas);
 
         document.body.appendChild(overlay);
 
-        // Close handlers
-        const closeFullscreen = () => {
-            // Exit fullscreen if active
-            if (document.fullscreenElement) {
-                document.exitFullscreen();
+        // Create a new ShaderPreview instance that renders directly to the display canvas
+        // This avoids the expensive gl.readPixels() call in getDisplayCanvas()
+        const dpr = window.devicePixelRatio || 1;
+        const fullscreenWidth = Math.floor(window.innerWidth * dpr);
+        const fullscreenHeight = Math.floor(window.innerHeight * dpr);
+
+        displayCanvas.width = fullscreenWidth;
+        displayCanvas.height = fullscreenHeight;
+        displayCanvas.style.width = window.innerWidth + 'px';
+        displayCanvas.style.height = window.innerHeight + 'px';
+
+        // Import ShaderPreview - already imported in main.js, so use direct import
+        import('../rendering/ShaderPreview.js').then(module => {
+            const ShaderPreview = module.ShaderPreview;
+            const fullscreenPreview = new ShaderPreview(
+                displayCanvas,
+                previewInstance.videoElement,
+                { offscreen: false }
+            );
+
+            // Load the current shader
+            if (previewInstance.currentShaderSource) {
+                fullscreenPreview.loadShader(previewInstance.currentShaderSource);
             }
 
-            // Restore original size
-            srcCanvas.width = originalWidth;
-            srcCanvas.height = originalHeight;
+            // Copy custom uniform values
+            if (previewInstance.customUniformValues) {
+                fullscreenPreview.customUniformValues = previewInstance.customUniformValues;
+            }
 
-            // Remove from overlay and put back in the node
+            // Store reference for cleanup
+            overlay._fullscreenPreview = fullscreenPreview;
+
+            // Request fullscreen
+            overlay.requestFullscreen().catch(err => {
+                console.warn('Fullscreen request failed:', err);
+            });
+        });
+
+        // Track if fullscreen exit is in progress
+        let isExiting = false;
+
+        // Close handlers
+        const closeFullscreen = () => {
+            if (isExiting) return;
+            isExiting = true;
+
+            // Destroy the fullscreen ShaderPreview instance
+            if (overlay._fullscreenPreview) {
+                overlay._fullscreenPreview.destroy();
+            }
+
+            // Exit fullscreen if active (with error handling)
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(err => {
+                    // Ignore "operation cancelled" errors
+                    if (!err.message.includes('cancelled')) {
+                        console.warn('Error exiting fullscreen:', err);
+                    }
+                });
+            }
+
+            // Resume other preview nodes
+            for (const paused of pausedAnimations) {
+                if (paused.node.previewInstance) {
+                    paused.node.previewInstance.animate();
+                }
+            }
+
+            // Resume background renderer if it was paused
+            if (backgroundWasPaused && nodeGraph && nodeGraph.backgroundRenderer && nodeGraph.backgroundRenderer.shaderPreview) {
+                nodeGraph.backgroundRenderer.shaderPreview.animate();
+            }
+
+            // Resume NodeGraph rendering
+            if (nodeGraphWasPaused && nodeGraph && nodeGraph._originalRender) {
+                nodeGraph.render = nodeGraph._originalRender;
+                delete nodeGraph._originalRender;
+                // Trigger a render to refresh the display
+                nodeGraph.render();
+            }
+
+            // Remove overlay
             overlay.remove();
-            srcCanvas.style.maxWidth = '';
-            srcCanvas.style.maxHeight = '';
-            srcCanvas.style.objectFit = '';
 
             // Call onClose callback
             if (onClose) onClose();
@@ -216,7 +335,7 @@ export class UIHelpers {
 
         // Handle fullscreen changes (including user pressing ESC)
         const fullscreenChangeHandler = () => {
-            if (!document.fullscreenElement) {
+            if (!document.fullscreenElement && !isExiting) {
                 closeFullscreen();
             }
         };
@@ -224,8 +343,11 @@ export class UIHelpers {
 
         // Close on escape key (backup for non-fullscreen mode)
         const escapeHandler = (e) => {
-            if (e.key === 'Escape' && !document.fullscreenElement) {
-                closeFullscreen();
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                if (!document.fullscreenElement) {
+                    closeFullscreen();
+                }
             }
         };
         document.addEventListener('keydown', escapeHandler);
@@ -233,26 +355,6 @@ export class UIHelpers {
         // Close on click
         overlay.addEventListener('click', () => {
             closeFullscreen();
-        });
-
-        // Request fullscreen and resize canvas
-        overlay.requestFullscreen().then(() => {
-            // Wait a frame for fullscreen to complete, then get actual overlay dimensions
-            requestAnimationFrame(() => {
-                const dpr = window.devicePixelRatio || 1;
-                const newWidth = overlay.clientWidth * dpr;
-                const newHeight = overlay.clientHeight * dpr;
-                srcCanvas.width = newWidth;
-                srcCanvas.height = newHeight;
-            });
-        }).catch(err => {
-            console.warn('Fullscreen request failed, using fullwindow mode:', err);
-            // Fallback to window dimensions if fullscreen is denied
-            const dpr = window.devicePixelRatio || 1;
-            const newWidth = window.innerWidth * dpr;
-            const newHeight = window.innerHeight * dpr;
-            srcCanvas.width = newWidth;
-            srcCanvas.height = newHeight;
         });
     }
 
