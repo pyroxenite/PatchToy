@@ -5,21 +5,36 @@ export class ShaderPreview {
         this.nodeId = options.nodeId || null;
         this.canManageCamera = !this.isOffscreen; // Only main preview manages camera
 
-        // Create canvas (either use provided or create offscreen)
-        if (this.isOffscreen) {
-            this.canvas = document.createElement('canvas');
-            this.canvas.width = options.width || 128;
-            this.canvas.height = options.height || 128;
-            this.parentCanvas = canvas; // Store reference to parent for potential future use
+        // Use shared GL context if provided, otherwise create own (for backwards compatibility)
+        if (options.sharedGL) {
+            this.gl = options.sharedGL;
+            this.canvas = null; // No canvas needed, rendering to framebuffer
+            this.usingSharedContext = true;
         } else {
-            this.canvas = canvas;
+            // Legacy path: create own context
+            if (this.isOffscreen) {
+                this.canvas = document.createElement('canvas');
+                this.canvas.width = options.width || 128;
+                this.canvas.height = options.height || 128;
+                this.parentCanvas = canvas;
+            } else {
+                this.canvas = canvas;
+            }
+
+            this.gl = this.canvas.getContext('webgl2');
+            this.usingSharedContext = false;
+
+            if (!this.gl) {
+                console.error('WebGL 2 not supported' + (this.isOffscreen ? ' for preview node' : ''));
+                return;
+            }
         }
 
-        this.gl = this.canvas.getContext('webgl2');
-
-        if (!this.gl) {
-            console.error('WebGL 2 not supported' + (this.isOffscreen ? ' for preview node' : ''));
-            return;
+        // Create framebuffer for offscreen rendering (when using shared context)
+        if (this.usingSharedContext && this.isOffscreen) {
+            this.width = options.width || 128;
+            this.height = options.height || 128;
+            this.framebuffer = this.createFramebuffer(this.gl, this.width, this.height);
         }
 
         this.program = null;
@@ -39,44 +54,73 @@ export class ShaderPreview {
         this.animate();
     }
 
+    createFramebuffer(gl, width, height) {
+        const framebuffer = gl.createFramebuffer();
+        const texture = gl.createTexture();
+
+        // Set up texture
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+        // Attach texture to framebuffer
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+        // Check framebuffer status
+        const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+        if (status !== gl.FRAMEBUFFER_COMPLETE) {
+            console.error('Framebuffer incomplete:', status);
+        }
+
+        // Unbind
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+        return { framebuffer, texture };
+    }
+
     setupNoiseShader() {
         // Create a simple noise shader for when no program is loaded
         const gl = this.gl;
 
         const vertexShaderSource = `#version 300 es
-in vec2 a_position;
-void main() {
-    gl_Position = vec4(a_position, 0.0, 1.0);
-}`;
+        in vec2 a_position;
+        void main() {
+            gl_Position = vec4(a_position, 0.0, 1.0);
+        }`;
 
         const fragmentShaderSource = `#version 300 es
-precision highp float;
-uniform float u_time;
-uniform vec2 u_resolution;
-out vec4 fragColor;
+        precision highp float;
+        uniform float u_time;
+        uniform vec2 u_resolution;
+        out vec4 fragColor;
 
-// Better hash function for noise (less repetition)
-float hash(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
+        // Better hash function for noise (less repetition)
+        float hash(vec2 p) {
+            vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+            p3 += dot(p3, p3.yzx + 33.33);
+            return fract((p3.x + p3.y) * p3.z);
+        }
 
-void main() {
-    // Lower spatial resolution - make bigger pixels (4x4 blocks)
-    vec2 pixelSize = vec2(4.0);
-    vec2 uv = floor(gl_FragCoord.xy / pixelSize);
+        void main() {
+            // Lower spatial resolution - make bigger pixels (4x4 blocks)
+            vec2 pixelSize = vec2(4.0);
+            vec2 uv = floor(gl_FragCoord.xy / pixelSize);
 
-    // Animate the noise over time with better randomness
-    float t = u_time * 10.0;
-    float noise = hash(uv + vec2(t * 1.3, t * 0.7));
+            // Animate the noise over time with better randomness
+            float t = u_time * 10.0;
+            float noise = hash(uv + vec2(t * 1.3, t * 0.7));
 
-    // Add some subtle scanlines (less frequent)
-    float scanline = sin(gl_FragCoord.y * 3.14159 * 0.5) * 0.03;
-    noise += scanline;
+            // Add some subtle scanlines (less frequent)
+            float scanline = sin(gl_FragCoord.y * 3.14159 * 0.5) * 0.03;
+            noise += scanline;
 
-    fragColor = vec4(vec3(noise * 0.7), 1.0);
-}`;
+            fragColor = vec4(vec3(noise * 0.7), 1.0);
+        }`;
 
         const vertexShader = gl.createShader(gl.VERTEX_SHADER);
         gl.shaderSource(vertexShader, vertexShaderSource);
@@ -104,9 +148,9 @@ void main() {
         // Create a full-screen quad
         const positions = new Float32Array([
             -1, -1,
-             1, -1,
-            -1,  1,
-             1,  1,
+            1, -1,
+            -1, 1,
+            1, 1,
         ]);
 
         this.positionBuffer = gl.createBuffer();
@@ -205,6 +249,9 @@ void main() {
             shaderSource.webglErrors = [];
         }
 
+        // Store shader source for code inspection (even if compilation fails)
+        this.currentShaderSource = shaderSource;
+
         // Compile vertex shader
         const vertexShader = gl.createShader(gl.VERTEX_SHADER);
         gl.shaderSource(vertexShader, shaderSource.vertex);
@@ -251,7 +298,6 @@ void main() {
         }
 
         this.program = program;
-        this.currentShaderSource = shaderSource; // Store for code inspection
         this.customUniformValues = shaderSource.uniformValues || []; // Store custom uniform values
 
         // Get all uniform locations dynamically
@@ -263,8 +309,6 @@ void main() {
         }
 
         if (!this.isOffscreen) {
-            console.log('Active uniforms in shader:', Object.keys(this.uniforms));
-            console.log('Expected custom uniforms:', this.customUniformValues.map(u => u.name));
         }
 
         // Start animation
@@ -284,23 +328,9 @@ void main() {
         // Update feedback texture references before rendering
         if (this.customUniformValues && this.customUniformValues.length > 0) {
             for (const uniform of this.customUniformValues) {
-                // Update feedback texture each frame
+                // Update feedback texture each frame (all in same context now!)
                 if (uniform.type === 'sampler2D' && uniform.feedbackNodeId !== undefined && uniform.feedbackNode) {
-                    if (uniform.needsCrossContextCopy) {
-                        // Need to copy texture from feedback GL context to this preview's context
-                        // This is expensive but necessary for cross-context texture sharing
-                        // TODO: Consider using a shared context or OffscreenCanvas in the future
-                        if (Math.random() < 0.01) {
-                            console.warn('[ShaderPreview] Cross-context feedback - may not work');
-                        }
-                    } else {
-                        // Same context - just update the texture reference
-                        const newTexture = uniform.feedbackNode.getReadTexture();
-                        if (Math.random() < 0.01) {
-                            console.log(`[ShaderPreview] Updating texture for ${uniform.name}:`, newTexture ? 'valid' : 'null');
-                        }
-                        uniform.texture = newTexture;
-                    }
+                    uniform.texture = uniform.feedbackNode.getReadTexture();
                 }
             }
         }
@@ -320,15 +350,24 @@ void main() {
     render() {
         const gl = this.gl;
 
+        // Bind framebuffer if using shared context
+        if (this.usingSharedContext && this.framebuffer) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer.framebuffer);
+        }
+
+        // Get dimensions (from canvas or framebuffer)
+        const width = this.usingSharedContext ? this.width : this.canvas.width;
+        const height = this.usingSharedContext ? this.height : this.canvas.height;
+
         if (!this.program) {
             // Render TV static noise when no program is loaded
             if (this.noiseProgram) {
-                gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+                gl.viewport(0, 0, width, height);
                 gl.useProgram(this.noiseProgram);
 
                 // Set uniforms for noise shader
                 if (this.noiseUniforms.u_resolution) {
-                    gl.uniform2f(this.noiseUniforms.u_resolution, this.canvas.width, this.canvas.height);
+                    gl.uniform2f(this.noiseUniforms.u_resolution, width, height);
                 }
                 if (this.noiseUniforms.u_time) {
                     gl.uniform1f(this.noiseUniforms.u_time, (Date.now() - this.startTime) / 1000.0);
@@ -347,18 +386,23 @@ void main() {
                 gl.clearColor(0.1, 0.1, 0.1, 1.0);
                 gl.clear(gl.COLOR_BUFFER_BIT);
             }
+
+            // Unbind framebuffer
+            if (this.usingSharedContext && this.framebuffer) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            }
             return;
         }
 
         // Always try to update camera texture (will check internally if video is playing)
         this.updateCameraTexture();
 
-        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+        gl.viewport(0, 0, width, height);
         gl.useProgram(this.program);
 
         // Set standard uniforms
         if (this.uniforms.u_resolution) {
-            gl.uniform2f(this.uniforms.u_resolution, this.canvas.width, this.canvas.height);
+            gl.uniform2f(this.uniforms.u_resolution, width, height);
         }
         if (this.uniforms.u_time) {
             gl.uniform1f(this.uniforms.u_time, (Date.now() - this.startTime) / 1000.0);
@@ -388,10 +432,14 @@ void main() {
                             const rms = uniform.microphoneNode.getRMS();
                             uniform.value = rms;
                             if (Math.random() < 0.01) { // Log 1% of the time to avoid spam
-                                console.log('[ShaderPreview] Microphone RMS:', rms, 'for uniform:', uniform.name);
                             }
                         }
                         gl.uniform1f(location, uniform.value);
+                    } else if (uniform.type === 'int') {
+                        gl.uniform1i(location, uniform.value);
+                    } else if (uniform.type === 'bool') {
+                        // GLSL bools are set as integers (0 or 1)
+                        gl.uniform1i(location, uniform.value ? 1 : 0);
                     } else if (uniform.type === 'vec2') {
                         gl.uniform2f(location, uniform.value[0], uniform.value[1]);
                     } else if (uniform.type === 'vec3') {
@@ -419,6 +467,11 @@ void main() {
 
         // Draw
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+        // Unbind framebuffer
+        if (this.usingSharedContext && this.framebuffer) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        }
     }
 
     destroy() {

@@ -190,9 +190,16 @@ export class CanvasTextInput {
         if (key.length === 1) {
             e.preventDefault();
 
-            // Only allow numbers, decimal point, minus sign
-            if (!/^[0-9.\-]$/.test(key)) {
-                return true;
+            // For int type: only allow numbers and minus sign (no decimal point)
+            if (this.type === 'int') {
+                if (!/^[0-9\-]$/.test(key)) {
+                    return true;
+                }
+            } else {
+                // For float type: allow numbers, decimal point, minus sign
+                if (!/^[0-9.\-]$/.test(key)) {
+                    return true;
+                }
             }
 
             // Delete selection if exists

@@ -1,29 +1,13 @@
 export class FeedbackRenderer {
-    constructor(nodeGraph, shaderCompiler, shaderPreview) {
+    constructor(nodeGraph, shaderCompiler, sharedGL) {
         this.nodeGraph = nodeGraph;
         this.shaderCompiler = shaderCompiler;
-        this.shaderPreview = shaderPreview;
-
-        // Create our own WebGL context for feedback rendering
-        this.canvas = document.createElement('canvas');
-        this.canvas.width = 512;
-        this.canvas.height = 512;
-        this.gl = this.canvas.getContext('webgl2') || this.canvas.getContext('webgl');
+        this.gl = sharedGL;
 
         if (!this.gl) {
-            console.error('FeedbackRenderer: Failed to create WebGL context');
+            console.error('FeedbackRenderer: No shared WebGL context provided');
             return;
         }
-
-        // Create position buffer for fullscreen quad
-        this.positionBuffer = this.gl.createBuffer();
-        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.positionBuffer);
-        this.gl.bufferData(this.gl.ARRAY_BUFFER, new Float32Array([
-            -1, -1,
-             1, -1,
-            -1,  1,
-             1,  1
-        ]), this.gl.STATIC_DRAW);
 
         // Track start time for u_time uniform
         this.startTime = Date.now();
@@ -73,34 +57,17 @@ export class FeedbackRenderer {
 
         if (feedbackNodes.length === 0) return;
 
-        // Debug: Log feedback node count
-        if (Math.random() < 0.01) {
-            console.log(`[FeedbackRenderer] Rendering ${feedbackNodes.length} feedback node(s)`);
-        }
+        const gl = this.gl;
 
         for (const feedbackNode of feedbackNodes) {
-            // Skip if buffers not initialized yet (will be done when first preview node uses it)
+            // Initialize buffers if needed (all in shared context now)
             if (!feedbackNode.buffersInitialized) {
-                continue;
-            }
-
-            // Use the GL context that the buffers were created in
-            const gl = feedbackNode.gl;
-            if (!gl) {
-                console.warn(`[FeedbackRenderer] Node ${feedbackNode.id} has no GL context`);
-                continue;
+                feedbackNode.initBuffers(gl);
             }
 
             // Skip if no compiled shader
             if (!feedbackNode.compiledShader) {
-                if (Math.random() < 0.01) {
-                    console.warn(`[FeedbackRenderer] Node ${feedbackNode.id} has no compiled shader`);
-                }
                 continue;
-            }
-
-            if (Math.random() < 0.01) {
-                console.log(`[FeedbackRenderer] Rendering feedback node ${feedbackNode.id}`);
             }
 
             // Compile GL program if not already compiled
@@ -148,18 +115,15 @@ export class FeedbackRenderer {
                 // Find the feedback node
                 const feedbackNode = this.nodeGraph.nodes.find(n => n.id === uniform.feedbackNodeId);
                 if (feedbackNode && feedbackNode.isFeedbackNode) {
-                    // IMPORTANT: Initialize buffers in the TARGET context (preview node's GL)
-                    // not in FeedbackRenderer's GL, so textures can be shared
-                    if (!feedbackNode.buffersInitialized && targetGl) {
-                        feedbackNode.initBuffers(targetGl);
-                        console.log(`[FeedbackRenderer] Initialized feedback buffers in preview context for node ${feedbackNode.id}`);
+                    // Initialize buffers in shared context if needed
+                    if (!feedbackNode.buffersInitialized) {
+                        feedbackNode.initBuffers(this.gl);
                     }
 
                     // Store reference to feedback node for per-frame updates
                     uniform.feedbackNode = feedbackNode;
-                    uniform.feedbackNodeInitializedInContext = targetGl;
 
-                    // Get the read texture (previous frame)
+                    // Get the read texture (previous frame) - all in same context now!
                     const sourceTexture = feedbackNode.getReadTexture();
                     uniform.texture = sourceTexture;
                 }
@@ -275,6 +239,17 @@ export class FeedbackRenderer {
                             uniform.value = uniform.microphoneNode.getRMS();
                         }
                         gl.uniform1f(location, uniform.value);
+                    } else if (uniform.type === 'int') {
+                        gl.uniform1i(location, uniform.value);
+                    } else if (uniform.type === 'bool') {
+                        // GLSL bools are set as integers (0 or 1)
+                        gl.uniform1i(location, uniform.value ? 1 : 0);
+                    } else if (uniform.type === 'vec2') {
+                        gl.uniform2f(location, uniform.value[0], uniform.value[1]);
+                    } else if (uniform.type === 'vec3') {
+                        gl.uniform3f(location, uniform.value[0], uniform.value[1], uniform.value[2]);
+                    } else if (uniform.type === 'vec4') {
+                        gl.uniform4f(location, uniform.value[0], uniform.value[1], uniform.value[2], uniform.value[3]);
                     } else if (uniform.type === 'sampler2D' && uniform.texture) {
                         // Bind feedback texture
                         gl.activeTexture(gl.TEXTURE0 + textureUnit);
