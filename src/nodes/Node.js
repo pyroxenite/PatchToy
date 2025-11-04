@@ -27,8 +27,6 @@ export class Node {
             type: this.type,
             x: this.x,
             y: this.y,
-            width: this.width,
-            height: this.height,
             data: { ...this.data }
         };
     }
@@ -83,7 +81,9 @@ export class Node {
         // Normal node header (textBaseline inherited from context - should be 'alphabetic' from main.js)
         ctx.fillStyle = '#ffffff';
         ctx.font = '12px bold "Pixeloid Sans"';;
-        ctx.fillText(this.type, this.x + 10, this.y + 18);
+        // Use displayTitle from definition if available (for custom nodes), otherwise use type
+        const displayName = this.definition?.displayTitle || this.type;
+        ctx.fillText(displayName, this.x + 10, this.y + 18);
 
         // Color picker content
         if (this.hasColorPicker && this.data.r !== undefined) {
@@ -115,24 +115,33 @@ export class Node {
             ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
             ctx.fill();
 
-            ctx.fillStyle = '#aaa';
-            ctx.font = '11px "Pixeloid Mono"';
-            ctx.fillText(this.inputs[i].name, pos.x + 10, pos.y);
+            // Get label (allow override via getInputPortLabel method)
+            const label = this.getInputPortLabel ? this.getInputPortLabel(i) : this.inputs[i].name;
+            if (label) {
+                ctx.fillStyle = '#aaa';
+                ctx.font = '11px "Pixeloid Mono"';
+                ctx.fillText(label, pos.x + 10, pos.y);
+            }
         }
 
         // Outputs
         for (let i = 0; i < this.outputs.length; i++) {
             const pos = this.getOutputPortPosition(i);
+            if (!pos) continue; // Skip if port is hidden
+
             ctx.fillStyle = '#007acc';
             ctx.beginPath();
             ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
             ctx.fill();
 
-            ctx.fillStyle = '#aaa';
-            ctx.font = '11px "Pixeloid Mono"';
-            const label = this.outputs[i].name;
-            const labelWidth = ctx.measureText(label).width;
-            ctx.fillText(label, pos.x - labelWidth - 10, pos.y);
+            // Get label (allow override via getOutputPortLabel method)
+            const label = this.getOutputPortLabel ? this.getOutputPortLabel(i) : this.outputs[i].name;
+            if (label) {
+                ctx.fillStyle = '#aaa';
+                ctx.font = '11px "Pixeloid Mono"';
+                const labelWidth = ctx.measureText(label).width;
+                ctx.fillText(label, pos.x - labelWidth - 10, pos.y);
+            }
         }
 
         // Draw text inputs
@@ -183,6 +192,10 @@ export class Node {
         this.hasInputFields = def.hasInputFields || false;
         this.hasColorPicker = def.hasColorPicker || false;
         this.hasUniformToggle = def.hasUniformToggle || false;
+        this.fieldType = def.fieldType || 'float';
+        this.isDynamicInput = def.isDynamicInput || false;
+        this.minInputs = def.minInputs || 0;
+        this.resolvedOutputType = null; // Will be set during type validation
 
         // Initialize data from definition.data (for Vec2/Vec3/Vec4/etc nodes)
         if (def.data) {
@@ -342,35 +355,8 @@ export class Node {
             };
         }
 
-        // Check output ports
-        for (let i = 0; i < this.outputs.length; i++) {
-            const portPos = this.getOutputPortPosition(i);
-            if (!portPos) continue;
-
-            const dist = Math.hypot(x - portPos.x, y - portPos.y);
-            if (dist < 8) {
-                return {
-                    type: 'START_CONNECTION_FROM_OUTPUT',
-                    node: this,
-                    outputIndex: i
-                };
-            }
-        }
-
-        // Check input ports
-        for (let i = 0; i < this.inputs.length; i++) {
-            const portPos = this.getInputPortPosition(i);
-            if (!portPos) continue;
-
-            const dist = Math.hypot(x - portPos.x, y - portPos.y);
-            if (dist < 8) {
-                return {
-                    type: 'CLICKED_INPUT_PORT',
-                    node: this,
-                    inputIndex: i
-                };
-            }
-        }
+        // Note: Port checking is now handled by NodeGraph before this method is called
+        // This ensures ports work even when they extend beyond node bounds
 
         // Default: start dragging the node
         return {
@@ -454,5 +440,79 @@ export class Node {
             }
         }
         return null;
+    }
+
+    // Dynamic input management for nodes like Blend
+    addDynamicInput() {
+        if (!this.isDynamicInput) return false;
+
+        // Find the next available input index
+        // For Blend node, inputs are named with just numbers: '0', '1', '2', etc.
+        let nextIndex = 0;
+        while (this.inputs.some(input => input.name === `${nextIndex}`)) {
+            nextIndex++;
+        }
+
+        // Add new input
+        const newInput = {
+            name: `${nextIndex}`,
+            type: 'any',
+            default: null,
+            optional: true
+        };
+
+        this.inputs.push(newInput);
+        this.updateDimensions();
+
+        return true;
+    }
+
+    removeDynamicInput(inputName) {
+        if (!this.isDynamicInput) return false;
+
+        // Don't allow removing below minimum inputs
+        // Blend inputs are numeric (excluding 'index')
+        const blendInputCount = this.inputs.filter(i => i.name !== 'index' && /^\d+$/.test(i.name)).length;
+        if (blendInputCount <= this.minInputs) return false;
+
+        const inputIndex = this.inputs.findIndex(i => i.name === inputName);
+        if (inputIndex === -1) return false;
+
+        // Check if it's a removable blend input (not the first two)
+        const inputNumber = parseInt(inputName);
+        if (isNaN(inputNumber) || inputNumber < 2) return false; // Can't remove 0 or 1
+
+        this.inputs.splice(inputIndex, 1);
+        this.updateDimensions();
+
+        return true;
+    }
+
+    // Check if all current blend inputs are connected (for auto-adding)
+    shouldAddNewInput() {
+        if (!this.isDynamicInput) return false;
+
+        // Blend inputs are numeric (excluding 'index')
+        const blendInputs = this.inputs.filter(i => i.name !== 'index' && /^\d+$/.test(i.name));
+
+        // Check if all blend inputs are connected
+        for (let i = 0; i < blendInputs.length; i++) {
+            const inputName = blendInputs[i].name;
+            const inputIndex = this.inputs.findIndex(input => input.name === inputName);
+
+            if (this.graph) {
+                const isConnected = this.graph.connections.some(conn =>
+                    conn.toNode === this && conn.toInput === inputIndex
+                );
+
+                // If any blend input is not connected, don't add new one
+                if (!isConnected) {
+                    return false;
+                }
+            }
+        }
+
+        // All blend inputs are connected, add a new one
+        return true;
     }
 }

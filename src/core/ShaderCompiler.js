@@ -1,4 +1,5 @@
 import { NodeDefinitions, TypeSystem } from './NodeDefinitions.js';
+import { TypeRegistry } from './TypeRegistry.js';
 
 export class ShaderCompiler {
     constructor() {
@@ -10,14 +11,37 @@ export class ShaderCompiler {
         this.warnings = [];
         this.generatedCode = [];
         this.uniforms = new Set();
-        this.customFunctions = new Map();
+        this.customFunctions = new Map(); // name -> code
+        this.functionHashes = new Map(); // hash -> name (for deduplication)
+        this.functionRenames = new Map(); // originalName_nodeId -> newName
         this.compiledNodes = new Map();
         this.errorNodeId = null;
         this.codeToNodeMap = new Map(); // Maps line number to node ID
+        this.usedStructs = new Set(); // Track which struct types are used
+        this.functionCounter = 0; // Counter for renamed functions
+        this.nodeIdRemap = new Map(); // Maps old node IDs to compact sequential IDs
+    }
+
+    // Renumber all nodes to have compact sequential IDs starting from 0
+    renumberNodes(nodeGraph) {
+        // Collect all unique node IDs and sort them
+        const nodeIds = [...new Set(nodeGraph.nodes.map(n => n.id))].sort((a, b) => a - b);
+
+        // Create mapping from old ID to new sequential ID
+        this.nodeIdRemap.clear();
+        nodeIds.forEach((oldId, index) => {
+            this.nodeIdRemap.set(oldId, index);
+        });
+    }
+
+    // Get the remapped node ID (compact sequential ID)
+    getRemappedNodeId(nodeId) {
+        return this.nodeIdRemap.has(nodeId) ? this.nodeIdRemap.get(nodeId) : nodeId;
     }
 
     compile(nodeGraph) {
         this.reset();
+        this.renumberNodes(nodeGraph);
 
         // Find the output node
         const outputNode = nodeGraph.nodes.find(node => node.definition?.isOutputNode);
@@ -31,12 +55,14 @@ export class ShaderCompiler {
 
     compileForPreviewNode(previewNode, nodeGraph) {
         this.reset();
+        this.renumberNodes(nodeGraph);
         return this.compileFromOutputNode(previewNode, nodeGraph);
     }
 
     compileFromNodeAsOutput(node, outputIndex, nodeGraph) {
         // Compile starting from a specific node and output as if it were the final output
         this.reset();
+        this.renumberNodes(nodeGraph);
 
         try {
             // Compile the node and its dependencies
@@ -47,8 +73,21 @@ export class ShaderCompiler {
             }
 
             // Convert the output to vec4 for rendering
+            // Check if node has multiple independent outputs (like ForLoopEnd)
+            let outputValue;
+            if (node.outputVars) {
+                const outputPortName = node.outputs[outputIndex].name;
+                outputValue = node.outputVars[outputPortName];
+                if (!outputValue) {
+                    console.error(`Preview: Output '${outputPortName}' not found in outputVars for node ${node.id}`);
+                    outputValue = result.output; // Fallback
+                }
+            } else {
+                outputValue = result.output;
+            }
+
             const sourceType = node.outputs[outputIndex].type;
-            const finalColor = TypeSystem.convertCode(result.output, sourceType, 'vec4');
+            const finalColor = TypeSystem.convertCode(outputValue, sourceType, 'vec4');
 
             // Build the final shader
             const fragmentShader = this.buildFragmentShader(finalColor);
@@ -100,8 +139,24 @@ export class ShaderCompiler {
                 const result = this.compileNode(outputConnection.fromNode, nodeGraph);
 
                 if (result) {
-                    const sourceType = outputConnection.fromNode.outputs[outputConnection.fromOutput].type;
-                    finalColor = TypeSystem.convertCode(result.output, sourceType, 'vec4');
+                    const sourceNode = outputConnection.fromNode;
+                    const sourceOutputIndex = outputConnection.fromOutput;
+
+                    // Check if source node has multiple independent outputs (like ForLoopEnd)
+                    let sourceValue;
+                    if (sourceNode.outputVars) {
+                        const outputPortName = sourceNode.outputs[sourceOutputIndex].name;
+                        sourceValue = sourceNode.outputVars[outputPortName];
+                        if (!sourceValue) {
+                            console.error(`Output '${outputPortName}' not found in outputVars for node ${sourceNode.id}`);
+                            sourceValue = result.output; // Fallback
+                        }
+                    } else {
+                        sourceValue = result.output;
+                    }
+
+                    const sourceType = sourceNode.outputs[sourceOutputIndex].type;
+                    finalColor = TypeSystem.convertCode(sourceValue, sourceType, 'vec4');
                 }
             }
 
@@ -142,19 +197,35 @@ export class ShaderCompiler {
     }
 
     compileNode(node, nodeGraph) {
-        // Return cached result if already compiled
-        if (this.compiledNodes.has(node.id)) {
+        // Return cached result if already compiled (but not for dynamic nodes that need revalidation)
+        if (this.compiledNodes.has(node.id) && !node.isDynamicInput) {
             return this.compiledNodes.get(node.id);
         }
+
+        // Temporarily override varName with remapped ID for compact numbering
+        const originalVarName = node.varName;
+        const remappedId = this.getRemappedNodeId(node.id);
+        node.varName = `node_${remappedId}`;
 
         const definition = node.definition;
         if (!definition) {
             this.addError(`Node ${node.type} has no definition`, node.id);
+            node.varName = originalVarName; // Restore
             return null;
+        }
+
+        // Track struct types used by this node's outputs
+        if (node.outputs) {
+            for (const output of node.outputs) {
+                if (TypeRegistry.isStruct(output.type)) {
+                    this.usedStructs.add(output.type);
+                }
+            }
         }
 
         // Special case: output node
         if (definition.isOutputNode) {
+            node.varName = originalVarName; // Restore
             return null;
         }
 
@@ -172,6 +243,7 @@ export class ShaderCompiler {
 
             // Cache and return
             this.compiledNodes.set(node.id, result);
+            node.varName = originalVarName; // Restore
             return result;
         }
 
@@ -180,8 +252,10 @@ export class ShaderCompiler {
             definition.uniforms.forEach(u => this.uniforms.add(u));
         }
 
-        // Compile input connections
+        // Compile input connections and collect types for validation
         const inputValues = {};
+        const inputTypes = {};
+
         for (let i = 0; i < node.inputs.length; i++) {
             const input = node.inputs[i];
             const connection = nodeGraph.connections.find(
@@ -192,35 +266,77 @@ export class ShaderCompiler {
                 // Recursively compile connected node
                 const sourceResult = this.compileNode(connection.fromNode, nodeGraph);
                 if (sourceResult) {
-                    let sourceValue = sourceResult.output;
+                    // Check if source node has multiple independent outputs (like ForLoop)
+                    let sourceValue;
+                    if (connection.fromNode.outputVars) {
+                        const outputPortName = connection.fromNode.outputs[connection.fromOutput].name;
+                        sourceValue = connection.fromNode.outputVars[outputPortName];
+                        if (!sourceValue) {
+                            console.error(`Output '${outputPortName}' not found in outputVars for node ${connection.fromNode.id}. Available:`, Object.keys(connection.fromNode.outputVars));
+                            sourceValue = sourceResult.output; // Fallback
+                        }
+                    } else {
+                        sourceValue = sourceResult.output;
+                    }
                     let sourceType = connection.fromNode.outputs[connection.fromOutput].type;
 
-                    // Apply swizzle if present
-                    if (connection.swizzle) {
-                        sourceValue = sourceValue + connection.swizzle;
-                        // Infer type from swizzle
-                        sourceType = this.inferSwizzleType(sourceType, connection.swizzle);
+                    // Apply accessor if present (struct member access and/or swizzle)
+                    if (connection.accessor) {
+                        sourceValue = sourceValue + connection.accessor;
+                        // Resolve type after accessor
+                        try {
+                            sourceType = TypeRegistry.resolveAccessorType(sourceType, connection.accessor);
+                        } catch (e) {
+                            this.addError(`Invalid accessor ${connection.accessor} on type ${sourceType}: ${e.message}`, node.id);
+                            sourceType = 'float'; // Fallback
+                        }
                     }
 
+                    inputTypes[input.name] = sourceType;
                     const targetType = input.type;
 
-                    // Check type compatibility
-                    if (!TypeSystem.canConvert(sourceType, targetType)) {
-                        this.addWarning(
-                            `Type mismatch: connecting ${sourceType} to ${targetType} in ${node.type}`
+                    // Handle 'any' type inputs - defer type checking to the node
+                    if (TypeRegistry.isAny(targetType)) {
+                        // Store the actual type for validation
+                        inputValues[input.name] = sourceValue;
+                    } else {
+                        // Check type compatibility
+                        if (!TypeSystem.canConvert(sourceType, targetType)) {
+                            this.addWarning(
+                                `Type mismatch: connecting ${sourceType} to ${targetType} in ${node.type}`
+                            );
+                        }
+
+                        // Auto-convert if needed
+                        inputValues[input.name] = TypeSystem.convertCode(
+                            sourceValue,
+                            sourceType,
+                            targetType
                         );
                     }
-
-                    // Auto-convert if needed
-                    inputValues[input.name] = TypeSystem.convertCode(
-                        sourceValue,
-                        sourceType,
-                        targetType
-                    );
                 }
             } else {
                 // Use default value
                 inputValues[input.name] = input.default;
+                inputTypes[input.name] = null; // Not connected
+            }
+        }
+
+        // If node has custom type validation, run it
+        if (definition.validateTypes) {
+            const validation = definition.validateTypes(node, inputTypes, this);
+            if (!validation.valid) {
+                this.addError(validation.error, node.id);
+                node.varName = originalVarName; // Restore
+                return null;
+            }
+            // Store resolved output type on the node
+            if (validation.outputType) {
+                node.resolvedOutputType = validation.outputType;
+                // Update the output type dynamically (always update for dynamic nodes)
+                if (node.outputs.length > 0 && (TypeRegistry.isAny(node.outputs[0].type) || node.isDynamicInput)) {
+                    node.outputs[0].type = validation.outputType;
+                }
             }
         }
 
@@ -235,9 +351,21 @@ export class ShaderCompiler {
                 }
             }
 
+            // Add preamble (function definitions for custom nodes)
+            // Preamble contains complete function definitions - add it directly as a block
+            let preambleRenames = {};
+            if (result.preamble) {
+                // Add preamble and get any function renames
+                const preambleResult = this.addCustomFunction(`preamble_node_${node.id}`, result.preamble, node.id);
+                preambleRenames = preambleResult.renames || {};
+            }
+
             // Add generated code and track which node it came from
             if (result.code) {
-                const { statements, functions } = this.extractFunctionsFromCode(result.code);
+                // Apply any function renames from preamble to the calling code
+                let codeWithRenames = this.applyFunctionRenames(result.code, preambleRenames);
+
+                const { statements, functions } = this.extractFunctionsFromCode(codeWithRenames);
 
                 // Hoist any function definitions outside of main()
                 for (const func of functions) {
@@ -260,9 +388,11 @@ export class ShaderCompiler {
 
             // Cache result
             this.compiledNodes.set(node.id, result);
+            node.varName = originalVarName; // Restore
             return result;
         } else {
             this.addError(`Node ${node.type} has invalid glsl generator`, node.id);
+            node.varName = originalVarName; // Restore
             return null;
         }
     }
@@ -271,6 +401,9 @@ export class ShaderCompiler {
         const uniformDeclarations = Array.from(this.uniforms)
             .map(u => this.getUniformDeclaration(u))
             .join('\n');
+
+        // Generate struct definitions for all used struct types (with dependencies)
+        const structDefinitions = this.generateStructDefinitions();
 
         const customFunctionCode = Array.from(this.customFunctions.values())
             .join('\n\n');
@@ -286,6 +419,8 @@ ${uniformDeclarations}
 
 out vec4 fragColor;
 
+${structDefinitions}
+
 ${customFunctionCode}
 
 void main() {
@@ -299,6 +434,35 @@ ${mainCode}
         this.mainCodeStartLine = preambleLines;
 
         return shader;
+    }
+
+    generateStructDefinitions() {
+        if (this.usedStructs.size === 0) {
+            return '';
+        }
+
+        const allStructs = new Set();
+
+        // Collect all structs including dependencies
+        for (const structType of this.usedStructs) {
+            const deps = TypeRegistry.getDependentStructs(structType);
+            deps.forEach(dep => allStructs.add(dep));
+        }
+
+        // Generate definitions in dependency order (reverse of collection order ensures dependencies first)
+        const structArray = Array.from(allStructs).reverse();
+        let code = structArray
+            .map(structType => TypeRegistry.generateStructDefinition(structType))
+            .join('\n');
+
+        // Generate blend functions for all used struct types
+        // (in case Blend nodes or custom blend operations are used)
+        code += '\n';
+        for (const structType of allStructs) {
+            code += TypeRegistry.generateBlendFunction(structType);
+        }
+
+        return code;
     }
 
     parseWebGLError(errorString) {
@@ -348,19 +512,310 @@ void main() {
     }
 
     addCustomFunction(name, code, nodeId = null) {
-        if (!code) return;
+        if (!code) return { originalNames: [], renamedNames: [] };
 
         const normalizedCode = code.trim();
-        if (!normalizedCode) return;
+        if (!normalizedCode) return { originalNames: [], renamedNames: [] };
 
-        const functionName = name || this.extractFunctionName(normalizedCode) || `anon_${this.customFunctions.size}`;
-        const existing = this.customFunctions.get(functionName);
+        // Extract all function definitions from the code block
+        const functions = this.extractAllFunctions(normalizedCode);
+        const renames = {}; // originalName -> newName
+        const functionsToAdd = []; // Store functions to add after processing all
 
-        if (existing && existing !== normalizedCode) {
-            this.addWarning(`Conflicting GLSL function definitions detected for '${functionName}'. Using latest definition.`);
+        // First pass: determine all renames
+        for (const func of functions) {
+            const { name: funcName, code: funcCode } = func;
+
+            // Compute a hash of the function code for deduplication
+            const codeHash = this.hashCode(funcCode);
+
+            // Check if we've already seen this exact function code
+            const existingName = this.functionHashes.get(codeHash);
+            if (existingName) {
+                // Identical function already exists - skip it but record the name
+                renames[funcName] = existingName;
+                continue;
+            }
+
+            // Check if function name conflicts with existing function
+            const existingFunc = this.customFunctions.get(funcName);
+
+            if (existingFunc && this.hashCode(existingFunc) !== codeHash) {
+                // Different function with same name - need to rename
+                this.functionCounter++;
+                const newName = `${funcName}_${this.functionCounter}`;
+
+                // Record rename
+                renames[funcName] = newName;
+                functionsToAdd.push({ originalName: funcName, newName, code: funcCode });
+
+                console.log(`Renamed conflicting function '${funcName}' to '${newName}'`);
+            } else if (!existingFunc) {
+                // New function - add it
+                renames[funcName] = funcName; // No rename needed
+                functionsToAdd.push({ originalName: funcName, newName: funcName, code: funcCode });
+            } else {
+                // Identical function already exists
+                renames[funcName] = funcName;
+            }
         }
 
-        this.customFunctions.set(functionName, normalizedCode);
+        // Second pass: add functions with renames applied to both definition and body
+        for (const { originalName, newName, code: funcCode } of functionsToAdd) {
+            // Apply all renames to this function's code (for calls to other functions)
+            let updatedCode = this.applyFunctionRenames(funcCode, renames);
+
+            // Rename the function itself in its declaration
+            if (originalName !== newName) {
+                updatedCode = this.renameFunctionInCode(updatedCode, originalName, newName);
+            }
+
+            // Store the function
+            this.customFunctions.set(newName, updatedCode);
+            this.functionHashes.set(this.hashCode(funcCode), newName);
+        }
+
+        return {
+            renames,
+            originalNames: functions.map(f => f.name),
+            renamedNames: functions.map(f => renames[f.name])
+        };
+    }
+
+    /**
+     * Compute a simple hash of a string for deduplication
+     */
+    hashCode(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32bit integer
+        }
+        return hash.toString();
+    }
+
+    /**
+     * Extract all function definitions from a code block
+     */
+    extractAllFunctions(code) {
+        const functions = [];
+        // GLSL keywords that cannot be return types
+        const glslKeywords = new Set([
+            'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'default',
+            'break', 'continue', 'return', 'discard',
+            'struct', 'const', 'uniform', 'varying', 'attribute', 'in', 'out', 'inout',
+            'layout', 'precision', 'highp', 'mediump', 'lowp',
+            'flat', 'smooth', 'centroid', 'invariant'
+        ]);
+        const functionRegex = /(\w+)\s+(\w+)\s*\(([^)]*)\)\s*\{/g;
+
+        // Build a map of positions that are inside comments or strings
+        // This is a single-pass analysis that's much faster than checking each position
+        const insideCommentOrString = new Array(code.length).fill(false);
+
+        let inMultiLineComment = false;
+        let inSingleLineComment = false;
+        let inString = false;
+        let stringChar = '';
+
+        for (let i = 0; i < code.length; i++) {
+            const char = code[i];
+            const nextChar = i + 1 < code.length ? code[i + 1] : '';
+            const prevChar = i > 0 ? code[i - 1] : '';
+
+            // Check for single-line comment start
+            if (!inString && !inMultiLineComment && !inSingleLineComment && char === '/' && nextChar === '/') {
+                inSingleLineComment = true;
+                insideCommentOrString[i] = true;
+                continue;
+            }
+
+            // Check for single-line comment end
+            if (inSingleLineComment && char === '\n') {
+                inSingleLineComment = false;
+                continue;
+            }
+
+            // Check for multi-line comment start
+            if (!inString && !inSingleLineComment && !inMultiLineComment && char === '/' && nextChar === '*') {
+                inMultiLineComment = true;
+                insideCommentOrString[i] = true;
+                continue;
+            }
+
+            // Check for multi-line comment end
+            if (inMultiLineComment && char === '*' && nextChar === '/') {
+                insideCommentOrString[i] = true;
+                insideCommentOrString[i + 1] = true;
+                i++; // Skip the '/'
+                inMultiLineComment = false;
+                continue;
+            }
+
+            // Check for string start/end
+            if (!inMultiLineComment && !inSingleLineComment) {
+                if (!inString && (char === '"' || char === "'")) {
+                    inString = true;
+                    stringChar = char;
+                    insideCommentOrString[i] = true;
+                    continue;
+                } else if (inString && char === stringChar && prevChar !== '\\') {
+                    insideCommentOrString[i] = true;
+                    inString = false;
+                    continue;
+                }
+            }
+
+            // Mark this position if we're inside a comment or string
+            if (inMultiLineComment || inSingleLineComment || inString) {
+                insideCommentOrString[i] = true;
+            }
+        }
+
+        // Now find functions
+        let match;
+        while ((match = functionRegex.exec(code)) !== null) {
+            const [fullMatch, returnType, funcName, params] = match;
+            const startIndex = match.index;
+
+            // Skip if this match is inside a comment or string
+            if (insideCommentOrString[startIndex]) {
+                continue;
+            }
+
+            // Skip if return type or function name is a GLSL keyword
+            if (glslKeywords.has(returnType) || glslKeywords.has(funcName)) {
+                continue;
+            }
+
+            // Find the matching closing brace
+            let braceCount = 1;
+            let endIndex = startIndex + fullMatch.length;
+
+            while (braceCount > 0 && endIndex < code.length) {
+                if (!insideCommentOrString[endIndex]) {
+                    if (code[endIndex] === '{') braceCount++;
+                    if (code[endIndex] === '}') braceCount--;
+                }
+                endIndex++;
+            }
+
+            const funcCode = code.substring(startIndex, endIndex);
+            functions.push({
+                name: funcName,
+                returnType,
+                params,
+                signature: `${returnType} ${funcName}(${params})`,
+                code: funcCode
+            });
+        }
+
+        return functions;
+    }
+
+    /**
+     * Rename a function in its own definition code
+     */
+    renameFunctionInCode(code, oldName, newName) {
+        // Replace the function name in its declaration
+        const funcDeclRegex = new RegExp(`(\\w+\\s+)(${oldName})(\\s*\\([^)]*\\)\\s*\\{)`, 'g');
+        return code.replace(funcDeclRegex, `$1${newName}$3`);
+    }
+
+    /**
+     * Apply function renames to calling code, skipping comments
+     */
+    applyFunctionRenames(code, renames) {
+        if (!renames || Object.keys(renames).length === 0) {
+            return code;
+        }
+
+        // Parse code to identify comment regions
+        const commentRanges = this.findCommentRanges(code);
+
+        let result = code;
+        for (const [oldName, newName] of Object.entries(renames)) {
+            if (oldName === newName) continue;
+
+            // Only replace function calls, not variable names
+            // Pattern: functionName followed by optional whitespace and (
+            const callRegex = new RegExp(`\\b${this.escapeRegex(oldName)}\\s*\\(`, 'g');
+
+            // Collect all matches
+            const matches = [];
+            let match;
+            while ((match = callRegex.exec(code)) !== null) {
+                matches.push({
+                    index: match.index,
+                    length: match[0].length,
+                    text: match[0]
+                });
+            }
+
+            // Apply replacements in reverse order to preserve indices
+            for (let i = matches.length - 1; i >= 0; i--) {
+                const m = matches[i];
+
+                // Check if this match is inside a comment
+                if (this.isInCommentRange(m.index, commentRanges)) {
+                    continue; // Skip replacements in comments
+                }
+
+                // Replace the function name but preserve whitespace and (
+                const replacement = m.text.replace(new RegExp(`\\b${this.escapeRegex(oldName)}`), newName);
+                result = result.substring(0, m.index) + replacement + result.substring(m.index + m.length);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Find all comment ranges in the code
+     */
+    findCommentRanges(code) {
+        const ranges = [];
+
+        // Find single-line comments
+        const singleLineRegex = /\/\/.*/g;
+        let match;
+        while ((match = singleLineRegex.exec(code)) !== null) {
+            ranges.push({
+                start: match.index,
+                end: match.index + match[0].length
+            });
+        }
+
+        // Find multi-line comments
+        const multiLineRegex = /\/\*[\s\S]*?\*\//g;
+        while ((match = multiLineRegex.exec(code)) !== null) {
+            ranges.push({
+                start: match.index,
+                end: match.index + match[0].length
+            });
+        }
+
+        return ranges;
+    }
+
+    /**
+     * Check if an index is within any comment range
+     */
+    isInCommentRange(index, ranges) {
+        for (const range of ranges) {
+            if (index >= range.start && index < range.end) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Escape special regex characters
+     */
+    escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
     extractFunctionsFromCode(code) {
@@ -378,9 +833,64 @@ void main() {
         let braceDepth = 0;
         let buffer = [];
 
+        // Remove comments and strings from a line to count braces accurately
+        const stripCommentsAndStrings = (line) => {
+            let result = '';
+            let inString = false;
+            let stringChar = '';
+            let i = 0;
+
+            while (i < line.length) {
+                // Check for string start/end
+                if (!inString && (line[i] === '"' || line[i] === "'")) {
+                    inString = true;
+                    stringChar = line[i];
+                    i++;
+                    continue;
+                } else if (inString && line[i] === stringChar && line[i - 1] !== '\\') {
+                    inString = false;
+                    i++;
+                    continue;
+                }
+
+                // If we're in a string, skip this character
+                if (inString) {
+                    i++;
+                    continue;
+                }
+
+                // Check for single-line comment
+                if (line[i] === '/' && i + 1 < line.length && line[i + 1] === '/') {
+                    // Rest of line is comment, we're done
+                    break;
+                }
+
+                // Check for multi-line comment start
+                if (line[i] === '/' && i + 1 < line.length && line[i + 1] === '*') {
+                    // Find end of comment on this line
+                    i += 2;
+                    while (i < line.length - 1) {
+                        if (line[i] === '*' && line[i + 1] === '/') {
+                            i += 2;
+                            break;
+                        }
+                        i++;
+                    }
+                    continue;
+                }
+
+                result += line[i];
+                i++;
+            }
+
+            return result;
+        };
+
         const countBraceDelta = (line) => {
-            const opens = (line.match(/\{/g) || []).length;
-            const closes = (line.match(/\}/g) || []).length;
+            // Strip comments and strings before counting braces
+            const cleaned = stripCommentsAndStrings(line);
+            const opens = (cleaned.match(/\{/g) || []).length;
+            const closes = (cleaned.match(/\}/g) || []).length;
             return opens - closes;
         };
 
@@ -396,6 +906,12 @@ void main() {
             const trimmed = line.trim();
 
             if (!capturingFunction) {
+                // Don't match lines that are comments
+                if (trimmed.startsWith('//') || trimmed.startsWith('/*')) {
+                    statements.push(line);
+                    continue;
+                }
+
                 if (functionHeaderRegex.test(trimmed)) {
                     capturingFunction = true;
                     waitingForBody = !trimmed.includes('{');

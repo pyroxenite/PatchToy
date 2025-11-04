@@ -4,22 +4,83 @@ import { PreviewNode as PreviewNodeClass } from '../nodes/PreviewNode.js';
 import { QuickNodeSearch } from '../ui/QuickNodeSearch.js';
 import { SelectionManager } from '../graph/SelectionManager.js';
 import { NodeFactory } from '../graph/NodeFactory.js';
+import { TypeRegistry } from './TypeRegistry.js';
 
 // Re-export Node for backwards compatibility
 export { Node };
 
 // Static deserialize helper for nodes - now uses NodeFactory
-function deserializeNode(json, canvas, videoElement) {
-    return NodeFactory.deserializeNode(json, canvas, videoElement);
+function deserializeNode(json, canvas, videoElement, sharedGL = null) {
+    return NodeFactory.deserializeNode(json, canvas, videoElement, sharedGL);
 }
 
 export class Connection {
-    constructor(fromNode, fromOutput, toNode, toInput, swizzle = null) {
+    constructor(fromNode, fromOutput, toNode, toInput, accessor = null) {
         this.fromNode = fromNode;
         this.fromOutput = fromOutput;
         this.toNode = toNode;
         this.toInput = toInput;
-        this.swizzle = swizzle;  // e.g., null (full value), ".x", ".xy", ".rgb", etc.
+        // Accessor can be:
+        // - null (full value)
+        // - ".x", ".xy", ".rgb" (swizzle only)
+        // - ".position" (struct member)
+        // - ".position.xy" (struct member + swizzle)
+        this.accessor = accessor;
+
+        // For backwards compatibility
+        this.swizzle = accessor;
+    }
+
+    /**
+     * Get the output type after applying accessor
+     */
+    getOutputType() {
+        if (!this.fromNode || !this.fromNode.outputs || !this.fromNode.outputs[this.fromOutput]) {
+            return null;
+        }
+
+        // Use resolvedOutputType if available (for dynamic nodes like Blend)
+        const baseType = this.fromNode.resolvedOutputType || this.fromNode.outputs[this.fromOutput].type;
+
+        if (!this.accessor) {
+            return baseType;
+        }
+
+        try {
+            return TypeRegistry.resolveAccessorType(baseType, this.accessor);
+        } catch (e) {
+            console.error('Error resolving accessor type:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Validate that this connection's types are compatible
+     */
+    isValid() {
+        const outputType = this.getOutputType();
+        if (!outputType) return false;
+
+        if (!this.toNode || !this.toNode.inputs || !this.toNode.inputs[this.toInput]) {
+            return false;
+        }
+
+        const inputType = this.toNode.inputs[this.toInput].type;
+
+        // If input is 'any' type, defer validation to the node itself
+        if (TypeRegistry.isAny(inputType)) {
+            // For now, accept the connection - actual validation happens during compilation
+            return true;
+        }
+
+        // TODO: Add proper type compatibility checking
+        // For now, exact match only for structs
+        if (TypeRegistry.isStruct(outputType) || TypeRegistry.isStruct(inputType)) {
+            return outputType === inputType;
+        }
+
+        // For primitives, allow any connection (existing behavior - has auto-conversion)
+        return true;
     }
 
     getMidpoint() {
@@ -50,11 +111,14 @@ export class Connection {
     }
 
     getLabel() {
-        if (this.swizzle) {
-            // Remove the dot from swizzle display
-            return this.swizzle.replace('.', '');
+        if (this.accessor) {
+            // Remove leading dot and replace internal dots with chevrons for multi-level access
+            let label = this.accessor.startsWith('.') ? this.accessor.slice(1) : this.accessor;
+            // Replace dots with chevrons (›) for better visual hierarchy
+            label = label.replace(/\./g, ' › ');
+            return label;
         }
-        // Don't show type label if no swizzle
+        // Don't show label if no accessor
         return '';
     }
 
@@ -99,6 +163,9 @@ export class NodeGraph {
         this.dragOffsetY = 0;
 
         this.connectingFrom = null;
+        this.swizzleHint = ''; // Accumulated swizzle/accessor string during connection drag
+        this.swizzleHintSuggestion = null; // Autocomplete suggestion for swizzle hint
+        this.swizzleHintTimer = null; // Timer for swizzle hint input timeout
         this.mouseX = 0;
         this.mouseY = 0;
 
@@ -139,6 +206,7 @@ export class NodeGraph {
         this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
         this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
         this.canvas.addEventListener('contextmenu', (e) => this.onContextMenu(e));
+        this.canvas.addEventListener('dblclick', (e) => this.onDoubleClick(e));
         this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
 
         // Keyboard events
@@ -160,6 +228,20 @@ export class NodeGraph {
         const pos = this.getMousePos(e);
 
         // Find clicked node
+        for (let i = this.nodes.length - 1; i >= 0; i--) {
+            if (this.nodes[i].containsPoint(pos.x, pos.y)) {
+                if (this.onNodeRightClick) {
+                    this.onNodeRightClick(this.nodes[i], e);
+                }
+                return;
+            }
+        }
+    }
+
+    onDoubleClick(e) {
+        const pos = this.getMousePos(e);
+
+        // Find double-clicked node
         for (let i = this.nodes.length - 1; i >= 0; i--) {
             if (this.nodes[i].containsPoint(pos.x, pos.y)) {
                 if (this.onNodeRightClick) {
@@ -257,6 +339,44 @@ export class NodeGraph {
             this.selectAll();
         }
 
+        // Accessor input during connection dragging (struct members and swizzle)
+        if (this.connectingFrom) {
+            const key = e.key;
+
+            // Accept alphanumeric, underscore, and dot for struct member access
+            // Also accept traditional swizzle chars: xyzwrgba
+            if (/^[a-zA-Z0-9_.]$/.test(key)) {
+                e.preventDefault();
+                this.handleSwizzleInput(key);
+                this.render();
+            } else if (e.key === 'Backspace') {
+                e.preventDefault();
+                // Remove last character from swizzle hint
+                if (this.swizzleHint.length > 0) {
+                    this.swizzleHint = this.swizzleHint.slice(0, -1);
+                    this.swizzleHintSuggestion = null; // Clear swizzle hint suggestion on backspace
+                    this.render();
+                }
+            } else if (e.key === 'Tab' || e.key === 'Enter') {
+                // Accept swizzle hint autocomplete suggestion
+                if (this.swizzleHintSuggestion && this.swizzleHint) {
+                    e.preventDefault();
+                    this.swizzleHint = this.swizzleHintSuggestion;
+                    this.swizzleHintSuggestion = null;
+                    this.render();
+                }
+            } else if (e.key === 'Escape') {
+                // Clear swizzle hint
+                this.swizzleHint = '';
+                this.swizzleHintSuggestion = null;
+                if (this.swizzleHintTimer) {
+                    clearTimeout(this.swizzleHintTimer);
+                    this.swizzleHintTimer = null;
+                }
+                this.render();
+            }
+        }
+
         // Escape - clear selection or cancel ghost node
         if (e.key === 'Escape') {
             if (this.quickNodeSearch.hasGhostNode()) {
@@ -274,13 +394,24 @@ export class NodeGraph {
     }
 
     deleteSelectedNodes() {
-        // Remove connections to/from selected nodes
+        // Add paired ForLoop nodes to selection if one is selected
+        const nodesToDelete = new Set(this.selectionManager.selectedNodes);
+        for (const node of this.selectionManager.selectedNodes) {
+            if ((node.isForLoopStartNode || node.isForLoopEndNode) && node.data.pairNodeId) {
+                const pairNode = this.nodes.find(n => n.id === node.data.pairNodeId);
+                if (pairNode) {
+                    nodesToDelete.add(pairNode);
+                }
+            }
+        }
+
+        // Remove connections to/from nodes being deleted
         this.connections = this.connections.filter(conn =>
-            !this.selectionManager.selectedNodes.has(conn.fromNode) && !this.selectionManager.selectedNodes.has(conn.toNode)
+            !nodesToDelete.has(conn.fromNode) && !nodesToDelete.has(conn.toNode)
         );
 
         // Clean up preview nodes
-        for (const node of this.selectionManager.selectedNodes) {
+        for (const node of nodesToDelete) {
             if (node.isPreviewNode && this.previewNodes.has(node.id)) {
                 this.previewNodes.get(node.id).destroy();
                 this.previewNodes.delete(node.id);
@@ -288,7 +419,7 @@ export class NodeGraph {
         }
 
         // Remove nodes
-        this.nodes = this.nodes.filter(node => !this.selectionManager.selectedNodes.has(node));
+        this.nodes = this.nodes.filter(node => !nodesToDelete.has(node));
 
         this.selectionManager.selectedNodes.clear();
         if (this.onGraphChanged) this.onGraphChanged();
@@ -333,7 +464,7 @@ export class NodeGraph {
                 id: this.nextNodeId++,
                 x: nodeData.x + 20,
                 y: nodeData.y + 20
-            }, this.canvas, this.videoElement);
+            }, this.canvas, this.videoElement, this.sharedGL);
             newNode.graph = this;  // Set graph reference
 
             // Register preview renderer if it's a preview node
@@ -344,6 +475,38 @@ export class NodeGraph {
             idMap.set(nodeData.id, newNode);
             newNodes.push(newNode);
             this.nodes.push(newNode);
+        }
+
+        // First pass: Check blend nodes in pasted nodes and add necessary inputs
+        for (const newNode of newNodes) {
+            if (newNode.isDynamicInput && newNode.type === 'Blend') {
+                // Find the highest input index that will be connected to this blend node
+                let maxInputIndex = -1; // Start with -1
+
+                for (const connData of this.clipboard.connections) {
+                    // Map old ID to new node
+                    const mappedToNode = idMap.get(connData.toId);
+                    if (mappedToNode === newNode) {
+                        // Check if this is a blend input connection (not the index input)
+                        if (connData.toInput > 0) { // Skip index input at position 0
+                            const inputNum = connData.toInput - 1;
+                            if (inputNum > maxInputIndex) {
+                                maxInputIndex = inputNum;
+                            }
+                        }
+                    }
+                }
+
+                // If no connections found, default to having 0 and 1
+                if (maxInputIndex === -1) {
+                    maxInputIndex = 1;
+                }
+
+                // Add inputs up to maxInputIndex + 1 (to have one free input)
+                while (newNode.inputs.filter(i => i.name !== 'index' && /^\d+$/.test(i.name)).length <= maxInputIndex + 1) {
+                    newNode.addDynamicInput();
+                }
+            }
         }
 
         // Recreate connections with new node references
@@ -388,7 +551,50 @@ export class NodeGraph {
         };
     }
 
+    /**
+     * Check if a click hit any of this node's ports
+     * Returns an action object or null
+     */
+    checkNodePorts(node, x, y) {
+        // Check output ports first
+        for (let i = 0; i < node.outputs.length; i++) {
+            const portPos = node.getOutputPortPosition(i);
+            if (!portPos) continue;
+
+            const dist = Math.hypot(x - portPos.x, y - portPos.y);
+            if (dist < 8) {
+                return {
+                    type: 'START_CONNECTION_FROM_OUTPUT',
+                    node: node,
+                    outputIndex: i
+                };
+            }
+        }
+
+        // Check input ports
+        for (let i = 0; i < node.inputs.length; i++) {
+            const portPos = node.getInputPortPosition(i);
+            if (!portPos) continue;
+
+            const dist = Math.hypot(x - portPos.x, y - portPos.y);
+            if (dist < 8) {
+                return {
+                    type: 'CLICKED_INPUT_PORT',
+                    node: node,
+                    inputIndex: i
+                };
+            }
+        }
+
+        return null;
+    }
+
     onMouseDown(e) {
+        // Ignore right-clicks (they're handled by onContextMenu)
+        if (e.button === 2) {
+            return;
+        }
+
         const pos = this.getMousePos(e);
 
         // If ghost node exists, place it
@@ -396,7 +602,28 @@ export class NodeGraph {
             return;
         }
 
-        // Check for connection clicks first
+        // Check nodes first (in reverse order for z-index) since they render on top
+        for (let i = this.nodes.length - 1; i >= 0; i--) {
+            const node = this.nodes[i];
+
+            // First check ports (they extend beyond node bounds)
+            const portAction = this.checkNodePorts(node, pos.x, pos.y);
+            if (portAction) {
+                this.handleAction(portAction, e);
+                return;
+            }
+
+            // Then check if click is within node body
+            if (node.containsPoint(pos.x, pos.y)) {
+                const result = node.handleMouseDown(pos.x, pos.y, e);
+                if (result) {
+                    this.handleAction(result, e);
+                    return;
+                }
+            }
+        }
+
+        // Check connections/swizzles last since they render under nodes
         for (const conn of this.connections) {
             // If we find an orphaned connection, clean them all up immediately
             if (!conn.fromNode || !conn.toNode) {
@@ -408,18 +635,6 @@ export class NodeGraph {
             const result = conn.handleMouseDown(pos.x, pos.y, e, this);
             if (result && result.handled) {
                 return;
-            }
-        }
-
-        // Check nodes (in reverse order for z-index)
-        for (let i = this.nodes.length - 1; i >= 0; i--) {
-            const node = this.nodes[i];
-            if (node.containsPoint(pos.x, pos.y)) {
-                const result = node.handleMouseDown(pos.x, pos.y, e);
-                if (result) {
-                    this.handleAction(result, e);
-                    return;
-                }
             }
         }
 
@@ -521,6 +736,75 @@ export class NodeGraph {
         }
     }
 
+    handleSwizzleInput(char) {
+        const ACCESSOR_TIMEOUT = 800; // ms - time window to type swizzle hint
+
+        // If timer expired (null) AND we have pending text, clear it to start fresh
+        if (this.swizzleHintTimer === null && this.swizzleHint.length > 0) {
+            this.swizzleHint = '';
+            this.swizzleHintSuggestion = null;
+        } else if (this.swizzleHintTimer !== null) {
+            // Clear existing timer to extend the typing window
+            clearTimeout(this.swizzleHintTimer);
+        }
+
+        // Add character to swizzle hint
+        this.swizzleHint += char;
+
+        // Try autocomplete for swizzle hint (struct members)
+        if (this.connectingFrom) {
+            let outputType;
+
+            // Get output type based on connection direction
+            if (this.connectingFrom.isReverse) {
+                // Connecting from input (reverse), no autocomplete needed
+                outputType = null;
+            } else {
+                // Connecting from output (normal direction)
+                outputType = this.connectingFrom.node.outputs[this.connectingFrom.outputIndex]?.type;
+            }
+
+            if (outputType && TypeRegistry && TypeRegistry.isStruct && TypeRegistry.isStruct(outputType)) {
+                const suggestion = this.getStructAutocomplete(outputType, this.swizzleHint);
+                if (suggestion) {
+                    this.swizzleHintSuggestion = suggestion;
+                } else {
+                    this.swizzleHintSuggestion = null;
+                }
+            } else {
+                this.swizzleHintSuggestion = null;
+            }
+        }
+
+        // Don't enforce length limit - struct member names can be longer than 4 chars
+        // Validation will happen when connection is created
+
+        // Set new timer to clear after timeout
+        this.swizzleHintTimer = setTimeout(() => {
+            // After timeout, allow starting a new accessor on next keypress
+            // but keep current one for the connection
+            this.swizzleHintTimer = null;
+        }, ACCESSOR_TIMEOUT);
+
+        this.render();
+    }
+
+    getStructAutocomplete(structType, partial) {
+        if (!TypeRegistry || !partial) return null;
+
+        const typeDef = TypeRegistry.getType(structType);
+        if (!typeDef || !typeDef.members) return null;
+
+        // Find members that start with the partial string
+        for (const member of typeDef.members) {
+            if (member.name.startsWith(partial)) {
+                return member.name;
+            }
+        }
+
+        return null;
+    }
+
     handleTextInputInteraction(action) {
         const { node, input, x, y } = action;
 
@@ -574,6 +858,14 @@ export class NodeGraph {
 
     onMouseMove(e) {
         const pos = this.getMousePos(e);
+
+        // Skip render if mouse hasn't moved significantly
+        const dx = Math.abs(pos.x - (this.mouseX || 0));
+        const dy = Math.abs(pos.y - (this.mouseY || 0));
+        if (dx < 1 && dy < 1 && !this.connectingFrom && !this.draggingNode && !this.isPanning && !this.resizingNode) {
+            return;
+        }
+
         this.mouseX = pos.x;
         this.mouseY = pos.y;
 
@@ -764,13 +1056,51 @@ export class NodeGraph {
                                          conn.toInput === this.connectingFrom.inputIndex)
                             );
 
-                            // Create new connection
-                            this.connections.push(new Connection(
+                            // Create new connection with swizzle hint if present
+                            // Use autocomplete suggestion if available, otherwise use what was typed
+                            const finalAccessor = this.swizzleHintSuggestion || this.swizzleHint;
+                            const accessor = finalAccessor ? `.${finalAccessor}` : null;
+                            const newConnection = new Connection(
                                 node,
                                 i,
                                 this.connectingFrom.node,
-                                this.connectingFrom.inputIndex
-                            ));
+                                this.connectingFrom.inputIndex,
+                                accessor
+                            );
+
+                            // Resolve dynamic node output types before validation
+                            if (node.isDynamicInput) {
+                                this.resolveDynamicNodeOutputType(node);
+                            }
+
+                            // Validate the connection
+                            if (!newConnection.isValid()) {
+                                console.warn('Invalid connection: type mismatch', {
+                                    from: newConnection.getOutputType(),
+                                    to: this.connectingFrom.node.inputs[this.connectingFrom.inputIndex]?.type,
+                                    accessor
+                                });
+                                // Clear the invalid swizzle hint and allow connection without it
+                                this.swizzleHint = '';
+                                if (this.swizzleHintTimer) {
+                                    clearTimeout(this.swizzleHintTimer);
+                                    this.swizzleHintTimer = null;
+                                }
+                                // Don't create connection for now - let user try again
+                                break;
+                            }
+
+                            this.connections.push(newConnection);
+
+                            // Check if we should auto-add a new input for dynamic nodes (like Blend)
+                            if (this.connectingFrom.node.shouldAddNewInput && this.connectingFrom.node.shouldAddNewInput()) {
+                                this.connectingFrom.node.addDynamicInput();
+                            }
+
+                            // Also check the target node (for nodes like ForLoopStart)
+                            if (node.shouldAddNewInput && node.shouldAddNewInput()) {
+                                node.addDynamicInput();
+                            }
 
                             connected = true;
                             if (this.onGraphChanged) this.onGraphChanged();
@@ -808,13 +1138,47 @@ export class NodeGraph {
                                 conn => !(conn.toNode === node && conn.toInput === i)
                             );
 
-                            // Create new connection
-                            this.connections.push(new Connection(
+                            // Create new connection with swizzle hint if present
+                            // Use autocomplete suggestion if available, otherwise use what was typed
+                            const finalAccessor = this.swizzleHintSuggestion || this.swizzleHint;
+                            const accessor = finalAccessor ? `.${finalAccessor}` : null;
+                            const newConnection = new Connection(
                                 this.connectingFrom.node,
                                 this.connectingFrom.outputIndex,
                                 node,
-                                i
-                            ));
+                                i,
+                                accessor
+                            );
+
+                            // Resolve dynamic node output types before validation
+                            if (this.connectingFrom.node.isDynamicInput) {
+                                this.resolveDynamicNodeOutputType(this.connectingFrom.node);
+                            }
+
+                            // Validate the connection
+                            if (!newConnection.isValid()) {
+                                console.warn('Invalid connection: type mismatch', {
+                                    from: newConnection.getOutputType(),
+                                    to: node.inputs[i]?.type,
+                                    accessor
+                                });
+                                // Clear the invalid swizzle hint and allow connection without it
+                                this.swizzleHint = '';
+                                if (this.swizzleHintTimer) {
+                                    clearTimeout(this.swizzleHintTimer);
+                                    this.swizzleHintTimer = null;
+                                }
+                                // Don't create connection for now - let user try again
+                                break;
+                            }
+
+                            this.connections.push(newConnection);
+
+                            // Check if we should auto-add a new input for dynamic nodes (like Blend)
+                            // Here the target node (node) is the one receiving the connection
+                            if (node.shouldAddNewInput && node.shouldAddNewInput()) {
+                                node.addDynamicInput();
+                            }
 
                             connected = true;
                             if (this.onGraphChanged) this.onGraphChanged();
@@ -825,7 +1189,14 @@ export class NodeGraph {
                 }
             }
 
+            // Clear connection state and swizzle
             this.connectingFrom = null;
+            this.swizzleHint = '';
+            this.swizzleHintSuggestion = null;
+            if (this.swizzleHintTimer) {
+                clearTimeout(this.swizzleHintTimer);
+                this.swizzleHintTimer = null;
+            }
         }
 
         this.draggedNode = null;
@@ -834,8 +1205,40 @@ export class NodeGraph {
         this.render();
     }
 
+    /**
+     * Resolve the output type for a dynamic node (like Blend) based on its current inputs
+     * This is called before connection validation to ensure the output type is up-to-date
+     */
+    resolveDynamicNodeOutputType(node) {
+        if (!node.isDynamicInput || !node.definition?.validateTypes) {
+            return;
+        }
+
+        // Collect input types from connections
+        const inputTypes = {};
+        for (const input of node.inputs) {
+            const connection = this.connections.find(
+                conn => conn.toNode === node && conn.toInput === node.inputs.indexOf(input)
+            );
+            if (connection) {
+                inputTypes[input.name] = connection.getOutputType();
+            } else {
+                inputTypes[input.name] = null;
+            }
+        }
+
+        // Run validation to get output type
+        const validation = node.definition.validateTypes(node, inputTypes, null);
+        if (validation.valid && validation.outputType) {
+            node.resolvedOutputType = validation.outputType;
+            if (node.outputs.length > 0) {
+                node.outputs[0].type = validation.outputType;
+            }
+        }
+    }
+
     addNode(type, x, y) {
-        const node = NodeFactory.createNode(type, this.nextNodeId++, x, y, this.canvas, this.videoElement);
+        const node = NodeFactory.createNode(type, this.nextNodeId++, x, y, this.canvas, this.videoElement, this.sharedGL);
 
         if (!node) {
             console.error(`Failed to create node of type: ${type}`);
@@ -849,6 +1252,30 @@ export class NodeGraph {
 
         node.graph = this;  // Give node reference to graph for callbacks
         this.nodes.push(node);
+
+        // Auto-pair ForLoopStart with ForLoopEnd
+        if (node.isForLoopStartNode) {
+            // Create paired ForLoopEnd node to the right
+            const pairX = x + 300; // Position to the right
+            const pairY = y;
+            const pairNode = NodeFactory.createNode('ForLoopEnd', this.nextNodeId++, pairX, pairY, this.canvas, this.videoElement, this.sharedGL);
+
+            if (pairNode) {
+                // Copy varTypes for initial creation
+                pairNode.data.varTypes = [...node.data.varTypes];
+
+                // Link them together
+                node.data.pairNodeId = pairNode.id;
+                pairNode.data.pairNodeId = node.id;
+
+                // Add pair to graph
+                pairNode.graph = this;
+                this.nodes.push(pairNode);
+
+                // Update ports to match
+                pairNode.updatePorts();
+            }
+        }
 
         this.render();
         return node;
@@ -885,6 +1312,17 @@ export class NodeGraph {
     }
 
     render() {
+        // Use requestAnimationFrame to batch renders
+        if (!this.renderRequested) {
+            this.renderRequested = true;
+            requestAnimationFrame(() => {
+                this.renderRequested = false;
+                this.performRender();
+            });
+        }
+    }
+
+    performRender() {
         const ctx = this.ctx;
         ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -901,23 +1339,60 @@ export class NodeGraph {
         // Apply pan transform
         ctx.translate(this.panX, this.panY);
 
-        // Draw connections
+        // Draw all connections in a single batch
         ctx.strokeStyle = '#007acc';
         ctx.lineWidth = 2;
+
+        // Begin a single path for all non-labeled connections
+        ctx.beginPath();
         for (const conn of this.connections) {
+            if (conn.swizzle) continue; // Draw these separately with labels
+
             const fromPos = conn.fromNode.getOutputPortPosition(conn.fromOutput);
             const toPos = conn.toNode.getInputPortPosition(conn.toInput);
 
-            if (!fromPos || !toPos) continue; // Skip if ports not available
+            if (!fromPos || !toPos) continue;
+
+            ctx.moveTo(fromPos.x, fromPos.y);
+
+            // Simplified bezier calculation
+            const xDiff = toPos.x - fromPos.x;
+            const ctrl = Math.min(Math.abs(xDiff) * 0.5, 100);
+            ctx.bezierCurveTo(
+                fromPos.x + ctrl, fromPos.y,
+                toPos.x - ctrl, toPos.y,
+                toPos.x, toPos.y
+            );
+        }
+        ctx.stroke();
+
+        // Draw clickable dots for non-swizzled connections
+        ctx.fillStyle = 'rgba(0, 122, 204, 0.4)';
+        for (const conn of this.connections) {
+            if (conn.swizzle) continue;
+            const mid = conn.getMidpoint();
+            ctx.beginPath();
+            ctx.arc(mid.x, mid.y, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Draw labeled connections separately
+        for (const conn of this.connections) {
+            if (!conn.swizzle) continue;
+
+            const fromPos = conn.fromNode.getOutputPortPosition(conn.fromOutput);
+            const toPos = conn.toNode.getInputPortPosition(conn.toInput);
+
+            if (!fromPos || !toPos) continue;
 
             ctx.beginPath();
             ctx.moveTo(fromPos.x, fromPos.y);
 
-            // Bezier curve for nice connection lines
-            const xOverShoot = Math.abs(fromPos.x - toPos.x) / 3 + Math.abs(fromPos.y - toPos.y) / 4;
+            const xDiff = toPos.x - fromPos.x;
+            const ctrl = Math.min(Math.abs(xDiff) * 0.5, 100);
             ctx.bezierCurveTo(
-                fromPos.x + xOverShoot, fromPos.y,
-                toPos.x - xOverShoot, toPos.y,
+                fromPos.x + ctrl, fromPos.y,
+                toPos.x - ctrl, toPos.y,
                 toPos.x, toPos.y
             );
             ctx.stroke();
@@ -927,8 +1402,19 @@ export class NodeGraph {
             // Draw connection label (only if swizzled)
             if (conn.swizzle) {
                 const label = conn.getLabel();
-                ctx.font = '10px -apple-system, sans-serif';
-                const textWidth = ctx.measureText(label).width;
+
+                // Cache text measurements
+                const cacheKey = `swizzle_${label}`;
+                let textWidth = this.textMeasureCache?.get(cacheKey);
+                if (!textWidth) {
+                    ctx.font = '10px -apple-system, sans-serif';
+                    textWidth = ctx.measureText(label).width;
+                    if (!this.textMeasureCache) this.textMeasureCache = new Map();
+                    this.textMeasureCache.set(cacheKey, textWidth);
+                } else {
+                    ctx.font = '10px -apple-system, sans-serif';
+                }
+
                 const padding = 4;
                 const labelHeight = 14;
 
@@ -950,12 +1436,6 @@ export class NodeGraph {
                 // Restore state for next connection
                 ctx.strokeStyle = '#007acc';
                 ctx.lineWidth = 2;
-            } else {
-                // Draw subtle clickable dot indicator at midpoint
-                ctx.fillStyle = 'rgba(0, 122, 204, 0.4)';
-                ctx.beginPath();
-                ctx.arc(mid.x, mid.y, 4, 0, Math.PI * 2);
-                ctx.fill();
             }
         }
 
@@ -1007,6 +1487,61 @@ export class NodeGraph {
             ctx.strokeRect(this.selectionBox.x, this.selectionBox.y,
                 this.selectionBox.width, this.selectionBox.height);
             ctx.setLineDash([]);
+        }
+
+        // Draw swizzle hint on top of everything when dragging connection
+        if (this.connectingFrom && this.swizzleHint) {
+            // Format text with chevrons instead of dots for multi-level access
+            const typedText = this.swizzleHint.replace(/\./g, ' › ');
+            const remainingSuggestion = this.swizzleHintSuggestion ?
+                this.swizzleHintSuggestion.substring(this.swizzleHint.length).replace(/\./g, ' › ') : null;
+
+            ctx.font = 'bold 14px -apple-system, sans-serif';
+
+            // Calculate widths for typed text and suggestion
+            const typedWidth = ctx.measureText(typedText).width;
+            const suggestionWidth = remainingSuggestion ? ctx.measureText(remainingSuggestion).width : 0;
+            const totalWidth = typedWidth + suggestionWidth;
+
+            const padding = 6;
+            const labelHeight = 20;
+            const offsetX = 15;
+            const offsetY = 15;
+
+            // Background with stronger visibility
+            ctx.fillStyle = 'rgba(0, 122, 204, 0.95)';
+            ctx.beginPath();
+            ctx.roundRect(
+                this.mouseX + offsetX,
+                this.mouseY + offsetY,
+                totalWidth + padding * 2,
+                labelHeight,
+                4
+            );
+            ctx.fill();
+
+            // Border
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Draw typed text - white and bold for visibility
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(
+                typedText,
+                this.mouseX + offsetX + padding,
+                this.mouseY + offsetY + labelHeight / 2
+            );
+
+            // Draw autocomplete suggestion - grayed out
+            if (remainingSuggestion) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.fillText(
+                    remainingSuggestion,
+                    this.mouseX + offsetX + padding + typedWidth,
+                    this.mouseY + offsetY + labelHeight / 2
+                );
+            }
         }
 
         ctx.restore();
@@ -1099,13 +1634,15 @@ export class NodeGraph {
                 item.addEventListener('click', () => {
                     if (opt.custom) {
                         // Show custom swizzle input
-                        const customSwizzle = prompt('Enter custom swizzle (e.g., xy, xz, yzw):', '');
-                        if (customSwizzle !== null && customSwizzle.trim()) {
+                        const customAccessor = prompt('Enter custom accessor (e.g., xy, xz, yzw, position, position.xy):', '');
+                        if (customAccessor !== null && customAccessor.trim()) {
                             // Add dot prefix if not present
-                            conn.swizzle = customSwizzle.startsWith('.') ? customSwizzle : '.' + customSwizzle;
+                            conn.accessor = customAccessor.startsWith('.') ? customAccessor : '.' + customAccessor;
+                            conn.swizzle = conn.accessor; // Keep backwards compatibility
                         }
                     } else {
-                        conn.swizzle = opt.value;
+                        conn.accessor = opt.value;
+                        conn.swizzle = opt.value; // Keep backwards compatibility
                     }
                     menu.remove();
                     this.render();
@@ -1131,7 +1668,51 @@ export class NodeGraph {
     getSwizzleOptions(type, currentSwizzle) {
         const options = [];
 
-        if (type === 'vec2') {
+        // Check if this is a struct type
+        if (TypeRegistry && TypeRegistry.isStruct && TypeRegistry.isStruct(type)) {
+            const typeDef = TypeRegistry.getType(type);
+            if (typeDef && typeDef.members) {
+                // Add struct members
+                for (const member of typeDef.members) {
+                    options.push({
+                        label: member.name,
+                        value: `.${member.name}`,
+                        type: member.type
+                    });
+
+                    // If the member is a vector type, add common swizzles
+                    if (member.type === 'vec2' || member.type === 'vec3' || member.type === 'vec4') {
+                        options.push({
+                            label: `${member.name} › x`,
+                            value: `.${member.name}.x`,
+                            type: 'float'
+                        });
+                        options.push({
+                            label: `${member.name} › y`,
+                            value: `.${member.name}.y`,
+                            type: 'float'
+                        });
+                        if (member.type === 'vec3' || member.type === 'vec4') {
+                            options.push({
+                                label: `${member.name} › z`,
+                                value: `.${member.name}.z`,
+                                type: 'float'
+                            });
+                        }
+                        if (member.type === 'vec4') {
+                            options.push({
+                                label: `${member.name} › w`,
+                                value: `.${member.name}.w`,
+                                type: 'float'
+                            });
+                        }
+                    }
+                }
+
+                // Add custom option
+                options.push({ label: 'other...', value: 'custom', span: 2, custom: true });
+            }
+        } else if (type === 'vec2') {
             // Layout:
             // xy (spanning 2 cols)
             // x  | y
@@ -1197,7 +1778,9 @@ export class NodeGraph {
             'float': 'Float',
             'vec2': 'Vec2',
             'vec3': 'Vec3',
-            'vec4': 'Vec4'
+            'vec4': 'Vec4',
+            'int': 'Int',
+            'bool': 'Bool'
         };
         return constantTypes[type] !== undefined;
     }
@@ -1208,7 +1791,9 @@ export class NodeGraph {
             'float': 'Float',
             'vec2': 'Vec2',
             'vec3': 'Vec3',
-            'vec4': 'Vec4'
+            'vec4': 'Vec4',
+            'int': 'Int',
+            'bool': 'Bool'
         };
 
         const nodeType = constantTypes[inputType];
@@ -1229,7 +1814,6 @@ export class NodeGraph {
             inputIndex
         ));
 
-        console.log(`Auto-created ${nodeType} node for ${inputType} input`);
     }
 
     serialize() {
@@ -1253,7 +1837,6 @@ export class NodeGraph {
         this.nodes = [];
         this.connections = [];
         this.selectionManager.selectedNodes.clear();
-        this.nextNodeId = data.nextNodeId || 0;
 
         // Clear background renderer when loading a new project
         if (this.onPreviewBackground) {
@@ -1267,7 +1850,7 @@ export class NodeGraph {
         // Recreate nodes
         const idMap = new Map();
         for (const nodeData of data.nodes) {
-            const node = deserializeNode(nodeData, this.canvas, this.videoElement);
+            const node = deserializeNode(nodeData, this.canvas, this.videoElement, this.sharedGL);
             node.graph = this;
             this.nodes.push(node);
             idMap.set(nodeData.id, node);
@@ -1275,6 +1858,61 @@ export class NodeGraph {
             // Register preview renderer if it's a preview node
             if (node instanceof PreviewNodeClass) {
                 this.previewNodes.set(node.id, node.renderer);
+            }
+        }
+
+        // Restore nextNodeId
+        this.nextNodeId = data.nextNodeId || 0;
+
+        // First pass: Check blend nodes and add necessary inputs based on connections
+        for (const node of this.nodes) {
+            if (node.isDynamicInput && node.type === 'Blend') {
+                // Find the highest input index that will be connected to this blend node
+                let maxInputIndex = -1; // Start with -1, will find actual max from connections
+
+                for (const connData of data.connections) {
+                    if (connData.toId === node.id) {
+                        // Check if this is a blend input connection (not the index input)
+                        // We need to check the toInput index corresponds to an input that starts with 'input'
+                        // The connection stores the input index, not the name
+                        if (connData.toInput > 0) { // Skip index input at position 0
+                            // Calculate which input this would be
+                            // toInput 1 = input0, toInput 2 = input1, etc.
+                            const inputNum = connData.toInput - 1;
+                            if (inputNum > maxInputIndex) {
+                                maxInputIndex = inputNum;
+                            }
+                        }
+                    }
+                }
+
+                // If no connections found, default to having 0 and 1 (minInputs = 2)
+                if (maxInputIndex === -1) {
+                    maxInputIndex = 1; // We want 0 and 1 at minimum
+                }
+
+                // Add inputs up to maxInputIndex + 1 (to have one free input)
+                // We need to add inputs until we have enough
+                // Current inputs: index (0), 0 (1), 1 (2)...
+                while (node.inputs.filter(i => i.name !== 'index' && /^\d+$/.test(i.name)).length <= maxInputIndex + 1) {
+                    node.addDynamicInput();
+                }
+            }
+
+            // Handle ForLoopStart and ForLoopEnd nodes - restore varTypes and update ports
+            if (node.isForLoopStartNode || node.isForLoopEndNode) {
+                // The varTypes should already be in node.data from deserialization
+                // Just need to trigger port rebuild
+                node.updatePorts();
+            }
+        }
+
+        // Second pass: Update ForLoopEnd nodes to read from their paired ForLoopStart
+        // ForLoopStart is the authoritative source, ForLoopEnd just reads from it
+        for (const node of this.nodes) {
+            if (node.isForLoopEndNode && node.data.pairNodeId) {
+                // Trigger port rebuild which will read from the paired ForLoopStart
+                node.updatePorts();
             }
         }
 
@@ -1321,7 +1959,7 @@ export class NodeGraph {
      * Helper method called by QuickNodeSearch to create ghost nodes
      */
     createGhostNode(nodeType) {
-        const node = NodeFactory.createNode(nodeType, this.nextNodeId++, this.mouseX, this.mouseY, this.canvas, this.videoElement);
+        const node = NodeFactory.createNode(nodeType, this.nextNodeId++, this.mouseX, this.mouseY, this.canvas, this.videoElement, this.sharedGL);
 
         if (!node) {
             console.error(`Failed to create ghost node of type: ${nodeType}`);
