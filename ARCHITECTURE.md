@@ -175,7 +175,7 @@ You can extend `TypeSystem.canConvert()` and `TypeSystem.convertCode()` to add m
    - Linker errors
    - Shown in UI via error callback
 
-**UI Display:** Errors appear as red notifications in top-left corner for 5 seconds.
+**UI Display:** Errors appear as red notifications in bottom-left corner.
 
 ## Adding Custom GLSL Function Nodes
 
