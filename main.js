@@ -10,6 +10,8 @@ import { AuthDialogs } from './src/ui/AuthDialogs.js';
 import { NodeDialogs } from './src/ui/NodeDialogs.js';
 import { ProjectDialogs } from './src/ui/ProjectDialogs.js';
 import { UIHelpers } from './src/ui/UIHelpers.js';
+import { GLSLCommentParser } from './src/utils/GLSLCommentParser.js';
+import { FloatingCodeEditor } from './src/ui/FloatingCodeEditor.js';
 
 class PatchToy {
     constructor() {
@@ -18,16 +20,28 @@ class PatchToy {
         this.videoElement = document.getElementById('cameraVideo');
         this.addNodeBtn = document.getElementById('addNodeBtn');
 
+        // Create shared WebGL context for all rendering
+        this.sharedGLCanvas = document.createElement('canvas');
+        this.sharedGLCanvas.width = 512;
+        this.sharedGLCanvas.height = 512;
+        this.sharedGL = this.sharedGLCanvas.getContext('webgl2') || this.sharedGLCanvas.getContext('webgl');
+
+        if (!this.sharedGL) {
+            console.error('Failed to create shared WebGL context');
+            alert('WebGL not supported - PatchToy requires WebGL to run');
+        }
+
         // Core instances
         this.nodeGraph = new NodeGraph(this.nodeCanvas, this.videoElement);
         this.nodeGraph.addNodeButton = this.addNodeBtn;
+        this.nodeGraph.sharedGL = this.sharedGL; // Pass to node graph for creating preview nodes
         this.shaderCompiler = new ShaderCompiler();
         this.apiClient = new ApiClient();
 
         // Managers
         this.projectManager = new ProjectManager(this.nodeGraph, this.apiClient);
-        this.backgroundRenderer = new BackgroundRenderer(this.nodeCanvas, this.videoElement);
-        this.feedbackRenderer = new FeedbackRenderer(this.nodeGraph, this.shaderCompiler, null);
+        this.backgroundRenderer = new BackgroundRenderer(this.nodeCanvas, this.videoElement, this.sharedGL);
+        this.feedbackRenderer = new FeedbackRenderer(this.nodeGraph, this.shaderCompiler, this.sharedGL);
         this.compilationManager = new CompilationManager(this.nodeGraph, this.shaderCompiler, null, this.backgroundRenderer, this.feedbackRenderer);
 
         // State
@@ -93,8 +107,10 @@ class PatchToy {
             const definition = NodeDefinitions[node.type];
             if (definition && definition.isCustomNode) {
                 NodeDialogs.showEditNodeDialog(node, definition, (nodeName, glslCode) => {
-                    this.createCustomNode(nodeName, glslCode);
+                    const result = this.createCustomNode(nodeName, glslCode);
                     this.compilationManager.scheduleCompile();
+                    // Return the final code so the editor can update
+                    return result.success ? result.finalCode : null;
                 });
             } else if (definition && definition.hasColorPicker) {
                 NodeDialogs.showColorPicker(node, this.colorInput, this.nodeCanvas, () => {
@@ -107,17 +123,24 @@ class PatchToy {
         // Custom node creation request
         this.nodeGraph.onCustomNodeRequested = () => {
             NodeDialogs.showCustomNodeDialog((nodeName, glslCode) => {
-                const success = this.createCustomNode(nodeName, glslCode);
-                if (success) {
+                const result = this.createCustomNode(nodeName, glslCode);
+                if (result.success) {
                     this.nodeGraph.addNode(nodeName, 200, 200);
                 }
-                return success;
+                return result.success;
             });
+        };
+
+        // Custom node deletion request
+        this.nodeGraph.onCustomNodeDelete = (nodeName) => {
+            this.deleteCustomNode(nodeName);
         };
 
         // Preview node code inspect
         this.nodeGraph.onPreviewCodeInspect = (node) => {
-            const shaderSource = node?.renderer?.currentShaderSource?.fragment;
+            // Try to get shader from last compilation (works even if compilation failed)
+            const shaderSource = node?.lastCompiledShader?.fragment ||
+                                 node?.renderer?.currentShaderSource?.fragment;
             NodeDialogs.showGeneratedCode(shaderSource);
         };
 
@@ -210,13 +233,18 @@ class PatchToy {
 
         // Load file input
         document.getElementById('loadFileInput').addEventListener('change', async (e) => {
-            const loaded = await this.projectManager.loadProjectFromFile(
+            // Close all open editors before loading new project
+            FloatingCodeEditor.closeAll();
+
+            const result = await this.projectManager.loadProjectFromFile(
                 e.target.files[0],
                 (name, glsl, skipSave) => this.createCustomNode(name, glsl, skipSave),
                 () => this.saveCustomNodes()
             );
-            if (loaded) {
+            if (result && result.success) {
                 this.compilationManager.scheduleCompile();
+                // Restore editor states from the loaded project
+                this.restoreEditorStates(result.editorStates);
             }
             e.target.value = ''; // Reset file input
         });
@@ -228,6 +256,7 @@ class PatchToy {
                 projectTitle: this.projectManager.projectTitle,
                 currentProjectId: this.projectManager.currentProjectId,
                 onProjectTitleChange: (title) => this.projectManager.setProjectTitle(title),
+                onNewProject: () => this.handleNewProject(),
                 onShowCurrentProjectMenu: (anchorBtn) => {
                     ProjectDialogs.showCurrentProjectMenu({
                         anchorBtn,
@@ -236,8 +265,19 @@ class PatchToy {
                 },
                 onLoadLocalClick: () => document.getElementById('loadFileInput').click(),
                 onLoadCloudProject: async (projectId) => {
-                    const loaded = await this.projectManager.loadCloudProject(projectId, (name, glsl) => this.createCustomNode(name, glsl));
-                    if (loaded) this.compilationManager.scheduleCompile();
+                    // Close all open editors before loading cloud project
+                    FloatingCodeEditor.closeAll();
+
+                    const result = await this.projectManager.loadCloudProject(projectId, (name, glsl) => this.createCustomNode(name, glsl));
+                    if (result && result.success) {
+                        // Restore editor states if present
+                        if (result.editorStates && result.editorStates.length > 0) {
+                            FloatingCodeEditor.restoreAllStates(result.editorStates, this.nodeGraph.nodes);
+                        }
+                        this.compilationManager.scheduleCompile();
+                        // Update UI to show save button
+                        UIHelpers.updateAccountButton(this.apiClient);
+                    }
                 },
                 onShowProjectOptionsMenu: (project, anchorBtn, listItem) => {
                     ProjectDialogs.showProjectOptionsMenu({
@@ -296,19 +336,34 @@ class PatchToy {
 
         // Graph changes
         this.nodeGraph.onGraphChanged = () => {
+            // Mark project as dirty (has unsaved changes)
+            this.projectManager.markDirty();
+
             // Compile feedback shaders first
             this.feedbackRenderer.compileFeedbackShaders();
             this.feedbackRenderer.renderFeedbackNodes();
 
             // Then schedule main compilation
             this.compilationManager.scheduleCompile();
-            this.projectManager.saveGraph();
+            // Note: markDirty() already calls saveGraph()
         };
 
         // Uniform value changes (no recompilation needed)
         this.nodeGraph.onUniformValueChanged = (node) => {
-            this.compilationManager.updateUniforms();
-            this.projectManager.saveGraph();
+            this.compilationManager.updateUniformsForNode(node);
+            // Debounce save to avoid lag during dragging
+            this.debouncedSave();
+        };
+
+        // Debounced save for uniform updates
+        this.saveTimeout = null;
+        this.debouncedSave = () => {
+            if (this.saveTimeout) {
+                clearTimeout(this.saveTimeout);
+            }
+            this.saveTimeout = setTimeout(() => {
+                this.projectManager.saveGraph();
+            }, 500); // Save after 500ms of no changes
         };
     }
 
@@ -342,21 +397,121 @@ class PatchToy {
         }
     }
 
-    createCustomNode(nodeName, glslCode, skipSave = false) {
-        // Parse the GLSL function to extract signature
-        const funcMatch = glslCode.match(/(\w+)\s+(\w+)\s*\((.*?)\)/);
+    handleNewProject() {
+        // Check if there are nodes in the current graph
+        const hasNodes = this.nodeGraph.nodes.length > 0;
 
-        if (!funcMatch) {
+        if (hasNodes) {
+            // Ask if user wants to save first
+            const save = confirm('Do you want to save the current project before creating a new one?');
+
+            if (save) {
+                // If logged in, save to cloud
+                if (this.apiClient.isLoggedIn()) {
+                    this.projectManager.saveToCloud().then(result => {
+                        if (result.success || result.needsName) {
+                            // If save succeeded or was handled, create new project
+                            this.createNewProject();
+                        }
+                        // If user cancelled save dialog, don't create new project
+                    });
+                } else {
+                    // Not logged in, download to file
+                    this.projectManager.saveProjectToFile();
+                    // Create new project after a brief delay to allow download
+                    setTimeout(() => this.createNewProject(), 100);
+                }
+            } else {
+                // User doesn't want to save, just create new project
+                this.createNewProject();
+            }
+        } else {
+            // No nodes, just create new project
+            this.createNewProject();
+        }
+    }
+
+    createNewProject() {
+        // Close all open editors (saves states before closing)
+        FloatingCodeEditor.closeAll();
+
+        // Clear the graph
+        this.nodeGraph.nodes = [];
+        this.nodeGraph.connections = [];
+        this.nodeGraph.nextNodeId = 0;
+        this.nodeGraph.panX = 0;
+        this.nodeGraph.panY = 0;
+
+        // Clear background renderer
+        if (this.backgroundRenderer) {
+            this.backgroundRenderer.setActivePreviewNode(null);
+        }
+
+        // Reset project info
+        this.projectManager.projectTitle = 'Untitled Project';
+        this.projectManager.currentProjectId = null;
+        this.projectManager.viewingSharedProject = null;
+        document.getElementById('projectTitleDisplay').textContent = 'Untitled Project';
+
+        // Save the empty graph and trigger compilation
+        this.projectManager.saveGraph();
+        this.compilationManager.compile();
+        this.nodeGraph.render();
+    }
+
+    createCustomNode(nodeName, glslCode, skipSave = false) {
+        // Auto-generate default magic comments if none exist
+        let finalCode = glslCode;
+        if (!GLSLCommentParser.hasComments(glslCode)) {
+            finalCode = GLSLCommentParser.generateDefaultComments(glslCode);
+        }
+
+        // Parse magic comments
+        const { metadata, code } = GLSLCommentParser.parse(finalCode);
+
+        // Validate the metadata
+        const validation = GLSLCommentParser.validate(metadata, code);
+        if (!validation.valid) {
+            alert('Magic comment validation failed:\n' + validation.errors.join('\n'));
+            return false;
+        }
+
+        // Extract all functions from code
+        const functions = GLSLCommentParser.extractFunctions(code);
+        if (functions.length === 0) {
             alert('Could not parse GLSL function. Please ensure it has a valid signature like: vec3 myFunc(vec2 uv)');
             return false;
         }
 
-        const returnType = funcMatch[1];
-        const funcName = funcMatch[2];
-        const paramsString = funcMatch[3];
+        // Determine main function
+        let mainFunction;
+        if (metadata.node) {
+            mainFunction = functions.find(f => f.name === metadata.node);
+        } else if (functions.length === 1) {
+            mainFunction = functions[0];
+        } else {
+            alert('Multiple functions found but no @node directive specified');
+            return false;
+        }
 
-        // Parse parameters
+        if (!mainFunction) {
+            alert('Could not determine main function');
+            return false;
+        }
+
+        // Parse function parameters
+        const funcMatch = code.match(
+            new RegExp(`${mainFunction.returnType}\\s+${mainFunction.name}\\s*\\(([^)]*)\\)`)
+        );
+
+        if (!funcMatch) {
+            alert('Could not parse function parameters');
+            return false;
+        }
+
+        const paramsString = funcMatch[1];
         const inputs = [];
+
         if (paramsString.trim()) {
             const params = paramsString.split(',').map(p => p.trim());
             for (const param of params) {
@@ -364,24 +519,50 @@ class PatchToy {
                 if (parts.length >= 2) {
                     const type = parts[0];
                     const name = parts[1];
-                    inputs.push({ name, type });
+
+                    // Check if there's custom metadata for this input
+                    const inputMeta = metadata.inputs[name];
+
+                    inputs.push({
+                        name,
+                        type,
+                        displayName: inputMeta?.displayName || name,
+                        default: inputMeta?.default || null
+                    });
                 }
             }
         }
 
+        // Use title from metadata, or function name if not specified
+        const displayTitle = metadata.title || mainFunction.name;
+
         // Create the node definition
         NodeDefinitions[nodeName] = {
-            category: 'custom',
-            inputs: inputs,
-            outputs: [{ name: 'out', type: returnType }],
-            customGLSL: glslCode,
+            category: metadata.category,
+            inputs: inputs.map(inp => ({
+                name: inp.displayName || inp.name,
+                type: inp.type,
+                paramName: inp.name  // Store original param name for function calls
+            })),
+            outputs: [{ name: '', type: mainFunction.returnType }],
+            customGLSL: finalCode,
             isCustomNode: true,
+            displayTitle: displayTitle,
+            description: metadata.description,
             glsl: (node, inputValues) => {
                 // Build the function call with proper default values
+                // inputValues is indexed by display name (input.name)
                 const args = inputs.map((inp) => {
-                    if (inputValues[inp.name]) {
-                        return inputValues[inp.name];
+                    const displayName = inp.displayName || inp.name;
+                    if (inputValues[displayName]) {
+                        return inputValues[displayName];
                     }
+
+                    // Use custom default from @input directive if available
+                    if (inp.default) {
+                        return inp.default;
+                    }
+
                     // Generate appropriate default value based on type
                     const type = inp.type;
                     if (type === 'float') return '0.0';
@@ -402,7 +583,10 @@ class PatchToy {
                 }).join(', ');
 
                 return {
-                    code: `${glslCode}\n${returnType} ${node.varName} = ${funcName}(${args});`,
+                    // Function definitions go in preamble (outside main)
+                    preamble: code,
+                    // Only the function call goes in main
+                    code: `${mainFunction.returnType} ${node.varName} = ${mainFunction.name}(${args});`,
                     output: node.varName
                 };
             }
@@ -414,8 +598,25 @@ class PatchToy {
 
         this.nodeGraph.refreshNodesOfType(nodeName, { preserveData: true });
 
-        console.log(`Created custom node: ${nodeName}`);
-        return true;
+        return { success: true, finalCode };
+    }
+
+    deleteCustomNode(nodeName) {
+        // Remove from NodeDefinitions
+        delete NodeDefinitions[nodeName];
+
+        // Remove all instances of this node from the graph
+        const nodesToRemove = this.nodeGraph.nodes.filter(n => n.type === nodeName);
+        for (const node of nodesToRemove) {
+            this.nodeGraph.deleteNode(node);
+        }
+
+        // Save updated custom nodes list
+        this.saveCustomNodes();
+
+        // Refresh UI
+        this.nodeGraph.render();
+        this.compilationManager.scheduleCompile();
     }
 
     saveCustomNodes() {
@@ -473,11 +674,39 @@ class PatchToy {
         }
 
         // Create the custom node
-        if (this.createCustomNode(finalName, glslCode)) {
+        const result = this.createCustomNode(finalName, glslCode);
+        if (result.success) {
             this.nodeGraph.addNode(finalName, this.nodeGraph.mouseX, this.nodeGraph.mouseY);
             this.nodeGraph.render();
             this.compilationManager.showSuccess(`Created custom node: ${finalName}`);
         }
+    }
+
+    restoreEditorStates(editorStates) {
+        if (!editorStates || editorStates.length === 0) return;
+
+        // Restore each editor
+        editorStates.forEach(state => {
+            const nodeType = state.nodeType;
+            const definition = NodeDefinitions[nodeType];
+
+            if (definition && definition.customGLSL) {
+                // Create a dummy node for the dialog
+                const dummyNode = { type: nodeType };
+
+                // Show editor with saved state
+                NodeDialogs.showEditNodeDialog(
+                    dummyNode,
+                    definition,
+                    (nodeName, glslCode) => {
+                        const result = this.createCustomNode(nodeName, glslCode);
+                        this.compilationManager.scheduleCompile();
+                        return result.success ? result.finalCode : null;
+                    },
+                    state // Pass saved state for position/size
+                );
+            }
+        });
     }
 
     resize() {
@@ -506,64 +735,75 @@ class PatchToy {
         // Load custom nodes first
         this.loadCustomNodes();
 
-        // Check if URL contains shared project
+        // Check if URL contains password reset token
         const urlParams = new URLSearchParams(window.location.search);
+        const resetToken = urlParams.get('reset');
+
+        if (resetToken && this.apiClient.isEnabled()) {
+            // Show password reset dialog
+            AuthDialogs.showResetPassword(this.apiClient, resetToken);
+            // Clear the token from URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return;
+        }
+
+        // Check if URL contains shared project
         const sharedProjectId = urlParams.get('project');
 
         if (sharedProjectId && this.apiClient.isEnabled()) {
             // Try to load shared project
             try {
-                const result = await this.apiClient.getPublicProject(sharedProjectId);
-                const projectData = result.data;
+                const result = await this.projectManager.loadCloudProject(
+                    sharedProjectId,
+                    (name, glsl) => this.createCustomNode(name, glsl)
+                );
 
-                // Mark as viewing someone else's project
-                const sharedProjectInfo = {
-                    id: sharedProjectId,
-                    name: result.name,
-                    username: result.username,
-                    isOwner: result.isOwner || false
-                };
-                this.projectManager.viewingSharedProject = sharedProjectInfo;
-
-                // Load custom nodes if present
-                if (projectData.customNodes) {
-                    for (const [nodeName, nodeData] of Object.entries(projectData.customNodes)) {
-                        this.createCustomNode(nodeName, nodeData.customGLSL);
+                if (result && result.success) {
+                    // Restore editor states if present
+                    if (result.editorStates && result.editorStates.length > 0) {
+                        FloatingCodeEditor.restoreAllStates(result.editorStates, this.nodeGraph.nodes);
                     }
-                }
 
-                // Load the project
-                if (projectData.graph) {
-                    this.nodeGraph.deserialize(projectData.graph);
+                    this.nodeGraph.render();
+
+                    // Show notification if viewing someone else's project
+                    if (this.projectManager.projectState && !this.projectManager.projectState.isOwner) {
+                        setTimeout(() => {
+                            const username = this.projectManager.projectState.ownerUsername;
+                            const title = this.projectManager.projectState.title;
+                            alert(`Viewing "${title}" by @${username}\n\nAny changes you save will create your own copy.`);
+                        }, 500);
+                    }
+
+                    // Compile the shader
+                    this.compilationManager.scheduleCompile();
+
+                    // Update UI to show save button
+                    UIHelpers.updateAccountButton(this.apiClient);
+
+                    // KEEP URL parameter (don't clear it!) so users can share the URL
                 } else {
-                    // Old format - direct graph data
-                    this.nodeGraph.nodes = projectData.nodes || [];
-                    this.nodeGraph.connections = projectData.connections || [];
+                    // Failed to load - clear URL and start fresh
+                    this.projectManager.clearProjectUrl();
+                    this.initDefaultProject();
                 }
-                this.nodeGraph.render();
-
-                // Update project title to show it's shared
-                const projectTitleDisplay = document.getElementById('projectTitleDisplay');
-                if (projectTitleDisplay) {
-                    projectTitleDisplay.textContent = `${result.name} (by @${result.username})`;
-                }
-
-                // Show notification
-                if (!result.isOwner) {
-                    setTimeout(() => {
-                        alert(`Viewing "${result.name}" by @${result.username}\n\nAny changes you save will create your own copy.`);
-                    }, 500);
-                }
-
-                // Compile the shader
-                this.compilationManager.scheduleCompile();
-
-                // Clear URL parameter
-                window.history.replaceState({}, document.title, window.location.pathname);
             } catch (err) {
                 console.error('Failed to load shared project:', err);
-                alert('Failed to load shared project: ' + err.message);
-                // Fall through to normal init
+
+                // Check if it's a private project error
+                const currentUser = this.apiClient.getCurrentUser();
+                if (err.message.includes('private') || err.message.includes('not found')) {
+                    // Try to extract owner info from error or make a best-effort message
+                    const msg = currentUser
+                        ? 'This project is private or does not exist.\n\nIf you know the owner, you can ask them to make it public.'
+                        : 'This project is private or does not exist.\n\nPlease log in if you own this project, or ask the owner to make it public.';
+                    alert(msg);
+                } else {
+                    alert('Failed to load project: ' + err.message);
+                }
+
+                // Clear URL and fall through to normal init
+                this.projectManager.clearProjectUrl();
                 this.initDefaultProject();
             }
         } else {
@@ -574,9 +814,12 @@ class PatchToy {
 
     initDefaultProject() {
         // Try to load saved graph
-        const loaded = this.projectManager.loadGraph();
+        const editorStates = this.projectManager.loadGraph();
 
-        if (!loaded) {
+        if (editorStates && editorStates.length >= 0) {
+            // Graph was loaded, restore editor states
+            this.restoreEditorStates(editorStates);
+        } else {
             // Create default nodes - Preview node instead of Output
             this.nodeGraph.addNode('Preview', 600, 200);
             this.nodeGraph.addNode('Vec3', 300, 200);

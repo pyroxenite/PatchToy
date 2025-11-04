@@ -125,6 +125,14 @@ export class ApiClient {
     return await this.request('GET', '/api/auth/verify');
   }
 
+  async requestPasswordReset(email) {
+    return await this.request('POST', '/api/auth/request-password-reset', { email });
+  }
+
+  async resetPassword(token, newPassword) {
+    return await this.request('POST', '/api/auth/reset-password', { token, newPassword });
+  }
+
   // Project endpoints
   async listProjects() {
     return await this.request('GET', '/api/projects');
