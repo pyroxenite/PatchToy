@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="patchtoy.png" alt="PatchToy" width="200" style="image-rendering: pixelated; image-rendering: crisp-edges;"/>
+  <img src="patchtoy-large.png" alt="PatchToy" width="300"/>
 </p>
 
 # PatchToy
