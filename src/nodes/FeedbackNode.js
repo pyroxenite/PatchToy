@@ -88,20 +88,6 @@ export class FeedbackNode extends Node {
         const temp = this.readBuffer;
         this.readBuffer = this.writeBuffer;
         this.writeBuffer = temp;
-
-        // Debug: Log swap
-        console.log(`[Feedback ${this.id}] Swapped buffers - Read texture: ${this.readBuffer?.texture?.constructor.name}@${this.getTextureId(this.readBuffer?.texture)}, Write FB: ${this.getTextureId(this.writeBuffer?.texture)}`);
-    }
-
-    /**
-     * Debug helper: Get a stable ID for a texture object
-     */
-    getTextureId(texture) {
-        if (!texture) return 'null';
-        if (!texture.__debugId) {
-            texture.__debugId = Math.random().toString(36).substring(2, 11);
-        }
-        return texture.__debugId;
     }
 
     /**

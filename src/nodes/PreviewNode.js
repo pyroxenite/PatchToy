@@ -6,7 +6,7 @@ import { ShaderPreview } from '../rendering/ShaderPreview.js';
  * Extends Node with preview-specific functionality
  */
 export class PreviewNode extends Node {
-    constructor(id, type, x, y, canvas, videoElement) {
+    constructor(id, type, x, y, canvas, videoElement, sharedGL = null) {
         super(id, type, x, y);
 
         this.bottomBarHeight = 32;
@@ -14,17 +14,82 @@ export class PreviewNode extends Node {
         // Initialize dimensions with correct aspect ratio
         this.recalculateDimensions();
 
+        // Calculate preview area size (excluding bottom bar)
+        const previewHeight = this.height - this.bottomBarHeight;
+        const dpr = window.devicePixelRatio || 1;
+
         // Create renderer instance using ShaderPreview in offscreen mode
-        this.renderer = new ShaderPreview(canvas, videoElement, {
+        const options = {
             offscreen: true,
             nodeId: id,
-            width: 128,
-            height: 128
-        });
+            width: Math.floor(this.width * dpr),
+            height: Math.floor(previewHeight * dpr)
+        };
+
+        // Use shared GL context if provided
+        if (sharedGL) {
+            options.sharedGL = sharedGL;
+        }
+
+        this.renderer = new ShaderPreview(canvas, videoElement, options);
         this.previewInstance = this.renderer; // For backwards compatibility
 
-        // Resize canvas to match initial node dimensions
-        this.resizeCanvas();
+        // Create display canvas for shared context rendering
+        if (sharedGL) {
+            this.displayCanvas = document.createElement('canvas');
+            this.displayCanvas.width = Math.floor(this.width * dpr);
+            this.displayCanvas.height = Math.floor(previewHeight * dpr);
+            this.displayCtx = this.displayCanvas.getContext('2d');
+        }
+
+        // Resize canvas to match initial node dimensions (only if not using shared context)
+        if (!sharedGL) {
+            this.resizeCanvas();
+        }
+    }
+
+    /**
+     * Get canvas to display - either direct canvas or copy from framebuffer
+     */
+    getDisplayCanvas() {
+        // Legacy path: direct canvas
+        if (this.renderer && this.renderer.canvas) {
+            return this.renderer.canvas;
+        }
+
+        // Shared context path: copy framebuffer to display canvas
+        if (this.renderer && this.renderer.framebuffer && this.displayCanvas) {
+            const gl = this.renderer.gl;
+            const fb = this.renderer.framebuffer;
+
+            // Bind framebuffer to read from
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fb.framebuffer);
+
+            // Read pixels from framebuffer
+            const width = this.renderer.width;
+            const height = this.renderer.height;
+            const pixels = new Uint8Array(width * height * 4);
+            gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+            // Unbind framebuffer
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+            // Create ImageData and put it on display canvas
+            const imageData = new ImageData(new Uint8ClampedArray(pixels), width, height);
+
+            // Resize display canvas if needed
+            if (this.displayCanvas.width !== width || this.displayCanvas.height !== height) {
+                this.displayCanvas.width = width;
+                this.displayCanvas.height = height;
+            }
+
+            // Put image data directly (we'll flip when drawing to node canvas)
+            this.displayCtx.putImageData(imageData, 0, 0);
+
+            return this.displayCanvas;
+        }
+
+        return null;
     }
 
     recalculateDimensions() {
@@ -37,12 +102,36 @@ export class PreviewNode extends Node {
     }
 
     resizeCanvas() {
-        // Resize the preview canvas to match node dimensions with device pixel ratio
+        // Resize the preview canvas/framebuffer to match node dimensions with device pixel ratio
         if (this.previewInstance) {
             const dpr = window.devicePixelRatio || 1;
             const previewHeight = this.height - this.bottomBarHeight;
-            this.previewInstance.canvas.width = this.width * dpr;
-            this.previewInstance.canvas.height = previewHeight * dpr;
+            const newWidth = Math.floor(this.width * dpr);
+            const newHeight = Math.floor(previewHeight * dpr);
+
+            if (this.previewInstance.canvas) {
+                // Legacy path: resize canvas
+                this.previewInstance.canvas.width = newWidth;
+                this.previewInstance.canvas.height = newHeight;
+            } else if (this.previewInstance.framebuffer) {
+                // Shared context path: recreate framebuffer with new size
+                const gl = this.previewInstance.gl;
+
+                // Delete old framebuffer
+                gl.deleteTexture(this.previewInstance.framebuffer.texture);
+                gl.deleteFramebuffer(this.previewInstance.framebuffer.framebuffer);
+
+                // Create new framebuffer with updated size
+                this.previewInstance.framebuffer = this.previewInstance.createFramebuffer(gl, newWidth, newHeight);
+                this.previewInstance.width = newWidth;
+                this.previewInstance.height = newHeight;
+
+                // Resize display canvas too
+                if (this.displayCanvas) {
+                    this.displayCanvas.width = newWidth;
+                    this.displayCanvas.height = newHeight;
+                }
+            }
         }
     }
 
@@ -111,7 +200,8 @@ export class PreviewNode extends Node {
         ctx.restore();
 
         // Draw preview content
-        if (this.renderer && this.renderer.canvas) {
+        const canvasToDraw = this.getDisplayCanvas();
+        if (canvasToDraw) {
             const previewHeight = this.height - this.bottomBarHeight;
             const borderRadius = 8;
 
@@ -127,8 +217,18 @@ export class PreviewNode extends Node {
             ctx.closePath();
             ctx.clip();
 
-            // Draw preview canvas filling clipped area
-            ctx.drawImage(this.renderer.canvas, this.x, this.y, this.width, previewHeight);
+            // Check if we need to flip (for framebuffer rendering)
+            if (this.displayCanvas && canvasToDraw === this.displayCanvas) {
+                // Flip vertically for WebGL framebuffer
+                ctx.save();
+                ctx.translate(this.x, this.y + previewHeight);
+                ctx.scale(1, -1);
+                ctx.drawImage(canvasToDraw, 0, 0, this.width, previewHeight);
+                ctx.restore();
+            } else {
+                // Draw normally for legacy canvas
+                ctx.drawImage(canvasToDraw, this.x, this.y, this.width, previewHeight);
+            }
 
             ctx.restore();
 
@@ -250,6 +350,8 @@ export class PreviewNode extends Node {
         const baseData = super.serialize();
         return {
             ...baseData,
+            width: this.width,
+            height: this.height,
             isBackground: this.isBackground || false
         };
     }

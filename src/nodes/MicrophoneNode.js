@@ -68,11 +68,6 @@ export class MicrophoneNode extends Node {
             this.isActive = true;
             this.error = null;
 
-            console.log('Microphone enabled with AudioWorklet processing');
-            console.log('Sample rate:', this.audioContext.sampleRate);
-            console.log('Base latency:', (this.audioContext.baseLatency * 1000).toFixed(1), 'ms');
-            console.log('Output latency:', (this.audioContext.outputLatency * 1000).toFixed(1), 'ms');
-            console.log('Worklet buffer size: 128 samples (~' + (128 / this.audioContext.sampleRate * 1000).toFixed(1) + 'ms)');
 
             return true;
 
