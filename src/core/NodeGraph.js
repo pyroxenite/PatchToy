@@ -1113,15 +1113,28 @@ export class NodeGraph {
                 // If not connected to anything, check if we should create a constant node
                 if (!connected) {
                     const inputDef = this.connectingFrom.node.inputs[this.connectingFrom.inputIndex];
-                    if (inputDef && this.canCreateConstantFor(inputDef.type)) {
-                        this.createConstantNodeForInput(
-                            this.connectingFrom.node,
-                            this.connectingFrom.inputIndex,
-                            inputDef.type,
-                            pos.x,
-                            pos.y
-                        );
-                        if (this.onGraphChanged) this.onGraphChanged();
+                    if (inputDef) {
+                        // Check if input has a specific defaultNode to create
+                        if (inputDef.defaultNode) {
+                            this.createDefaultNodeForInput(
+                                this.connectingFrom.node,
+                                this.connectingFrom.inputIndex,
+                                inputDef.defaultNode,
+                                pos.x,
+                                pos.y
+                            );
+                            if (this.onGraphChanged) this.onGraphChanged();
+                        } else if (this.canCreateConstantFor(inputDef.type)) {
+                            // Otherwise create a constant node for the type
+                            this.createConstantNodeForInput(
+                                this.connectingFrom.node,
+                                this.connectingFrom.inputIndex,
+                                inputDef.type,
+                                pos.x,
+                                pos.y
+                            );
+                            if (this.onGraphChanged) this.onGraphChanged();
+                        }
                     }
                 }
             } else {
@@ -1814,6 +1827,28 @@ export class NodeGraph {
             inputIndex
         ));
 
+    }
+
+    // Create a specific node type (from defaultNode attribute) and connect it to the input
+    createDefaultNodeForInput(targetNode, inputIndex, nodeType, dropX, dropY) {
+        // Position the node to the left of where we dropped
+        const nodeX = dropX - 100;
+        const nodeY = dropY - 40;
+
+        // Create the specified node
+        const newNode = this.addNode(nodeType, nodeX, nodeY);
+        if (!newNode) {
+            console.warn(`Failed to create default node of type: ${nodeType}`);
+            return;
+        }
+
+        // Connect it to the target input (assuming output at index 0)
+        this.connections.push(new Connection(
+            newNode,
+            0,
+            targetNode,
+            inputIndex
+        ));
     }
 
     serialize() {

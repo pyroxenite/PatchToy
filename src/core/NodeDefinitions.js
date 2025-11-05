@@ -1106,7 +1106,7 @@ export const TypeSystem = {
 /**
  * Helper to create node definitions from GLSL function strings
  */
-export function createNodeFromGLSL(name, glslCode) {
+export function createNodeFromGLSL(name, glslCode, metadata = null) {
     // Parse GLSL function signature
     // Example: "vec3 myFunction(vec2 uv, float time)"
     const funcMatch = glslCode.match(/(\w+)\s+(\w+)\s*\((.*?)\)/);
@@ -1122,7 +1122,21 @@ export function createNodeFromGLSL(name, glslCode) {
         const paramList = params.split(',').map(p => p.trim());
         for (const param of paramList) {
             const [type, name] = param.split(/\s+/);
-            inputs.push({ name, type, default: getDefaultValue(type) });
+            const inputDef = { name, type, default: getDefaultValue(type) };
+
+            // Check if metadata has additional info for this input (like defaultNode)
+            if (metadata && metadata.inputs && metadata.inputs[name]) {
+                const inputMetadata = metadata.inputs[name];
+                if (inputMetadata.defaultNode) {
+                    inputDef.defaultNode = inputMetadata.defaultNode;
+                }
+                // Override default if specified in metadata
+                if (inputMetadata.default) {
+                    inputDef.default = inputMetadata.default;
+                }
+            }
+
+            inputs.push(inputDef);
         }
     }
 

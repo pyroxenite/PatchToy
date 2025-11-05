@@ -527,7 +527,8 @@ class PatchToy {
                         name,
                         type,
                         displayName: inputMeta?.displayName || name,
-                        default: inputMeta?.default || null
+                        default: inputMeta?.default || null,
+                        defaultNode: inputMeta?.defaultNode || null
                     });
                 }
             }
@@ -539,11 +540,18 @@ class PatchToy {
         // Create the node definition
         NodeDefinitions[nodeName] = {
             category: metadata.category,
-            inputs: inputs.map(inp => ({
-                name: inp.displayName || inp.name,
-                type: inp.type,
-                paramName: inp.name  // Store original param name for function calls
-            })),
+            inputs: inputs.map(inp => {
+                const inputDef = {
+                    name: inp.displayName || inp.name,
+                    type: inp.type,
+                    paramName: inp.name  // Store original param name for function calls
+                };
+                // Include defaultNode if specified
+                if (inp.defaultNode) {
+                    inputDef.defaultNode = inp.defaultNode;
+                }
+                return inputDef;
+            }),
             outputs: [{ name: '', type: mainFunction.returnType }],
             customGLSL: finalCode,
             isCustomNode: true,

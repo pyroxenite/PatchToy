@@ -1,5 +1,4 @@
 # TODO
- - Camera may be broken
  - Feedback node may be broken
  - Swizzles sometimes don't have an effect on the produced GLSL code (check if it's still the case)
  - Fullscreen works but it matches the size of the window and not the size of the screen

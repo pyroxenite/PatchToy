@@ -151,21 +151,23 @@ export class GLSLCommentParser {
 
     /**
      * Process @input directive
-     * Format: paramName "DisplayName" default="expression"
+     * Format: paramName "DisplayName" default="expression" defaultNode="NodeType"
      */
     static processInputDirective(content, metadata) {
-        // Match: paramName "DisplayName" default="expression"
-        // or: paramName "DisplayName"
-        const match = content.match(/(\w+)\s+"([^"]+)"(?:\s+default\s*=\s*"([^"]+)")?/);
+        // Match: paramName "DisplayName" default="expression" defaultNode="NodeType"
+        // Both default and defaultNode are optional and can be used together
+        const match = content.match(/(\w+)\s+"([^"]+)"(?:\s+default\s*=\s*"([^"]+)")?(?:\s+defaultNode\s*=\s*"([^"]+)")?/);
 
         if (match) {
             const paramName = match[1];
             const displayName = match[2];
             const defaultValue = match[3] || null;
+            const defaultNode = match[4] || null;
 
             metadata.inputs[paramName] = {
                 displayName,
-                default: defaultValue
+                default: defaultValue,
+                defaultNode: defaultNode
             };
         }
     }
@@ -219,6 +221,30 @@ export class GLSLCommentParser {
     }
 
     /**
+     * Prettify parameter name for display
+     * Examples:
+     * - "position" → "Position"
+     * - "pivot_point" → "Pivot Point"
+     * - "waveLength" → "Wave Length"
+     * - "uv" → "UV"
+     */
+    static prettifyParamName(name) {
+        // Special cases
+        if (name === 'uv') return 'UV';
+
+        // Convert camelCase to space-separated: "waveLength" → "wave Length"
+        let result = name.replace(/([a-z])([A-Z])/g, '$1 $2');
+
+        // Convert snake_case to space-separated: "pivot_point" → "pivot point"
+        result = result.replace(/_/g, ' ');
+
+        // Capitalize first letter of each word
+        result = result.replace(/\b\w/g, char => char.toUpperCase());
+
+        return result;
+    }
+
+    /**
      * Generate default magic comments for GLSL code without any
      * @param {string} glslCode - The GLSL code
      * @returns {string} Code with generated magic comments prepended
@@ -256,7 +282,8 @@ export class GLSLCommentParser {
 
         // Add input directives
         for (const param of params) {
-            comment += ` * @input ${param.name} "${param.name}"\n`;
+            const prettyName = this.prettifyParamName(param.name);
+            comment += ` * @input ${param.name} "${prettyName}"\n`;
         }
 
         comment += ` * \n * @description\n`;
