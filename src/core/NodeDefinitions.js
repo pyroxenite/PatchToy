@@ -419,9 +419,9 @@ export const NodeDefinitions = {
     },
 
     // ===== STRUCT NODES =====
-    'Camera': {
+    'CameraObject': {
         category: 'struct',
-        description: 'Create a camera with position, target, and field of view',
+        description: 'Create a Camera Object with position, target, and field of view',
         inputs: [
             { name: 'position', type: 'vec3', default: 'vec3(0.0, 0.0, 5.0)' },
             { name: 'target', type: 'vec3', default: 'vec3(0.0, 0.0, 0.0)' },
