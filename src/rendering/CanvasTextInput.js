@@ -10,7 +10,7 @@ export class CanvasTextInput {
         this.width = width;
         this.height = height;
         this.value = String(initialValue);
-        this.type = type;  // 'float' or 'int'
+        this.type = type;  // 'float', 'int', or 'text'
         this.focused = false;
         this.cursorPos = this.value.length;
         this.cursorVisible = true;
@@ -19,7 +19,7 @@ export class CanvasTextInput {
         this.selectionEnd = -1;
         this.onChange = null;
 
-        // Drag-to-scrub
+        // Drag-to-scrub (only for numeric types)
         this.isDragging = false;
         this.dragStartX = 0;
         this.dragStartValue = 0;
@@ -42,8 +42,13 @@ export class CanvasTextInput {
         this.selectionStart = -1;
         this.selectionEnd = -1;
 
-        // Validate and format number
-        if (this.type === 'int') {
+        // Validate and format based on type
+        if (this.type === 'text') {
+            // No validation for text, just trigger onChange
+            if (this.onChange) {
+                this.onChange(this.value);
+            }
+        } else if (this.type === 'int') {
             const num = parseInt(this.value);
             if (!isNaN(num)) {
                 this.value = String(num);
@@ -64,6 +69,7 @@ export class CanvasTextInput {
 
     startDrag(mouseX) {
         if (this.focused) return false;  // Don't drag when editing
+        if (this.type === 'text') return false;  // No dragging for text fields
         this.isDragging = true;
         this.dragStartX = mouseX;
         const num = this.type === 'int' ? parseInt(this.value) : parseFloat(this.value);
@@ -186,12 +192,21 @@ export class CanvasTextInput {
             return true;
         }
 
+        // Paste - don't handle here, let paste event handle it
+        if ((e.ctrlKey || e.metaKey) && key === 'v') {
+            // Don't prevent default - let paste event fire
+            return false;
+        }
+
         // Handle character input
         if (key.length === 1) {
             e.preventDefault();
 
-            // For int type: only allow numbers and minus sign (no decimal point)
-            if (this.type === 'int') {
+            // Validate input based on type
+            if (this.type === 'text') {
+                // Allow all characters for text type
+            } else if (this.type === 'int') {
+                // For int type: only allow numbers and minus sign (no decimal point)
                 if (!/^[0-9\-]$/.test(key)) {
                     return true;
                 }
@@ -224,6 +239,56 @@ export class CanvasTextInput {
         return false;
     }
 
+    async handlePaste(e) {
+        if (!this.focused) return false;
+
+        e.preventDefault();
+
+        // Get pasted text from clipboard
+        let pastedText = '';
+        if (e.clipboardData) {
+            pastedText = e.clipboardData.getData('text');
+        } else {
+            // Fallback for older browsers
+            try {
+                pastedText = await navigator.clipboard.readText();
+            } catch (err) {
+                console.warn('Failed to read clipboard:', err);
+                return true;
+            }
+        }
+
+        if (!pastedText) return true;
+
+        // For numeric types, validate the pasted text
+        if (this.type === 'int') {
+            // Only keep valid characters for int
+            pastedText = pastedText.replace(/[^0-9\-]/g, '');
+        } else if (this.type === 'float') {
+            // Only keep valid characters for float
+            pastedText = pastedText.replace(/[^0-9.\-]/g, '');
+        }
+        // For 'text' type, allow all characters
+
+        // Delete selection if exists
+        if (this.selectionStart >= 0) {
+            const start = Math.min(this.selectionStart, this.selectionEnd);
+            const end = Math.max(this.selectionStart, this.selectionEnd);
+            this.value = this.value.slice(0, start) + pastedText + this.value.slice(end);
+            this.cursorPos = start + pastedText.length;
+            this.selectionStart = -1;
+            this.selectionEnd = -1;
+        } else {
+            // Insert at cursor
+            this.value = this.value.slice(0, this.cursorPos) + pastedText + this.value.slice(this.cursorPos);
+            this.cursorPos += pastedText.length;
+        }
+
+        this.cursorVisible = true;
+        this.cursorBlinkTime = 0;
+        return true;
+    }
+
     update(dt) {
         if (!this.focused) return;
 
@@ -238,12 +303,14 @@ export class CanvasTextInput {
     draw(ctx) {
         // Background
         ctx.fillStyle = this.focused ? '#1e1e1e' : '#2d2d2d';
-        ctx.fillRect(this.x, this.y, this.width, this.height);
+        ctx.beginPath();
+        ctx.roundRect(this.x, this.y, this.width, this.height, 3);
+        ctx.fill();
 
         // Border
         ctx.strokeStyle = this.focused ? '#007acc' : '#444';
         ctx.lineWidth = 1;
-        ctx.strokeRect(this.x, this.y, this.width, this.height);
+        ctx.stroke();
 
         // Clip text to input bounds
         ctx.save();

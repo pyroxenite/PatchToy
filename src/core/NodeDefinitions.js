@@ -329,6 +329,37 @@ export const NodeDefinitions = {
         inputs: [{ name: 'uv', type: 'vec2', default: 'gl_FragCoord.xy / u_resolution' }],
         outputs: [{ name: 'color', type: 'vec4' }],
         uniforms: ['u_camera', 'u_resolution'],
+        isCameraNode: true,
+        glsl: (node, inputs) => {
+            return {
+                code: `vec4 ${node.varName} = texture(u_camera, ${inputs.uv});`,
+                output: node.varName
+            };
+        }
+    },
+
+    'ScreenCapture': {
+        category: 'input',
+        inputs: [{ name: 'uv', type: 'vec2', default: 'gl_FragCoord.xy / u_resolution' }],
+        outputs: [{ name: 'color', type: 'vec4' }],
+        uniforms: ['u_camera', 'u_resolution'],
+        isScreenCaptureNode: true,
+        glsl: (node, inputs) => {
+            return {
+                code: `vec4 ${node.varName} = texture(u_camera, ${inputs.uv});`,
+                output: node.varName
+            };
+        }
+    },
+
+    'VideoURL': {
+        category: 'input',
+        inputs: [{ name: 'uv', type: 'vec2', default: 'gl_FragCoord.xy / u_resolution' }],
+        outputs: [{ name: 'color', type: 'vec4' }],
+        uniforms: ['u_camera', 'u_resolution'],
+        data: { url: '', loop: true, autoplay: true },
+        hasInputFields: true,
+        isVideoURLNode: true,
         glsl: (node, inputs) => {
             return {
                 code: `vec4 ${node.varName} = texture(u_camera, ${inputs.uv});`,
@@ -351,6 +382,30 @@ export const NodeDefinitions = {
                     type: 'float',
                     value: 0.0,
                     microphoneNodeId: node.id
+                }]
+            };
+        }
+    },
+
+    'MIDI CC': {
+        category: 'input',
+        inputs: [],
+        outputs: [{ name: 'value', type: 'float' }],
+        data: { channel: 1, ccNumber: 1, smoothing: 0.0 },
+        hasInputFields: true,
+        fieldType: 'float',
+        isMidiCCNode: true,
+        glsl: (node) => {
+            // Use the node's current smoothed value (will be restored from save file)
+            const currentValue = node.smoothedValue || 0.0;
+            return {
+                code: `float ${node.varName} = ${node.varName}_value;`,
+                output: node.varName,
+                uniforms: [{
+                    name: `${node.varName}_value`,
+                    type: 'float',
+                    value: currentValue,
+                    midiCCNodeId: node.id
                 }]
             };
         }
@@ -835,13 +890,39 @@ export const NodeDefinitions = {
     'Add': {
         category: 'math',
         inputs: [
-            { name: 'a', type: 'vec3', default: 'vec3(0.0)' },
-            { name: 'b', type: 'vec3', default: 'vec3(0.0)' }
+            { name: 'a', type: 'any', default: '0.0' },
+            { name: 'b', type: 'any', default: '0.0' }
         ],
-        outputs: [{ name: 'result', type: 'vec3' }],
+        outputs: [{ name: 'result', type: 'any' }],
+        validateTypes: (node, inputTypes) => {
+            const typeA = inputTypes.a;
+            const typeB = inputTypes.b;
+
+            // If both disconnected, default to float
+            if (!typeA && !typeB) {
+                return { valid: true, outputType: 'float' };
+            }
+
+            // If one is disconnected, use the other's type
+            if (!typeA) return { valid: true, outputType: typeB };
+            if (!typeB) return { valid: true, outputType: typeA };
+
+            // Both connected - must be same type
+            const validTypes = ['float', 'vec2', 'vec3', 'vec4'];
+            if (!validTypes.includes(typeA) || !validTypes.includes(typeB)) {
+                return { valid: false, error: `Add only supports float, vec2, vec3, vec4. Got ${typeA} and ${typeB}` };
+            }
+
+            if (typeA !== typeB) {
+                return { valid: false, error: `Both inputs must be the same type. Got ${typeA} and ${typeB}` };
+            }
+
+            return { valid: true, outputType: typeA };
+        },
         glsl: (node, inputs) => {
+            const outputType = node.resolvedOutputType || 'float';
             return {
-                code: `vec3 ${node.varName} = ${inputs.a} + ${inputs.b};`,
+                code: `${outputType} ${node.varName} = ${inputs.a || '0.0'} + ${inputs.b || '0.0'};`,
                 output: node.varName
             };
         }
@@ -850,13 +931,33 @@ export const NodeDefinitions = {
     'Subtract': {
         category: 'math',
         inputs: [
-            { name: 'a', type: 'vec3', default: 'vec3(0.0)' },
-            { name: 'b', type: 'vec3', default: 'vec3(0.0)' }
+            { name: 'a', type: 'any', default: '0.0' },
+            { name: 'b', type: 'any', default: '0.0' }
         ],
-        outputs: [{ name: 'result', type: 'vec3' }],
+        outputs: [{ name: 'result', type: 'any' }],
+        validateTypes: (node, inputTypes) => {
+            const typeA = inputTypes.a;
+            const typeB = inputTypes.b;
+
+            if (!typeA && !typeB) return { valid: true, outputType: 'float' };
+            if (!typeA) return { valid: true, outputType: typeB };
+            if (!typeB) return { valid: true, outputType: typeA };
+
+            const validTypes = ['float', 'vec2', 'vec3', 'vec4'];
+            if (!validTypes.includes(typeA) || !validTypes.includes(typeB)) {
+                return { valid: false, error: `Subtract only supports float, vec2, vec3, vec4. Got ${typeA} and ${typeB}` };
+            }
+
+            if (typeA !== typeB) {
+                return { valid: false, error: `Both inputs must be the same type. Got ${typeA} and ${typeB}` };
+            }
+
+            return { valid: true, outputType: typeA };
+        },
         glsl: (node, inputs) => {
+            const outputType = node.resolvedOutputType || 'float';
             return {
-                code: `vec3 ${node.varName} = ${inputs.a} - ${inputs.b};`,
+                code: `${outputType} ${node.varName} = ${inputs.a || '0.0'} - ${inputs.b || '0.0'};`,
                 output: node.varName
             };
         }
@@ -865,13 +966,33 @@ export const NodeDefinitions = {
     'Multiply': {
         category: 'math',
         inputs: [
-            { name: 'a', type: 'vec3', default: 'vec3(1.0)' },
-            { name: 'b', type: 'vec3', default: 'vec3(1.0)' }
+            { name: 'a', type: 'any', default: '1.0' },
+            { name: 'b', type: 'any', default: '1.0' }
         ],
-        outputs: [{ name: 'result', type: 'vec3' }],
+        outputs: [{ name: 'result', type: 'any' }],
+        validateTypes: (node, inputTypes) => {
+            const typeA = inputTypes.a;
+            const typeB = inputTypes.b;
+
+            if (!typeA && !typeB) return { valid: true, outputType: 'float' };
+            if (!typeA) return { valid: true, outputType: typeB };
+            if (!typeB) return { valid: true, outputType: typeA };
+
+            const validTypes = ['float', 'vec2', 'vec3', 'vec4'];
+            if (!validTypes.includes(typeA) || !validTypes.includes(typeB)) {
+                return { valid: false, error: `Multiply only supports float, vec2, vec3, vec4. Got ${typeA} and ${typeB}` };
+            }
+
+            if (typeA !== typeB) {
+                return { valid: false, error: `Both inputs must be the same type. Got ${typeA} and ${typeB}` };
+            }
+
+            return { valid: true, outputType: typeA };
+        },
         glsl: (node, inputs) => {
+            const outputType = node.resolvedOutputType || 'float';
             return {
-                code: `vec3 ${node.varName} = ${inputs.a} * ${inputs.b};`,
+                code: `${outputType} ${node.varName} = ${inputs.a || '1.0'} * ${inputs.b || '1.0'};`,
                 output: node.varName
             };
         }
@@ -880,13 +1001,33 @@ export const NodeDefinitions = {
     'Divide': {
         category: 'math',
         inputs: [
-            { name: 'a', type: 'vec3', default: 'vec3(1.0)' },
-            { name: 'b', type: 'vec3', default: 'vec3(1.0)' }
+            { name: 'a', type: 'any', default: '1.0' },
+            { name: 'b', type: 'any', default: '1.0' }
         ],
-        outputs: [{ name: 'result', type: 'vec3' }],
+        outputs: [{ name: 'result', type: 'any' }],
+        validateTypes: (node, inputTypes) => {
+            const typeA = inputTypes.a;
+            const typeB = inputTypes.b;
+
+            if (!typeA && !typeB) return { valid: true, outputType: 'float' };
+            if (!typeA) return { valid: true, outputType: typeB };
+            if (!typeB) return { valid: true, outputType: typeA };
+
+            const validTypes = ['float', 'vec2', 'vec3', 'vec4'];
+            if (!validTypes.includes(typeA) || !validTypes.includes(typeB)) {
+                return { valid: false, error: `Divide only supports float, vec2, vec3, vec4. Got ${typeA} and ${typeB}` };
+            }
+
+            if (typeA !== typeB) {
+                return { valid: false, error: `Both inputs must be the same type. Got ${typeA} and ${typeB}` };
+            }
+
+            return { valid: true, outputType: typeA };
+        },
         glsl: (node, inputs) => {
+            const outputType = node.resolvedOutputType || 'float';
             return {
-                code: `vec3 ${node.varName} = ${inputs.a} / ${inputs.b};`,
+                code: `${outputType} ${node.varName} = ${inputs.a || '1.0'} / ${inputs.b || '1.0'};`,
                 output: node.varName
             };
         }

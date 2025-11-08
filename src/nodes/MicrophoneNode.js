@@ -23,6 +23,27 @@ export class MicrophoneNode extends Node {
         this.error = null;
     }
 
+    // Override handleMouseDown to auto-enable microphone on any click
+    handleMouseDown(x, y, event) {
+        // Auto-enable microphone if not already enabled (uses user gesture from this click)
+        if (!this.isActive) {
+            console.log('[Microphone Node] Auto-enabling microphone from user gesture...');
+            this.enable().then(success => {
+                if (success) {
+                    const btn = document.getElementById('micBtn');
+                    if (btn) {
+                        btn.style.background = '#007acc';
+                        btn.style.borderColor = '#007acc';
+                        btn.title = 'Microphone Active';
+                    }
+                }
+            });
+        }
+
+        // Call parent to handle normal node interaction
+        return super.handleMouseDown ? super.handleMouseDown(x, y, event) : null;
+    }
+
     /**
      * Initialize microphone access
      */

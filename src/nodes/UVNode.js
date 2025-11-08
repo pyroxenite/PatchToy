@@ -170,19 +170,18 @@ export class UVNode extends Node {
 
     getOutputPortPosition(index) {
         const modeSelectorHeight = 30;
-        const topOffset = 20 + modeSelectorHeight;
+        const topOffset = modeSelectorHeight;
         const portSpacing = (this.height - topOffset) / (this.outputs.length + 1);
         return {
             x: this.x + this.width,
-            y: this.y + topOffset + portSpacing * (index + 1)
+            y: this.y + this.height / 2
         };
     }
 
     updateDimensions() {
         const baseHeight = 30;
         const modeSelectorHeight = 30;
-        const inputHeight = Math.max(this.inputs.length, this.outputs.length) * 25;
 
-        this.height = Math.max(60, baseHeight + modeSelectorHeight + inputHeight);
+        this.height = Math.max(60, baseHeight + modeSelectorHeight);
     }
 }

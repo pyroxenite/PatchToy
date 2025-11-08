@@ -5,6 +5,7 @@ export class ConstantNode extends Node {
     constructor(id, type, x, y) {
         super(id, type, x, y);
         this.width = 75; // Half the default width
+        this.skipParentTextInputDraw = true; // We'll handle text input drawing ourselves
     }
 
     rebuildTextInputs() {
@@ -42,9 +43,9 @@ export class ConstantNode extends Node {
                     if (!isNaN(numValue)) {
                         this.data[field] = numValue;
 
-                        // If in uniform mode, just update uniforms without recompiling
-                        if (this.data.useUniform && this.graph && this.graph.onUniformValueChanged) {
-                            this.graph.onUniformValueChanged(this);
+                        // If in uniform mode, update the uniform registry
+                        if (this.data.useUniform) {
+                            this.updateUniformRegistry();
                         } else if (this.graph && this.graph.onGraphChanged) {
                             // Otherwise recompile (constant mode with inline values)
                             this.graph.onGraphChanged();
@@ -81,10 +82,34 @@ export class ConstantNode extends Node {
         // Call parent draw
         super.draw(ctx, options);
 
+        // Draw text inputs (only for unconnected inputs)
+        if (this.hasInputFields && this.textInputs) {
+            for (const field of Object.keys(this.data)) {
+                const input = this.textInputs[field];
+                if (input && !this.isInputConnected(field)) {
+                    input.draw(ctx);
+                }
+            }
+        }
+
         // Draw boolean toggle buttons
         if (this.hasInputFields && this.fieldType === 'bool') {
             this.drawBooleanToggles(ctx);
         }
+    }
+
+    // Check if a specific input field is connected
+    isInputConnected(fieldName) {
+        if (!this.graph || !this.inputs) return false;
+
+        // Find the input index for this field name
+        const inputIndex = this.inputs.findIndex(inp => inp.name === fieldName);
+        if (inputIndex === -1) return false;
+
+        // Check if there's a connection to this input
+        return this.graph.connections.some(conn =>
+            conn.toNode === this && conn.toInput === inputIndex
+        );
     }
 
     drawBooleanToggles(ctx) {
@@ -149,8 +174,8 @@ export class ConstantNode extends Node {
                         this.data[field] = !this.data[field];
 
                         // Trigger graph update
-                        if (this.data.useUniform && this.graph && this.graph.onUniformValueChanged) {
-                            this.graph.onUniformValueChanged(this);
+                        if (this.data.useUniform) {
+                            this.updateUniformRegistry();
                         } else if (this.graph && this.graph.onGraphChanged) {
                             this.graph.onGraphChanged();
                         }
@@ -183,6 +208,57 @@ export class ConstantNode extends Node {
             return null;
         }
         return super.getInputPortPosition(index);
+    }
+
+    /**
+     * Update the uniform registry with this node's current values
+     * Called when values change in uniform mode
+     *
+     * Note: This finds the uniform by looking up what name this node
+     * was compiled with (using the nodeIdRemap), then updates just the value.
+     */
+    updateUniformRegistry() {
+        if (!this.graph || !this.graph.uniformRegistry) {
+            return;
+        }
+
+        // Find all uniforms that belong to this node (by sourceNodeId)
+        const allUniforms = this.graph.uniformRegistry.getAllUniforms();
+        for (const uniform of allUniforms) {
+            if (uniform.sourceNodeId === this.id) {
+                // Update the value for this uniform
+                const glslResult = this.definition.glsl(this, {});
+                if (glslResult && glslResult.uniforms && glslResult.uniforms.length > 0) {
+                    // Get the new value
+                    const newValue = glslResult.uniforms[0].value;
+                    console.log('Updating uniform', uniform.name, 'for node', this.id, 'to value:', newValue);
+
+                    // Update in registry (using the REMAPPED name)
+                    this.graph.uniformRegistry.registerUniform(
+                        uniform.name,  // Use the remapped name from compilation
+                        uniform.type,
+                        newValue,
+                        this
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Unregister this node's uniforms (called when switching to constant mode or deleting)
+     */
+    unregisterUniforms() {
+        if (!this.graph || !this.graph.uniformRegistry || !this.definition) {
+            return;
+        }
+
+        const glslResult = this.definition.glsl(this, {});
+        if (glslResult && glslResult.uniforms && glslResult.uniforms.length > 0) {
+            for (const uniform of glslResult.uniforms) {
+                this.graph.uniformRegistry.unregisterUniform(uniform.name);
+            }
+        }
     }
 
     updateDimensions() {

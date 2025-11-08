@@ -19,7 +19,11 @@ export class ShaderCompiler {
         this.codeToNodeMap = new Map(); // Maps line number to node ID
         this.usedStructs = new Set(); // Track which struct types are used
         this.functionCounter = 0; // Counter for renamed functions
-        this.nodeIdRemap = new Map(); // Maps old node IDs to compact sequential IDs
+        // NOTE: Do NOT reset nodeIdRemap here - it's injected by CompilationManager
+        // and must persist across all compilation passes in a single cycle
+        if (!this.nodeIdRemap) {
+            this.nodeIdRemap = new Map(); // Only initialize if not already set
+        }
     }
 
     // Renumber all nodes to have compact sequential IDs starting from 0
@@ -41,7 +45,8 @@ export class ShaderCompiler {
 
     compile(nodeGraph) {
         this.reset();
-        this.renumberNodes(nodeGraph);
+        // Note: nodeIdRemap is now injected by CompilationManager BEFORE any compilation
+        // DO NOT call renumberNodes() here - it would overwrite the global mapping
 
         // Find the output node
         const outputNode = nodeGraph.nodes.find(node => node.definition?.isOutputNode);
@@ -55,14 +60,16 @@ export class ShaderCompiler {
 
     compileForPreviewNode(previewNode, nodeGraph) {
         this.reset();
-        this.renumberNodes(nodeGraph);
+        // Note: nodeIdRemap is now injected by CompilationManager BEFORE any compilation
+        // DO NOT call renumberNodes() here - it would overwrite the global mapping
         return this.compileFromOutputNode(previewNode, nodeGraph);
     }
 
     compileFromNodeAsOutput(node, outputIndex, nodeGraph) {
         // Compile starting from a specific node and output as if it were the final output
         this.reset();
-        this.renumberNodes(nodeGraph);
+        // Note: nodeIdRemap is now injected by CompilationManager BEFORE any compilation
+        // DO NOT call renumberNodes() here - it would overwrite the global mapping
 
         try {
             // Compile the node and its dependencies
@@ -92,14 +99,24 @@ export class ShaderCompiler {
             // Build the final shader
             const fragmentShader = this.buildFragmentShader(finalColor);
 
-            // Extract uniform values
+            // Extract uniform values - create completely new objects to avoid shared references
             const uniformValues = Array.from(this.uniforms)
-                .filter(u => typeof u === 'object' && (u.value !== undefined || u.feedbackNodeId !== undefined || u.microphoneNodeId !== undefined))
+                .filter(u => typeof u === 'object' && (u.value !== undefined || u.feedbackNodeId !== undefined || u.microphoneNodeId !== undefined || u.midiCCNodeId !== undefined))
                 .map(u => {
                     const uniform = { name: u.name, type: u.type };
-                    if (u.value !== undefined) uniform.value = u.value;
-                    if (u.feedbackNodeId !== undefined) uniform.feedbackNodeId = u.feedbackNodeId;
-                    if (u.microphoneNodeId !== undefined) uniform.microphoneNodeId = u.microphoneNodeId;
+                    if (u.value !== undefined) {
+                        // Deep copy array values to avoid shared references
+                        uniform.value = Array.isArray(u.value) ? [...u.value] : u.value;
+                    }
+                    if (u.feedbackNodeId !== undefined) {
+                        uniform.feedbackNodeId = u.feedbackNodeId;
+                    }
+                    if (u.microphoneNodeId !== undefined) {
+                        uniform.microphoneNodeId = u.microphoneNodeId;
+                    }
+                    if (u.midiCCNodeId !== undefined) {
+                        uniform.midiCCNodeId = u.midiCCNodeId;
+                    }
                     return uniform;
                 });
 
@@ -126,74 +143,43 @@ export class ShaderCompiler {
     }
 
     compileFromOutputNode(outputNode, nodeGraph) {
-        try {
-            // Find what's connected to the output
-            const outputConnection = nodeGraph.connections.find(
-                conn => conn.toNode === outputNode
-            );
+        // Find what's connected to the output node
+        const outputConnection = nodeGraph.connections.find(
+            conn => conn.toNode === outputNode
+        );
 
-            let finalColor = 'vec4(1.0, 0.0, 1.0, 1.0)'; // Default magenta
-
-            if (outputConnection) {
-                // Compile the graph starting from the output
-                const result = this.compileNode(outputConnection.fromNode, nodeGraph);
-
-                if (result) {
-                    const sourceNode = outputConnection.fromNode;
-                    const sourceOutputIndex = outputConnection.fromOutput;
-
-                    // Check if source node has multiple independent outputs (like ForLoopEnd)
-                    let sourceValue;
-                    if (sourceNode.outputVars) {
-                        const outputPortName = sourceNode.outputs[sourceOutputIndex].name;
-                        sourceValue = sourceNode.outputVars[outputPortName];
-                        if (!sourceValue) {
-                            console.error(`Output '${outputPortName}' not found in outputVars for node ${sourceNode.id}`);
-                            sourceValue = result.output; // Fallback
-                        }
-                    } else {
-                        sourceValue = result.output;
-                    }
-
-                    const sourceType = sourceNode.outputs[sourceOutputIndex].type;
-                    finalColor = TypeSystem.convertCode(sourceValue, sourceType, 'vec4');
-                }
+        if (!outputConnection) {
+            // No connection - return default magenta shader
+            try {
+                const finalColor = 'vec4(1.0, 0.0, 1.0, 1.0)';
+                const fragmentShader = this.buildFragmentShader(finalColor);
+                return {
+                    vertex: this.getVertexShader(),
+                    fragment: fragmentShader,
+                    uniformValues: [],
+                    errors: this.errors,
+                    warnings: this.warnings,
+                    errorNodeId: this.errorNodeId
+                };
+            } catch (error) {
+                this.addError(`Compilation failed: ${error.message}`);
+                return {
+                    vertex: this.getVertexShader(),
+                    fragment: null,
+                    uniformValues: [],
+                    errors: this.errors,
+                    warnings: this.warnings,
+                    errorNodeId: this.errorNodeId
+                };
             }
-
-            // Build the final shader
-            const fragmentShader = this.buildFragmentShader(finalColor);
-
-            // Extract uniform values from uniforms Set
-            const uniformValues = Array.from(this.uniforms)
-                .filter(u => typeof u === 'object' && (u.value !== undefined || u.feedbackNodeId !== undefined || u.microphoneNodeId !== undefined))
-                .map(u => {
-                    const uniform = { name: u.name, type: u.type };
-                    if (u.value !== undefined) uniform.value = u.value;
-                    if (u.feedbackNodeId !== undefined) uniform.feedbackNodeId = u.feedbackNodeId;
-                    if (u.microphoneNodeId !== undefined) uniform.microphoneNodeId = u.microphoneNodeId;
-                    return uniform;
-                });
-
-            return {
-                vertex: this.getVertexShader(),
-                fragment: fragmentShader,
-                uniformValues: uniformValues,
-                errors: this.errors,
-                warnings: this.warnings,
-                errorNodeId: this.errorNodeId
-            };
-
-        } catch (error) {
-            this.addError(`Compilation failed: ${error.message}`);
-            return {
-                vertex: this.getVertexShader(),
-                fragment: null,
-                uniformValues: [],
-                errors: this.errors,
-                warnings: this.warnings,
-                errorNodeId: this.errorNodeId
-            };
         }
+
+        // Delegate to compileFromNodeAsOutput - this unifies all compilation logic
+        return this.compileFromNodeAsOutput(
+            outputConnection.fromNode,
+            outputConnection.fromOutput,
+            nodeGraph
+        );
     }
 
     compileNode(node, nodeGraph) {
@@ -1023,6 +1009,11 @@ void main() {
             // Get all nodes connected to this node's inputs
             for (const conn of nodeGraph.connections) {
                 if (conn.toNode === node) {
+                    // Skip connections TO feedback nodes - they break cycles by design
+                    if (conn.toNode.isFeedbackNode) {
+                        continue;
+                    }
+
                     if (!visited.has(conn.fromNode.id)) {
                         if (dfs(conn.fromNode)) return true;
                     } else if (recursionStack.has(conn.fromNode.id)) {

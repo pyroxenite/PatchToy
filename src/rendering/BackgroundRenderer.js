@@ -5,11 +5,14 @@ import { ShaderPreview } from './ShaderPreview.js';
  * Uses a separate canvas positioned behind the node canvas with CSS layering
  */
 export class BackgroundRenderer {
-    constructor(nodeCanvas, videoElement) {
+    constructor(nodeCanvas, videoElement, sharedGL = null, uniformRegistry = null) {
         this.nodeCanvas = nodeCanvas;
         this.videoElement = videoElement;
+        this.sharedGL = sharedGL;
+        this.uniformRegistry = uniformRegistry;
         this.activePreviewNode = null;
         this.shaderPreview = null;
+        this.graph = null; // Will be set from NodeGraph
 
         // Create background canvas and position it behind the node canvas
         this.canvas = document.createElement('canvas');
@@ -60,8 +63,13 @@ export class BackgroundRenderer {
                 if (!this.shaderPreview) {
                     this.updateCanvasSize(); // Ensure size is correct
                     this.shaderPreview = new ShaderPreview(this.canvas, this.videoElement, {
-                        offscreen: false
+                        offscreen: false,
+                        uniformRegistry: this.uniformRegistry
                     });
+                    // Set graph reference so it can find video nodes
+                    if (this.graph) {
+                        this.shaderPreview.graph = this.graph;
+                    }
                 }
 
                 // Load the current shader from the preview node if it has one

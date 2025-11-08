@@ -78,9 +78,11 @@ export class Node {
         ctx.roundRect(this.x, this.y, this.width, this.height, 8);
         ctx.stroke();
 
-        // Normal node header (textBaseline inherited from context - should be 'alphabetic' from main.js)
+        // Normal node header
         ctx.fillStyle = '#ffffff';
-        ctx.font = '12px bold "Pixeloid Sans"';;
+        ctx.font = '12px bold "Pixeloid Sans"';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
         // Use displayTitle from definition if available (for custom nodes), otherwise use type
         const displayName = this.definition?.displayTitle || this.type;
         ctx.fillText(displayName, this.x + 10, this.y + 18);
@@ -144,8 +146,8 @@ export class Node {
             }
         }
 
-        // Draw text inputs
-        if (this.hasInputFields && this.textInputs) {
+        // Draw text inputs (unless subclass handles it)
+        if (this.hasInputFields && this.textInputs && !this.skipParentTextInputDraw) {
             for (const field of Object.keys(this.data)) {
                 const input = this.textInputs[field];
                 if (input) {
@@ -398,10 +400,32 @@ export class Node {
             const wasUniform = this.data.useUniform;
             this.data.useUniform = !this.data.useUniform;
 
-            // If switching TO uniform mode, disconnect all inputs
+            // If switching TO uniform mode, disconnect all inputs and register uniforms
             if (!wasUniform && this.data.useUniform && this.graph) {
                 this.graph.connections = this.graph.connections.filter(conn => conn.toNode !== this);
                 console.log('Disconnected inputs when switching to uniform mode');
+
+                // Register uniforms if this is a constant node
+                if (this.updateUniformRegistry) {
+                    this.updateUniformRegistry();
+                }
+
+                // Trigger recompilation to add uniform to shader
+                if (this.graph.onGraphChanged) {
+                    this.graph.onGraphChanged();
+                }
+            }
+
+            // If switching FROM uniform mode, unregister uniforms
+            if (wasUniform && !this.data.useUniform && this.graph) {
+                if (this.unregisterUniforms) {
+                    this.unregisterUniforms();
+                }
+
+                // Trigger recompilation to remove uniform from shader
+                if (this.graph.onGraphChanged) {
+                    this.graph.onGraphChanged();
+                }
             }
 
             return true;

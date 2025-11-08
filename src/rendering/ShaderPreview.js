@@ -4,6 +4,7 @@ export class ShaderPreview {
         this.isOffscreen = options.offscreen || false;
         this.nodeId = options.nodeId || null;
         this.canManageCamera = !this.isOffscreen; // Only main preview manages camera
+        this.uniformRegistry = options.uniformRegistry || null; // Centralized uniform management
 
         // Use shared GL context if provided, otherwise create own (for backwards compatibility)
         if (options.sharedGL) {
@@ -217,20 +218,34 @@ export class ShaderPreview {
     }
 
     updateCameraTexture() {
+        // Try to find an active video source node
+        let videoElement = this.videoElement;
+
+        // If we have a graph context, try to find active video source nodes
+        if (this.graph) {
+            const activeVideoNode = this.graph.nodes.find(n =>
+                (n.isCameraNode || n.isScreenCaptureNode || n.isVideoURLNode) && n.isActive && n.videoElement
+            );
+            if (activeVideoNode) {
+                videoElement = activeVideoNode.videoElement;
+            }
+        }
+
         // Check if video element has valid data (works for both main and offscreen instances)
-        if (!this.videoElement || !this.videoElement.readyState || this.videoElement.readyState < 2) {
+        if (!videoElement || !videoElement.readyState || videoElement.readyState < 2) {
             return;
         }
 
-        // Check if video is actually playing (camera is enabled somewhere)
-        if (this.videoElement.paused || this.videoElement.srcObject === null) {
+        // Check if video is actually playing (has source and not paused)
+        const hasSource = videoElement.srcObject !== null || (videoElement.src && videoElement.src !== '');
+        if (videoElement.paused || !hasSource) {
             return;
         }
 
         const gl = this.gl;
         gl.bindTexture(gl.TEXTURE_2D, this.cameraTexture);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.videoElement);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
     }
 
     loadShader(shaderSource, onError) {
@@ -419,20 +434,41 @@ export class ShaderPreview {
             gl.uniform1i(this.uniforms.u_camera, 0);
         }
 
-        // Set custom uniforms from Float/Vec nodes
+        // Set custom uniforms - update values from UniformRegistry if available
         if (this.customUniformValues && this.customUniformValues.length > 0) {
+            // If we have a uniform registry, update values from it
+            if (this.uniformRegistry) {
+                for (const uniform of this.customUniformValues) {
+                    const registryUniform = this.uniformRegistry.getUniform(uniform.name);
+                    if (registryUniform) {
+                        uniform.value = registryUniform.value;
+                    }
+                }
+            } else {
+                if (Math.random() < 0.01) {
+                    console.warn('[ShaderPreview] No uniformRegistry! Cannot fetch realtime uniform values');
+                }
+            }
+        }
+
+        const uniformsToSet = this.customUniformValues || [];
+
+        if (uniformsToSet.length > 0) {
             let textureUnit = 1; // Start at 1 since camera uses 0
 
-            for (const uniform of this.customUniformValues) {
+            for (const uniform of uniformsToSet) {
                 const location = this.uniforms[uniform.name];
+
                 if (location !== null && location !== undefined) {
                     if (uniform.type === 'float') {
                         // Update microphone RMS value each frame if this is a microphone node
                         if (uniform.microphoneNode && uniform.microphoneNode.isActive) {
                             const rms = uniform.microphoneNode.getRMS();
                             uniform.value = rms;
-                            if (Math.random() < 0.01) { // Log 1% of the time to avoid spam
-                            }
+                        }
+                        // Update MIDI CC value each frame if this is a MIDI CC node
+                        if (uniform.midiCCNode) {
+                            uniform.value = uniform.midiCCNode.getValue();
                         }
                         gl.uniform1f(location, uniform.value);
                     } else if (uniform.type === 'int') {
@@ -454,7 +490,8 @@ export class ShaderPreview {
                         textureUnit++;
                     }
                 } else {
-                    console.warn('Uniform location not found for:', uniform.name, '| Available uniforms:', Object.keys(this.uniforms));
+                    // Silently skip uniforms that don't exist in this shader
+                    // This is expected - different shaders use different subsets of nodes
                 }
             }
         }

@@ -20,8 +20,15 @@ export class FloatingCodeEditor {
         // Track node type for deduplication (e.g., "Edit MyCustomNode")
         this.nodeType = options.nodeType || null;
 
+        // Button labels (allow customization for create vs edit mode)
+        this.saveButtonLabel = options.saveButtonLabel || 'Save';
+        this.closeButtonLabel = options.closeButtonLabel || 'Close';
+
+        // Creation mode: always show save/cancel buttons (don't wait for changes)
+        this.isCreationMode = options.saveButtonLabel === 'Create';
+
         // Track dirty state
-        this.isDirty = false;
+        this.isDirty = this.isCreationMode; // Start as "dirty" in creation mode
         this.originalValue = this.value;
 
         // Track position and size for persistence
@@ -110,7 +117,7 @@ export class FloatingCodeEditor {
 
             // Create Save button
             this.saveBtn = document.createElement('button');
-            this.saveBtn.textContent = 'Save';
+            this.saveBtn.textContent = this.saveButtonLabel;
             this.saveBtn.style.cssText = `
                 background: #007acc;
                 border: none;
@@ -127,7 +134,7 @@ export class FloatingCodeEditor {
 
             // Create Close button
             this.closeBtn = document.createElement('button');
-            this.closeBtn.textContent = 'Close';
+            this.closeBtn.textContent = this.closeButtonLabel;
             this.closeBtn.style.cssText = `
                 background: #444;
                 border: none;
@@ -235,9 +242,19 @@ export class FloatingCodeEditor {
         if (this.onSave) {
             const result = this.onSave(this.editor.getValue());
 
+            // If onSave returns false, keep the editor open (validation failed)
+            if (result === false) {
+                return;
+            }
+
             // If onSave returns updated code (e.g., with magic comments), update the editor
             if (typeof result === 'string') {
                 this.setValue(result);
+            }
+
+            // If onSave returned true or a string, close the editor
+            if (result === true || typeof result === 'string') {
+                this.close();
             }
         }
     }

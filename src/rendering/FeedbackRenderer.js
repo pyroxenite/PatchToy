@@ -1,8 +1,9 @@
 export class FeedbackRenderer {
-    constructor(nodeGraph, shaderCompiler, sharedGL) {
+    constructor(nodeGraph, shaderCompiler, sharedGL, uniformRegistry = null) {
         this.nodeGraph = nodeGraph;
         this.shaderCompiler = shaderCompiler;
         this.gl = sharedGL;
+        this.uniformRegistry = uniformRegistry;
 
         if (!this.gl) {
             console.error('FeedbackRenderer: No shared WebGL context provided');
@@ -42,6 +43,7 @@ export class FeedbackRenderer {
                 continue;
             }
 
+
             // Inject feedback textures (for feedback loops where output connects to input)
             this.injectFeedbackTextures(shader, this.gl);
 
@@ -58,6 +60,7 @@ export class FeedbackRenderer {
         if (feedbackNodes.length === 0) return;
 
         const gl = this.gl;
+
 
         for (const feedbackNode of feedbackNodes) {
             // Initialize buffers if needed (all in shared context now)
@@ -83,12 +86,20 @@ export class FeedbackRenderer {
                 for (const uniform of feedbackNode.compiledShader.uniformValues) {
                     if (uniform.type === 'sampler2D' && uniform.feedbackNodeId === feedbackNode.id) {
                         // Update texture to current read buffer (previous frame)
+                        const oldTexture = uniform.texture;
                         uniform.texture = feedbackNode.getReadTexture();
+                        if (Math.random() < 0.01) {
+                            console.log(`[FeedbackRenderer] Updated self-referencing texture for node ${feedbackNode.id}: ${oldTexture} -> ${uniform.texture}`);
+                        }
                     }
                 }
             }
 
             // Render to the feedback node's write buffer
+            if (Math.random() < 0.01) {
+                console.log(`[FeedbackRenderer] Rendering node ${feedbackNode.id} to framebuffer`);
+            }
+
             this.renderToFramebufferWithProgram(
                 gl,
                 feedbackNode.compiledProgram,
@@ -100,16 +111,25 @@ export class FeedbackRenderer {
 
             // Swap buffers for next frame (read becomes write, write becomes read)
             feedbackNode.swap();
+
+            if (Math.random() < 0.01) {
+                console.log(`[FeedbackRenderer] Swapped buffers for node ${feedbackNode.id}`);
+            }
         }
     }
 
     injectFeedbackTextures(shaderResult, targetGl) {
         // Find all feedback node uniforms and inject their textures
         if (!shaderResult.uniformValues) {
+            console.log('[FeedbackRenderer] injectFeedbackTextures: No uniformValues');
             return;
         }
 
+        console.log(`[FeedbackRenderer] injectFeedbackTextures: Processing ${shaderResult.uniformValues.length} uniforms`);
+
         for (const uniform of shaderResult.uniformValues) {
+            console.log(`[FeedbackRenderer] Checking uniform:`, uniform);
+
             // Inject feedback textures
             if (uniform.type === 'sampler2D' && uniform.feedbackNodeId !== undefined) {
                 // Find the feedback node
@@ -126,6 +146,8 @@ export class FeedbackRenderer {
                     // Get the read texture (previous frame) - all in same context now!
                     const sourceTexture = feedbackNode.getReadTexture();
                     uniform.texture = sourceTexture;
+                } else {
+                    console.error(`[FeedbackRenderer] Could not find feedback node ${uniform.feedbackNodeId}`);
                 }
             }
 
@@ -137,6 +159,17 @@ export class FeedbackRenderer {
                     uniform.microphoneNode = micNode;
                     // Initialize with current RMS value
                     uniform.value = micNode.getRMS();
+                }
+            }
+
+            // Inject MIDI CC values
+            if (uniform.type === 'float' && uniform.midiCCNodeId !== undefined) {
+                const midiNode = this.nodeGraph.nodes.find(n => n.id === uniform.midiCCNodeId);
+                if (midiNode && midiNode.isMidiCCNode) {
+                    // Store reference to MIDI CC node so it can be updated each frame
+                    uniform.midiCCNode = midiNode;
+                    // Initialize with current value
+                    uniform.value = midiNode.getValue();
                 }
             }
         }
@@ -231,12 +264,24 @@ export class FeedbackRenderer {
         if (shader.uniformValues) {
             let textureUnit = 0;
             for (const uniform of shader.uniformValues) {
+                // Update values from UniformRegistry if available (for constant nodes)
+                if (this.uniformRegistry && uniform.feedbackNodeId === undefined && uniform.microphoneNodeId === undefined && uniform.midiCCNodeId === undefined) {
+                    const registryUniform = this.uniformRegistry.getUniform(uniform.name);
+                    if (registryUniform) {
+                        uniform.value = registryUniform.value;
+                    }
+                }
+
                 const location = programData.uniforms[uniform.name];
                 if (location !== null && location !== undefined) {
                     if (uniform.type === 'float') {
                         // Update microphone RMS if applicable
                         if (uniform.microphoneNode && uniform.microphoneNode.isActive) {
                             uniform.value = uniform.microphoneNode.getRMS();
+                        }
+                        // Update MIDI CC value if applicable
+                        if (uniform.midiCCNode) {
+                            uniform.value = uniform.midiCCNode.getValue();
                         }
                         gl.uniform1f(location, uniform.value);
                     } else if (uniform.type === 'int') {

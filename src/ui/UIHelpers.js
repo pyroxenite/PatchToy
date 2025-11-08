@@ -157,6 +157,67 @@ export class UIHelpers {
         }
     }
 
+    static async enableMIDI() {
+        // Import and enable MIDI service
+        const { midiService } = await import('../services/MIDIService.js');
+
+        const btn = document.getElementById('midiBtn');
+
+        try {
+            const success = await midiService.enable();
+
+            if (success) {
+                // Update button state
+                btn.style.background = '#007acc';
+                btn.style.borderColor = '#007acc';
+                btn.title = 'MIDI Active';
+
+                const devices = midiService.getDevices();
+                console.log(`[MIDI] Enabled successfully. Found ${devices.length} device(s):`, devices);
+            } else {
+                throw new Error('Failed to enable MIDI');
+            }
+        } catch (error) {
+            console.error('[MIDI] Failed to enable:', error);
+            btn.style.background = '#f44336';
+            btn.style.borderColor = '#f44336';
+            btn.title = 'MIDI Error: ' + error.message;
+        }
+    }
+
+    static async enableAllCameras(nodeGraph) {
+        // Find all camera nodes in the graph
+        const cameraNodes = nodeGraph.nodes.filter(n => n.isCameraNode);
+
+        if (cameraNodes.length === 0) {
+            console.log('No camera nodes found in graph');
+            return;
+        }
+
+        const btn = document.getElementById('cameraBtn');
+
+        try {
+            // Enable all camera nodes
+            for (const cameraNode of cameraNodes) {
+                if (!cameraNode.isActive) {
+                    await cameraNode.enable();
+                }
+            }
+
+            // Update button state
+            btn.style.background = '#007acc';
+            btn.style.borderColor = '#007acc';
+            btn.title = 'Camera Active';
+
+            console.log(`Enabled ${cameraNodes.length} camera node(s)`);
+        } catch (error) {
+            console.error('Failed to enable cameras:', error);
+            btn.style.background = '#f44336';
+            btn.style.borderColor = '#f44336';
+            btn.title = 'Camera Error: ' + error.message;
+        }
+    }
+
     static togglePreviewFullscreen(previewPanel, resizeCallback) {
         previewPanel.classList.toggle('fullscreen-preview');
 
@@ -259,6 +320,11 @@ export class UIHelpers {
                 previewInstance.videoElement,
                 { offscreen: false }
             );
+
+            // Pass graph reference so it can find video nodes
+            if (nodeGraph) {
+                fullscreenPreview.graph = nodeGraph;
+            }
 
             // Load the current shader
             if (previewInstance.currentShaderSource) {

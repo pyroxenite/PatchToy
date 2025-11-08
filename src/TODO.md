@@ -5,18 +5,28 @@
  - Save button disappears 
  - More uniforms:
    - Midi
+     - Control CC done
+     - Midi notes
+       - Event detector with attack release
+       - Midi pitch (highest/lowest/last, )
    - BPM tracking?
    - Frequency bands
    - XY controller 
    - Keyboard
  - More modules:
    - Basic transforms
+   - Video sources:
+     - Multiple camera support (device picker on Camera node)
+     - System audio capture node
+     - File upload node (images/videos with persistence)
  - Website Icon
  - Initial preview node resolution bug
  - GLSL code editor size, position, visibility states should be saved to project
  - GLSL code editor should close when switching projects
  - Key command to toggle fps view
  - Dirty editors aren't preserved
+ - Better errors for auth
+ - Add text field in swizzle selector
   
 # Big features
   - User settings, project settings, display settings

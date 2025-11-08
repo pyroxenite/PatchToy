@@ -173,6 +173,11 @@ export class NodeGraph {
         this.panX = 0;
         this.panY = 0;
 
+        // Zoom level
+        this.zoom = 1.0;
+        this.minZoom = 0.1;
+        this.maxZoom = 3.0;
+
         // Selection - now managed by SelectionManager
         this.selectionManager = new SelectionManager();
         this.selectionStart = null;
@@ -211,14 +216,37 @@ export class NodeGraph {
 
         // Keyboard events
         window.addEventListener('keydown', (e) => this.onKeyDown(e));
+        window.addEventListener('paste', (e) => this.onPaste(e));
     }
 
     onWheel(e) {
         e.preventDefault();
 
-        // Update pan offset based on scroll
-        this.panX -= e.deltaX;
-        this.panY -= e.deltaY;
+        // Check if zoom gesture (Cmd/Ctrl + scroll, or pinch)
+        if (e.ctrlKey || e.metaKey) {
+            // Zoom toward mouse cursor
+            const rect = this.canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // Get world position before zoom
+            const worldX = (mouseX - this.panX) / this.zoom;
+            const worldY = (mouseY - this.panY) / this.zoom;
+
+            // Apply zoom
+            const zoomDelta = -e.deltaY * 0.001;
+            const newZoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom * (1 + zoomDelta)));
+
+            // Adjust pan to keep world position under cursor
+            this.panX = mouseX - worldX * newZoom;
+            this.panY = mouseY - worldY * newZoom;
+
+            this.zoom = newZoom;
+        } else {
+            // Pan
+            this.panX -= e.deltaX;
+            this.panY -= e.deltaY;
+        }
 
         this.render();
     }
@@ -277,6 +305,15 @@ export class NodeGraph {
             requestAnimationFrame(update);
         };
         requestAnimationFrame(update);
+    }
+
+    onPaste(e) {
+        // If a canvas text input is focused, let it handle the paste
+        if (this.focusedTextInput) {
+            this.focusedTextInput.handlePaste(e);
+            if (this.onGraphChanged) this.onGraphChanged();
+            this.render();
+        }
     }
 
     onKeyDown(e) {
@@ -416,14 +453,67 @@ export class NodeGraph {
                 this.previewNodes.get(node.id).destroy();
                 this.previewNodes.delete(node.id);
             }
+            // Clean up node-specific resources
+            if (node.cleanup) {
+                node.cleanup();
+            }
         }
 
         // Remove nodes
         this.nodes = this.nodes.filter(node => !nodesToDelete.has(node));
 
+        // Check if we need to disable buttons after deletion
+        this.updateDeviceButtonStates();
+
         this.selectionManager.selectedNodes.clear();
         if (this.onGraphChanged) this.onGraphChanged();
         this.render();
+    }
+
+    updateDeviceButtonStates() {
+        // Check if any camera nodes remain
+        const hasCameraNodes = this.nodes.some(n => n.isCameraNode);
+        if (!hasCameraNodes) {
+            const cameraBtn = document.getElementById('cameraBtn');
+            if (cameraBtn) {
+                cameraBtn.style.background = 'transparent';
+                cameraBtn.style.borderColor = '#444';
+                cameraBtn.title = 'Camera';
+            }
+        }
+
+        // Check if any microphone nodes remain
+        const hasMicNodes = this.nodes.some(n => n.isMicrophoneNode);
+        if (!hasMicNodes) {
+            const micBtn = document.getElementById('micBtn');
+            if (micBtn) {
+                micBtn.style.background = 'transparent';
+                micBtn.style.borderColor = '#444';
+                micBtn.title = 'Microphone';
+            }
+        }
+
+        // Check if any MIDI CC nodes remain
+        const hasMidiNodes = this.nodes.some(n => n.isMidiCCNode);
+        if (!hasMidiNodes) {
+            const midiBtn = document.getElementById('midiBtn');
+            if (midiBtn) {
+                midiBtn.style.background = 'transparent';
+                midiBtn.style.borderColor = '#444';
+                midiBtn.title = 'MIDI';
+            }
+        }
+
+        // Check if any screen capture nodes remain
+        const hasScreenCaptureNodes = this.nodes.some(n => n.isScreenCaptureNode);
+        if (!hasScreenCaptureNodes) {
+            const screenCaptureBtn = document.getElementById('screenCaptureBtn');
+            if (screenCaptureBtn) {
+                screenCaptureBtn.style.background = 'transparent';
+                screenCaptureBtn.style.borderColor = '#444';
+                screenCaptureBtn.title = 'Screen Capture';
+            }
+        }
     }
 
     copySelectedNodes() {
@@ -546,8 +636,8 @@ export class NodeGraph {
     getMousePos(e) {
         const rect = this.canvas.getBoundingClientRect();
         return {
-            x: e.clientX - rect.left - this.panX,
-            y: e.clientY - rect.top - this.panY
+            x: (e.clientX - rect.left - this.panX) / this.zoom,
+            y: (e.clientY - rect.top - this.panY) / this.zoom
         };
     }
 
@@ -1200,6 +1290,21 @@ export class NodeGraph {
                     }
                     if (connected) break;
                 }
+
+                // If dragging from output to void, create a preview node for float/vec types
+                if (!connected) {
+                    const outputDef = this.connectingFrom.node.outputs[this.connectingFrom.outputIndex];
+                    if (outputDef && this.canCreatePreviewFor(outputDef.type)) {
+                        this.createPreviewNodeForOutput(
+                            this.connectingFrom.node,
+                            this.connectingFrom.outputIndex,
+                            outputDef.type,
+                            pos.x,
+                            pos.y
+                        );
+                        if (this.onGraphChanged) this.onGraphChanged();
+                    }
+                }
             }
 
             // Clear connection state and swizzle
@@ -1349,8 +1454,9 @@ export class NodeGraph {
         ctx.textBaseline = 'middle';  // Use middle instead of alphabetic for more consistent results
         ctx.textAlign = 'left';
 
-        // Apply pan transform
+        // Apply pan and zoom transforms
         ctx.translate(this.panX, this.panY);
+        ctx.scale(this.zoom, this.zoom);
 
         // Draw all connections in a single batch
         ctx.strokeStyle = '#007acc';
@@ -1478,12 +1584,20 @@ export class NodeGraph {
             }
         }
 
-        // Draw nodes
+        // Draw nodes - wrap each in save/restore to prevent state leakage
         for (const node of this.nodes) {
+            ctx.save();
+            // Reset text properties to defaults for each node
+            ctx.font = '12px "Pixeloid Sans"';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+
             node.draw(this.ctx, {
                 isSelected: this.selectionManager.selectedNodes.has(node),
                 connections: this.connections
             });
+
+            ctx.restore();
         }
 
         // Draw ghost node if exists (semi-transparent)
@@ -1629,6 +1743,7 @@ export class NodeGraph {
             if (opt.spacer) {
                 item.style.cursor = 'default';
                 item.style.visibility = 'hidden';
+                item.dataset.spacer = 'true';
             } else {
                 item.style.cursor = 'pointer';
 
@@ -1646,20 +1761,15 @@ export class NodeGraph {
                 });
                 item.addEventListener('click', () => {
                     if (opt.custom) {
-                        // Show custom swizzle input
-                        const customAccessor = prompt('Enter custom accessor (e.g., xy, xz, yzw, position, position.xy):', '');
-                        if (customAccessor !== null && customAccessor.trim()) {
-                            // Add dot prefix if not present
-                            conn.accessor = customAccessor.startsWith('.') ? customAccessor : '.' + customAccessor;
-                            conn.swizzle = conn.accessor; // Keep backwards compatibility
-                        }
+                        // Show custom input field instead of prompt
+                        showCustomInput();
                     } else {
                         conn.accessor = opt.value;
                         conn.swizzle = opt.value; // Keep backwards compatibility
+                        menu.remove();
+                        this.render();
+                        if (this.onGraphChanged) this.onGraphChanged();
                     }
-                    menu.remove();
-                    this.render();
-                    if (this.onGraphChanged) this.onGraphChanged();
                 });
             }
 
@@ -1668,11 +1778,165 @@ export class NodeGraph {
 
         document.body.appendChild(menu);
 
+        // Track typed swizzle string
+        let typedSwizzle = '';
+        let typedTimer = null;
+        let customInputActive = false;
+
+        const selectOption = (swizzleValue) => {
+            const items = Array.from(grid.children).filter(item => !item.dataset.spacer);
+            items.forEach((item, i) => {
+                const opt = options[i];
+                if (opt && opt.value === swizzleValue) {
+                    item.style.background = '#007acc';
+                } else if (opt && conn.swizzle !== opt.value) {
+                    item.style.background = 'transparent';
+                }
+            });
+        };
+
+        const showCustomInput = () => {
+            customInputActive = true;
+
+            // Replace grid with text input
+            grid.style.display = 'none';
+
+            // Create input field
+            const inputContainer = document.createElement('div');
+            inputContainer.style.padding = '4px';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.placeholder = 'e.g., xy, xz, rgb, position.xy';
+            input.value = typedSwizzle || '';
+            input.style.width = '100%';
+            input.style.padding = '6px';
+            input.style.background = '#1e1e1e';
+            input.style.border = '1px solid #007acc';
+            input.style.borderRadius = '3px';
+            input.style.color = '#fff';
+            input.style.fontSize = '12px';
+            input.style.fontFamily = 'monospace';
+            input.style.outline = 'none';
+
+            inputContainer.appendChild(input);
+            menu.appendChild(inputContainer);
+
+            // Focus input
+            setTimeout(() => input.focus(), 0);
+
+            // Handle input submission
+            const applyCustom = () => {
+                const customAccessor = input.value.trim();
+                if (customAccessor) {
+                    conn.accessor = customAccessor.startsWith('.') ? customAccessor : '.' + customAccessor;
+                    conn.swizzle = conn.accessor;
+                    menu.remove();
+                    document.removeEventListener('keydown', handleKeyDown);
+                    document.removeEventListener('mousedown', closeMenu);
+                    this.render();
+                    if (this.onGraphChanged) this.onGraphChanged();
+                }
+            };
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    applyCustom();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    menu.remove();
+                    document.removeEventListener('keydown', handleKeyDown);
+                    document.removeEventListener('mousedown', closeMenu);
+                }
+                e.stopPropagation(); // Prevent bubbling to main handler
+            });
+        };
+
+        // Keyboard input for typing swizzle
+        const handleKeyDown = (e) => {
+            if (customInputActive) return; // Input field handles its own keys
+
+            // Check if it's a valid swizzle character or period (for struct access like position.xy)
+            if (/^[xyzwrgba.]$/.test(e.key)) {
+                e.preventDefault();
+
+                // Clear existing timer
+                if (typedTimer) {
+                    clearTimeout(typedTimer);
+                }
+
+                // Add character to typed swizzle
+                typedSwizzle += e.key;
+
+                // Try to find matching option
+                const matchingOpt = options.find(opt => !opt.spacer && !opt.custom && opt.value === `.${typedSwizzle}`);
+
+                if (matchingOpt) {
+                    // Highlight the matching option
+                    selectOption(matchingOpt.value);
+
+                    // Set timer to apply selection after short delay (allows typing multi-char swizzles)
+                    typedTimer = setTimeout(() => {
+                        conn.accessor = matchingOpt.value;
+                        conn.swizzle = matchingOpt.value;
+                        menu.remove();
+                        document.removeEventListener('keydown', handleKeyDown);
+                        document.removeEventListener('mousedown', closeMenu);
+                        this.render();
+                        if (this.onGraphChanged) this.onGraphChanged();
+                    }, 400);
+                } else if (typedSwizzle.length >= 2 || e.key === '.') {
+                    // If no match and we've typed 2+ chars or a period, show custom input
+                    clearTimeout(typedTimer);
+                    showCustomInput();
+                }
+            } else if (e.key === 'Backspace') {
+                e.preventDefault();
+                if (typedTimer) {
+                    clearTimeout(typedTimer);
+                    typedTimer = null;
+                }
+                typedSwizzle = typedSwizzle.slice(0, -1);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (typedTimer) {
+                    clearTimeout(typedTimer);
+                }
+                // Find the currently highlighted option
+                const matchingOpt = options.find(opt => !opt.spacer && !opt.custom && opt.value === `.${typedSwizzle}`);
+                if (matchingOpt) {
+                    conn.accessor = matchingOpt.value;
+                    conn.swizzle = matchingOpt.value;
+                } else if (typedSwizzle) {
+                    // Apply custom typed swizzle
+                    conn.accessor = `.${typedSwizzle}`;
+                    conn.swizzle = `.${typedSwizzle}`;
+                }
+                menu.remove();
+                document.removeEventListener('keydown', handleKeyDown);
+                document.removeEventListener('mousedown', closeMenu);
+                this.render();
+                if (this.onGraphChanged) this.onGraphChanged();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                if (typedTimer) {
+                    clearTimeout(typedTimer);
+                }
+                menu.remove();
+                document.removeEventListener('keydown', handleKeyDown);
+                document.removeEventListener('mousedown', closeMenu);
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+
         // Close on click outside
         const closeMenu = (e) => {
             if (!menu.contains(e.target)) {
                 menu.remove();
                 document.removeEventListener('mousedown', closeMenu);
+                document.removeEventListener('keydown', handleKeyDown);
             }
         };
         setTimeout(() => document.addEventListener('mousedown', closeMenu), 0);
@@ -1798,6 +2062,11 @@ export class NodeGraph {
         return constantTypes[type] !== undefined;
     }
 
+    // Check if we can create a preview node for this type (float/vec outputs)
+    canCreatePreviewFor(type) {
+        return type === 'float' || type === 'vec2' || type === 'vec3' || type === 'vec4';
+    }
+
     // Create a constant node and connect it to the input
     createConstantNodeForInput(targetNode, inputIndex, inputType, dropX, dropY) {
         const constantTypes = {
@@ -1851,6 +2120,47 @@ export class NodeGraph {
         ));
     }
 
+    // Create a preview node and connect the output to it
+    createPreviewNodeForOutput(sourceNode, outputIndex, outputType, dropX, dropY) {
+        // Position the preview node to the right of where we dropped
+        const nodeX = dropX + 20;
+        const nodeY = dropY - 100;
+
+        // Create the preview node
+        const previewNode = this.addNode('Preview', nodeX, nodeY);
+        if (!previewNode) {
+            console.warn('Failed to create preview node');
+            return;
+        }
+
+        // Convert the output to vec4 if needed using a conversion strategy
+        // For now, just connect directly and let the type system handle it
+        this.connections.push(new Connection(
+            sourceNode,
+            outputIndex,
+            previewNode,
+            0  // Preview node's color input
+        ));
+    }
+
+    // Export a minimal, readable representation of the graph for debugging
+    exportMinimal() {
+        return {
+            nodes: this.nodes.map(n => ({
+                id: n.id,
+                type: n.type,
+                data: n.data, // Include data for uniforms/values
+                inputs: n.inputs.map(i => i.name),
+                outputs: n.outputs.map(o => o.name)
+            })),
+            connections: this.connections.map(c => ({
+                from: `${c.fromNode.type}[${c.fromNode.id}].${c.fromNode.outputs[c.fromOutput]?.name || c.fromOutput}`,
+                to: `${c.toNode.type}[${c.toNode.id}].${c.toNode.inputs[c.toInput]?.name || c.toInput}`,
+                accessor: c.accessor || null
+            }))
+        };
+    }
+
     serialize() {
         return {
             nodes: this.nodes.map(n => n.serialize()),
@@ -1863,7 +2173,8 @@ export class NodeGraph {
             })),
             nextNodeId: this.nextNodeId,
             panX: this.panX,
-            panY: this.panY
+            panY: this.panY,
+            zoom: this.zoom
         };
     }
 
@@ -1878,9 +2189,10 @@ export class NodeGraph {
             this.onPreviewBackground(null);
         }
 
-        // Restore pan offset
+        // Restore pan offset and zoom
         this.panX = data.panX || 0;
         this.panY = data.panY || 0;
+        this.zoom = data.zoom || 1.0;
 
         // Recreate nodes
         const idMap = new Map();

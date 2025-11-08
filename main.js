@@ -4,6 +4,7 @@ import { NodeDefinitions } from './src/core/NodeDefinitions.js';
 import { ApiClient } from './src/services/ApiClient.js';
 import { ProjectManager } from './src/managers/ProjectManager.js';
 import { CompilationManager } from './src/managers/CompilationManager.js';
+import { UniformRegistry } from './src/managers/UniformRegistry.js';
 import { FeedbackRenderer } from './src/rendering/FeedbackRenderer.js';
 import { BackgroundRenderer } from './src/rendering/BackgroundRenderer.js';
 import { AuthDialogs } from './src/ui/AuthDialogs.js';
@@ -32,16 +33,19 @@ class PatchToy {
         }
 
         // Core instances
+        this.uniformRegistry = new UniformRegistry();
         this.nodeGraph = new NodeGraph(this.nodeCanvas, this.videoElement);
         this.nodeGraph.addNodeButton = this.addNodeBtn;
         this.nodeGraph.sharedGL = this.sharedGL; // Pass to node graph for creating preview nodes
+        this.nodeGraph.uniformRegistry = this.uniformRegistry; // Pass registry to node graph
         this.shaderCompiler = new ShaderCompiler();
         this.apiClient = new ApiClient();
 
         // Managers
         this.projectManager = new ProjectManager(this.nodeGraph, this.apiClient);
-        this.backgroundRenderer = new BackgroundRenderer(this.nodeCanvas, this.videoElement, this.sharedGL);
-        this.feedbackRenderer = new FeedbackRenderer(this.nodeGraph, this.shaderCompiler, this.sharedGL);
+        this.backgroundRenderer = new BackgroundRenderer(this.nodeCanvas, this.videoElement, this.sharedGL, this.uniformRegistry);
+        this.backgroundRenderer.graph = this.nodeGraph; // Pass graph reference for video node access
+        this.feedbackRenderer = new FeedbackRenderer(this.nodeGraph, this.shaderCompiler, this.sharedGL, this.uniformRegistry);
         this.compilationManager = new CompilationManager(this.nodeGraph, this.shaderCompiler, null, this.backgroundRenderer, this.feedbackRenderer);
 
         // State
@@ -220,15 +224,17 @@ class PatchToy {
 
         // Camera button
         document.getElementById('cameraBtn').addEventListener('click', async () => {
-            this.cameraEnabled = await this.toggleCamera();
-            const btn = document.getElementById('cameraBtn');
-            btn.style.background = this.cameraEnabled ? '#007acc' : 'transparent';
-            btn.style.borderColor = this.cameraEnabled ? '#007acc' : '#444';
+            await UIHelpers.enableAllCameras(this.nodeGraph);
         });
 
         // Microphone button
         document.getElementById('micBtn').addEventListener('click', async () => {
             await UIHelpers.enableAllMicrophones(this.nodeGraph);
+        });
+
+        // MIDI button
+        document.getElementById('midiBtn').addEventListener('click', async () => {
+            await UIHelpers.enableMIDI();
         });
 
         // Load file input
@@ -339,11 +345,15 @@ class PatchToy {
             // Mark project as dirty (has unsaved changes)
             this.projectManager.markDirty();
 
-            // Compile feedback shaders first
+            // CRITICAL: Create global node ID mapping ONCE before ANY compilation
+            // This ensures feedback shaders and preview shaders use consistent variable names
+            this.compilationManager.createGlobalNodeIdMapping();
+
+            // Compile feedback shaders first (uses the global ID mapping)
             this.feedbackRenderer.compileFeedbackShaders();
             this.feedbackRenderer.renderFeedbackNodes();
 
-            // Then schedule main compilation
+            // Then schedule main compilation (reuses the same global ID mapping)
             this.compilationManager.scheduleCompile();
             // Note: markDirty() already calls saveGraph()
         };
@@ -726,7 +736,13 @@ class PatchToy {
         this.nodeCanvas.height = nodeRect.height * dpr;
 
         const ctx = this.nodeCanvas.getContext('2d');
+        // Reset transform before scaling to prevent cumulative scaling
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.scale(dpr, dpr);
+
+        // Set default text properties to ensure consistency
+        ctx.font = '12px "Pixeloid Sans"';
+        ctx.textAlign = 'left';
         ctx.textBaseline = 'alphabetic';
 
         // Update background renderer canvas size

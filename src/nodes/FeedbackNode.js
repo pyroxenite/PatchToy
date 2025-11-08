@@ -49,13 +49,13 @@ export class FeedbackNode extends Node {
         // Set up texture - initialize with black color
         gl.bindTexture(gl.TEXTURE_2D, texture);
 
-        // Create initial black pixel data
+        // Create initial transparent black pixel data
         const pixels = new Uint8Array(width * height * 4);
         for (let i = 0; i < pixels.length; i += 4) {
             pixels[i] = 0;     // R
             pixels[i + 1] = 0; // G
             pixels[i + 2] = 0; // B
-            pixels[i + 3] = 255; // A (fully opaque)
+            pixels[i + 3] = 0; // A (fully transparent)
         }
 
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);

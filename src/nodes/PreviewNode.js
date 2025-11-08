@@ -18,6 +18,11 @@ export class PreviewNode extends Node {
         const previewHeight = this.height - this.bottomBarHeight;
         const dpr = window.devicePixelRatio || 1;
 
+        // Store references for later initialization
+        this.canvas = canvas;
+        this.videoElement = videoElement;
+        this.sharedGL = sharedGL;
+
         // Create renderer instance using ShaderPreview in offscreen mode
         const options = {
             offscreen: true,
@@ -30,6 +35,9 @@ export class PreviewNode extends Node {
         if (sharedGL) {
             options.sharedGL = sharedGL;
         }
+
+        // UniformRegistry will be set when node is added to graph
+        // via setGraph() override below
 
         this.renderer = new ShaderPreview(canvas, videoElement, options);
         this.previewInstance = this.renderer; // For backwards compatibility
@@ -262,12 +270,12 @@ export class PreviewNode extends Node {
             const buttonSize = 12;
             const buttonSpacing = 10;
 
-            // Code inspect button (</>) - leftmost (24px wide)
-            const codeButtonX = this.x + this.width - 24 - 16 - buttonSize - buttonSpacing * 3;
+            // Code inspect button ({}) - leftmost (24px wide)
+            const codeButtonX = this.x + this.width - 16 - 16 - buttonSize - buttonSpacing * 3;
             ctx.fillStyle = '#888';
             ctx.font = '12px monospace';
             ctx.textBaseline = 'middle';
-            ctx.fillText('</>', codeButtonX, buttonCenterY);
+            ctx.fillText('{}', codeButtonX, buttonCenterY);
 
             // Background button (⬚) - (16px wide)
             const bgButtonX = this.x + this.width - 16 - buttonSize - buttonSpacing * 2;
@@ -433,5 +441,21 @@ export class PreviewNode extends Node {
         if (this.graph.onPreviewFullscreen) {
             this.graph.onPreviewFullscreen(this);
         }
+    }
+
+    // Override to set uniformRegistry on renderer when graph is assigned
+    set graph(g) {
+        this._graph = g;
+        // Update renderer's uniformRegistry and graph reference when graph is set
+        if (this.renderer && g) {
+            if (g.uniformRegistry) {
+                this.renderer.uniformRegistry = g.uniformRegistry;
+            }
+            this.renderer.graph = g;
+        }
+    }
+
+    get graph() {
+        return this._graph;
     }
 }

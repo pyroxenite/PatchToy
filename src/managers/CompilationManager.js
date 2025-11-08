@@ -28,8 +28,28 @@ export class CompilationManager {
             node.hasError = false;
         }
 
+        // Note: Global node ID mapping should already be created by onGraphChanged handler
+        // If not (e.g., initial load), create it now
+        if (!this.globalNodeIdRemap || this.globalNodeIdRemap.size === 0) {
+            this.createGlobalNodeIdMapping();
+        }
+
         // Just compile preview nodes - no main output anymore
         this.compilePreviewNodes();
+    }
+
+    createGlobalNodeIdMapping() {
+        // Collect all unique node IDs and sort them
+        const nodeIds = [...new Set(this.nodeGraph.nodes.map(n => n.id))].sort((a, b) => a - b);
+
+        // Create mapping from old ID to new sequential ID
+        this.globalNodeIdRemap = new Map();
+        nodeIds.forEach((oldId, index) => {
+            this.globalNodeIdRemap.set(oldId, index);
+        });
+
+        // Inject this mapping into the ShaderCompiler so it uses it instead of creating its own
+        this.shaderCompiler.nodeIdRemap = this.globalNodeIdRemap;
     }
 
     compilePreviewNodes() {
@@ -110,47 +130,112 @@ export class CompilationManager {
         if (!anyErrors) {
             this.hideError();
         }
-    }
 
-    updateUniformsForNode(changedNode) {
-        // Optimized: Only update the specific uniform for the changed node
-        if (!changedNode.data || !changedNode.data.useUniform || !changedNode.definition) {
-            return;
-        }
+        // Build a map of uniform name -> source node from compiled shaders
+        // This uses the REMAPPED names from compilation, not the original node IDs
+        if (this.nodeGraph.uniformRegistry) {
+            this.nodeGraph.uniformRegistry.clear();
 
-        // Get the uniform info for this specific node
-        const glslResult = changedNode.definition.glsl(changedNode, {});
-        if (!glslResult || !glslResult.uniforms || glslResult.uniforms.length === 0) {
-            return;
-        }
+            // Extract uniforms from each compiled preview node's shader
+            const previewNodes = this.nodeGraph.nodes.filter(n => n.isPreviewNode);
+            for (const previewNode of previewNodes) {
+                if (previewNode.previewInstance && previewNode.previewInstance.customUniformValues) {
+                    for (const uniform of previewNode.previewInstance.customUniformValues) {
+                        // Skip feedback/microphone/MIDI uniforms - they're managed by renderers
+                        if (uniform.feedbackNodeId !== undefined || uniform.microphoneNodeId !== undefined || uniform.midiCCNodeId !== undefined) {
+                            continue;
+                        }
 
-        const updatedUniforms = glslResult.uniforms;
-
-        // Update in main preview
-        if (this.shaderPreview && this.shaderPreview.customUniformValues) {
-            for (const uniform of this.shaderPreview.customUniformValues) {
-                const updated = updatedUniforms.find(u => u.name === uniform.name);
-                if (updated) {
-                    uniform.value = updated.value;
+                        // Find the source node by matching the remapped name
+                        const sourceNode = this.findNodeByRemappedName(uniform.name);
+                        if (sourceNode) {
+                            this.nodeGraph.uniformRegistry.registerUniform(
+                                uniform.name,
+                                uniform.type,
+                                uniform.value,
+                                sourceNode
+                            );
+                        }
+                    }
                 }
             }
-        }
 
-        // Update in all preview nodes
-        const previewNodes = this.nodeGraph.nodes.filter(n => n.isPreviewNode);
-        for (const previewNode of previewNodes) {
-            if (previewNode.previewInstance && previewNode.previewInstance.customUniformValues) {
-                for (const uniform of previewNode.previewInstance.customUniformValues) {
-                    const updated = updatedUniforms.find(u => u.name === uniform.name);
-                    if (updated) {
-                        uniform.value = updated.value;
+            // Also register uniforms from background renderer if active
+            if (this.backgroundRenderer && this.backgroundRenderer.shaderPreview &&
+                this.backgroundRenderer.shaderPreview.customUniformValues) {
+                for (const uniform of this.backgroundRenderer.shaderPreview.customUniformValues) {
+                    // Skip feedback/microphone/MIDI uniforms - they're managed by renderers
+                    if (uniform.feedbackNodeId !== undefined || uniform.microphoneNodeId !== undefined || uniform.midiCCNodeId !== undefined) {
+                        continue;
+                    }
+
+                    if (!this.nodeGraph.uniformRegistry.hasUniform(uniform.name)) {
+                        const sourceNode = this.findNodeByRemappedName(uniform.name);
+                        if (sourceNode) {
+                            this.nodeGraph.uniformRegistry.registerUniform(
+                                uniform.name,
+                                uniform.type,
+                                uniform.value,
+                                sourceNode
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Also register uniforms from feedback nodes
+            const feedbackNodes = this.nodeGraph.nodes.filter(n => n.isFeedbackNode);
+            for (const feedbackNode of feedbackNodes) {
+                if (feedbackNode.compiledShader && feedbackNode.compiledShader.uniformValues) {
+                    for (const uniform of feedbackNode.compiledShader.uniformValues) {
+                        // Skip feedback/microphone/MIDI uniforms - they're managed by renderers
+                        if (uniform.feedbackNodeId !== undefined || uniform.microphoneNodeId !== undefined || uniform.midiCCNodeId !== undefined) {
+                            continue;
+                        }
+
+                        if (!this.nodeGraph.uniformRegistry.hasUniform(uniform.name)) {
+                            const sourceNode = this.findNodeByRemappedName(uniform.name);
+                            if (sourceNode) {
+                                this.nodeGraph.uniformRegistry.registerUniform(
+                                    uniform.name,
+                                    uniform.type,
+                                    uniform.value,
+                                    sourceNode
+                                );
+                            }
+                        }
                     }
                 }
             }
         }
+    }
 
-        // No need to trigger render - ShaderPreview has its own animation loop
-        // that will pick up the updated uniform values automatically
+    // Find a node by its remapped variable name (e.g., "node_5")
+    findNodeByRemappedName(varName) {
+        if (!this.shaderCompiler.nodeIdRemap) return null;
+
+        // Extract the remapped ID from the variable name (e.g., "node_5" -> 5)
+        const match = varName.match(/^node_(\d+)$/);
+        if (!match) return null;
+
+        const remappedId = parseInt(match[1]);
+
+        // Find the original node ID that maps to this remapped ID
+        for (const [originalId, mappedId] of this.shaderCompiler.nodeIdRemap.entries()) {
+            if (mappedId === remappedId) {
+                return this.nodeGraph.nodes.find(n => n.id === originalId);
+            }
+        }
+
+        return null;
+    }
+
+    // Legacy method - no longer needed with UniformRegistry
+    // Kept for compatibility but redirects to registry update
+    updateUniformsForNode(changedNode) {
+        // With UniformRegistry, uniforms are updated directly in ConstantNode
+        // No need for manual synchronization anymore
+        // This method is now a no-op
     }
 
     updateUniforms() {
