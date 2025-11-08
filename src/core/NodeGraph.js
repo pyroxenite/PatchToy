@@ -806,7 +806,8 @@ export class NodeGraph {
             // Start a new connection from the source output
             this.connectingFrom = {
                 node: existingConnection.fromNode,
-                outputIndex: existingConnection.fromOutput
+                outputIndex: existingConnection.fromOutput,
+                wasDisconnected: true // Track that this came from a disconnection
             };
 
             // Remove the old connection
@@ -1292,7 +1293,8 @@ export class NodeGraph {
                 }
 
                 // If dragging from output to void, create a preview node for float/vec types
-                if (!connected) {
+                // BUT NOT if this was a disconnection (user just wanted to disconnect)
+                if (!connected && !this.connectingFrom.wasDisconnected) {
                     const outputDef = this.connectingFrom.node.outputs[this.connectingFrom.outputIndex];
                     if (outputDef && this.canCreatePreviewFor(outputDef.type)) {
                         this.createPreviewNodeForOutput(

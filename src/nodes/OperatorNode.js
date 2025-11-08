@@ -4,8 +4,8 @@ export class OperatorNode extends Node {
     constructor(id, type, x, y, operator) {
         super(id, type, x, y);
         this.operator = operator;
-        this.width = 60;
-        this.height = 60;
+        this.width = 50;
+        this.height = 50;
     }
 
     draw(ctx, options = {}) {

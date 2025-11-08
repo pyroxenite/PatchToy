@@ -1,6 +1,7 @@
 import { Node } from '../nodes/Node.js';
 import { PreviewNode } from '../nodes/PreviewNode.js';
 import { ConstantNode } from '../nodes/ConstantNode.js';
+import { ColorNode } from '../nodes/ColorNode.js';
 import { MapNode } from '../nodes/MapNode.js';
 import { JSNode } from '../nodes/JSNode.js';
 import { FeedbackNode } from '../nodes/FeedbackNode.js';
@@ -53,6 +54,8 @@ export class NodeFactory {
             node = new ScreenCaptureNode(id, type, x, y);
         } else if (definition.isVideoURLNode) {
             node = new VideoURLNode(id, type, x, y);
+        } else if (type === 'Color') {
+            node = new ColorNode(id, type, x, y);
         } else if (type === 'UV') {
             node = new UVNode(id, type, x, y);
             node.updateDimensions();
@@ -133,6 +136,9 @@ export class NodeFactory {
             // Dimensions are recalculated, not restored
         } else if (definition.isVideoURLNode) {
             node = new VideoURLNode(json.id, json.type, json.x, json.y);
+            // Dimensions are recalculated, not restored
+        } else if (json.type === 'Color') {
+            node = new ColorNode(json.id, json.type, json.x, json.y);
             // Dimensions are recalculated, not restored
         } else if (json.type === 'UV') {
             node = new UVNode(json.id, json.type, json.x, json.y);

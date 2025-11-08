@@ -265,6 +265,7 @@ export class ShaderCompiler {
                         sourceValue = sourceResult.output;
                     }
                     let sourceType = connection.fromNode.outputs[connection.fromOutput].type;
+                    console.log(`[Source Type] Reading from ${connection.fromNode.type} (${connection.fromNode.id}) output ${connection.fromOutput}: type=${sourceType}`);
 
                     // Apply accessor if present (struct member access and/or swizzle)
                     if (connection.accessor) {
@@ -321,6 +322,7 @@ export class ShaderCompiler {
                 node.resolvedOutputType = validation.outputType;
                 // Update the output type dynamically (always update for dynamic nodes)
                 if (node.outputs.length > 0 && (TypeRegistry.isAny(node.outputs[0].type) || node.isDynamicInput)) {
+                    console.log(`[Type Resolution] ${node.type} (${node.id}) resolved to ${validation.outputType}, inputTypes:`, inputTypes);
                     node.outputs[0].type = validation.outputType;
                 }
             }

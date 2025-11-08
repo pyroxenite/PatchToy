@@ -87,23 +87,36 @@ export class Node {
         const displayName = this.definition?.displayTitle || this.type;
         ctx.fillText(displayName, this.x + 10, this.y + 18);
 
-        // Color picker content
+        // Color picker content - fill entire node below title
         if (this.hasColorPicker && this.data.r !== undefined) {
-            const colorX = this.x + 10;
-            const colorY = this.y + 35;
-            const colorWidth = this.width - 20;
-            const colorHeight = 40;
+            const titleBarHeight = 30;
+            const colorX = this.x;
+            const colorY = this.y + titleBarHeight;
+            const colorWidth = this.width;
+            const colorHeight = this.height - titleBarHeight;
 
             const r = Math.floor(this.data.r * 255);
             const g = Math.floor(this.data.g * 255);
             const b = Math.floor(this.data.b * 255);
 
+            // Draw color fill with rounded bottom corners
             ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-            ctx.fillRect(colorX, colorY, colorWidth, colorHeight);
-
-            ctx.strokeStyle = '#444';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(colorX, colorY, colorWidth, colorHeight);
+            ctx.beginPath();
+            // Start at top-left (no rounding)
+            ctx.moveTo(colorX, colorY);
+            // Top-right (no rounding)
+            ctx.lineTo(colorX + colorWidth, colorY);
+            // Bottom-right (rounded)
+            ctx.lineTo(colorX + colorWidth, colorY + colorHeight - 8);
+            ctx.arcTo(colorX + colorWidth, colorY + colorHeight, colorX + colorWidth - 8, colorY + colorHeight, 8);
+            // Bottom edge
+            ctx.lineTo(colorX + 8, colorY + colorHeight);
+            // Bottom-left (rounded)
+            ctx.arcTo(colorX, colorY + colorHeight, colorX, colorY + colorHeight - 8, 8);
+            // Left edge back to top
+            ctx.lineTo(colorX, colorY);
+            ctx.closePath();
+            ctx.fill();
         }
 
         // Inputs
