@@ -13,6 +13,7 @@ import { ProjectDialogs } from './src/ui/ProjectDialogs.js';
 import { UIHelpers } from './src/ui/UIHelpers.js';
 import { GLSLCommentParser } from './src/utils/GLSLCommentParser.js';
 import { FloatingCodeEditor } from './src/ui/FloatingCodeEditor.js';
+import { ShaderPreview } from './src/rendering/ShaderPreview.js';
 
 class PatchToy {
     constructor() {
@@ -335,6 +336,16 @@ class PatchToy {
                     UIHelpers.updateAccountButton(this.apiClient);
                 });
             }
+        });
+
+        // Track mouse position for shader u_mouse uniform
+        // Listen on document so it works both on the node canvas and in fullscreen overlays
+        document.addEventListener('mousemove', (e) => {
+            // If in fullscreen, use the fullscreen element's bounds
+            const target = document.fullscreenElement || this.nodeCanvas;
+            const rect = target.getBoundingClientRect();
+            ShaderPreview.mouseX = (e.clientX - rect.left) / rect.width;
+            ShaderPreview.mouseY = 1.0 - (e.clientY - rect.top) / rect.height;
         });
 
         // Window resize

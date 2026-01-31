@@ -1,4 +1,8 @@
 export class ShaderPreview {
+    // Shared mouse position (normalized 0-1, Y flipped for WebGL)
+    static mouseX = 0;
+    static mouseY = 0;
+
     constructor(canvas, videoElement, options = {}) {
         this.videoElement = videoElement;
         this.isOffscreen = options.offscreen || false;
@@ -423,8 +427,9 @@ export class ShaderPreview {
             gl.uniform1f(this.uniforms.u_time, (Date.now() - this.startTime) / 1000.0);
         }
         if (this.uniforms.u_mouse) {
-            // TODO: Track mouse position
-            gl.uniform2f(this.uniforms.u_mouse, 0.0, 0.0);
+            gl.uniform2f(this.uniforms.u_mouse,
+                ShaderPreview.mouseX,
+                ShaderPreview.mouseY);
         }
 
         // Set camera texture

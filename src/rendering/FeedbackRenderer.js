@@ -1,3 +1,5 @@
+import { ShaderPreview } from './ShaderPreview.js';
+
 export class FeedbackRenderer {
     constructor(nodeGraph, shaderCompiler, sharedGL, uniformRegistry = null) {
         this.nodeGraph = nodeGraph;
@@ -258,6 +260,11 @@ export class FeedbackRenderer {
         }
         if (programData.uniforms.u_time) {
             gl.uniform1f(programData.uniforms.u_time, (Date.now() - this.startTime) / 1000.0);
+        }
+        if (programData.uniforms.u_mouse) {
+            gl.uniform2f(programData.uniforms.u_mouse,
+                ShaderPreview.mouseX,
+                ShaderPreview.mouseY);
         }
 
         // Set custom uniforms from shader compilation
