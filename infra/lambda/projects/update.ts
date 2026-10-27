@@ -35,6 +35,10 @@ export const handler = handle('Update project', async (event: APIGatewayProxyEve
   if (!Object.keys(patch).length) {
     return response.error('At least one of name, data, description or visibility is required', 400);
   }
+  // Keep the denormalized author current (spelling, and usernameLower on items from before it existed)
+  if (auth.username && (project.username !== auth.username || project.usernameLower !== auth.username.toLowerCase())) {
+    patch.username = auth.username;
+  }
 
   const updatedAt = await db.updateProject(projectId, patch);
   if (visibility === 'private' && before !== 'private') await dropThumbnail(project);

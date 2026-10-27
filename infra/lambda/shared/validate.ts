@@ -25,7 +25,22 @@ export const MAX_PROJECTS_PER_USER = 500;
 
 export const VISIBILITIES: Visibility[] = ['private', 'unlisted', 'public'];
 
-export const USERNAME_RE = /^[a-z0-9_-]{3,20}$/;
+/**
+ * Usernames keep the spelling the user typed ("SirKitBoi") but are case-insensitive:
+ * lookups, uniqueness and reserved-name checks use usernameKey() ("sirkitboi").
+ */
+export const USERNAME_RE = /^[A-Za-z0-9_-]{3,20}$/;
+
+/** Case-insensitive key of a username (reservation items, lookups, comparisons). */
+export function usernameKey(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+/** True when two usernames are the same handle (any case). */
+export function sameUsername(a: unknown, b: unknown): boolean {
+  const ka = usernameKey(a);
+  return !!ka && ka === usernameKey(b);
+}
 
 /** Handles that would collide with app routes or impersonate the service. */
 export const RESERVED_USERNAMES = new Set([
@@ -99,15 +114,20 @@ export function validateDisplayName(value: unknown): string {
   return cleanText(value, MAX_DISPLAY_NAME_LENGTH, 'Display name');
 }
 
-/** Lowercase + validate a username. Returns an error message, or null when valid. */
+/**
+ * Validate a username as typed (see normalizeUsername). Reserved names and look-alikes are
+ * checked on the key, so "Admin" is refused like "admin". Returns an error message, or null.
+ */
 export function usernameError(username: string): string | null {
-  if (!USERNAME_RE.test(username)) return 'Username must be 3-20 characters (lowercase letters, numbers, _ and -)';
-  if (RESERVED_USERNAMES.has(username) || isReservedLookalike(username)) return 'That username is reserved';
+  if (!USERNAME_RE.test(username)) return 'Username must be 3-20 characters (letters, numbers, _ and -)';
+  const key = usernameKey(username);
+  if (RESERVED_USERNAMES.has(key) || isReservedLookalike(key)) return 'That username is reserved';
   return null;
 }
 
+/** A username as sent by a client: trimmed, spelling (case) preserved. */
 export function normalizeUsername(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 /** A username suggestion from an email local part (legacy accounts without one). */

@@ -86,7 +86,7 @@ beforeEach(() => {
 describe('social previews: routes and helpers', () => {
   test('only /p/<id> and /u/<name> with valid ids are handled', () => {
     assert.deepEqual(routeOf('/p/1234-abcd'), { kind: 'project', id: '1234-abcd' });
-    assert.deepEqual(routeOf('/u/Alice/'), { kind: 'user', username: 'alice' });
+    assert.deepEqual(routeOf('/u/Alice/'), { kind: 'user', username: 'Alice' });
     for (const bad of ['/', '/index.html', '/p/', '/p/a/b', '/p/%E0%A4%A', '/p/<x>', '/u/ab', '/u/a%20b', '/explore', '/assets/x.js']) {
       assert.equal(routeOf(bad), null, bad);
     }

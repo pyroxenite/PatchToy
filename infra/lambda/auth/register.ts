@@ -62,6 +62,7 @@ export const handler = handle('Register', async (event: APIGatewayProxyEvent) =>
   if (!verificationEnabled()) return registerImmediately(email, username, plainPassword);
 
   // Usernames are public (/u/<name>): saying one is taken leaks nothing about emails.
+  // Case-insensitive: "sirkitboi" is taken while "SirKitBoi" exists.
   // (A name claimed by another pending sign-up isn't held: whoever verifies first gets
   // it, the other account gets a numbered variant and is asked to confirm it.)
   if (await db.getUserByUsername(username)) {
@@ -88,7 +89,7 @@ async function registerImmediately(email: string, username: string, plainPasswor
   if (await db.getUserByEmail(email)) {
     return response.error('Email already in use', 409);
   }
-  // Legacy accounts have no reservation item: check the username index too
+  // Any case; legacy accounts without a reservation item are found through the username index
   if (await db.getUserByUsername(username)) {
     return response.error('Username already taken', 409);
   }

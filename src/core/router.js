@@ -3,7 +3,7 @@
  *
  *   /                 editor
  *   /p/<projectId>    a cloud project (share link)
- *   /u/<username>     a user's page (public projects)
+ *   /u/<username>     a user's page (public projects; the name in any case)
  *   /explore[/tab]    the project browser (demos | community | mine)
  *
  * Legacy share links (?project=<id>) are rewritten to /p/<id>. The static host
@@ -59,12 +59,30 @@ export function takeVerifyToken() {
     return t;
 }
 
+/**
+ * Usernames keep the spelling their owner chose ("SirKitBoi") but are case-insensitive:
+ * /u/sirkitboi is the same page. Same rule as the API (infra/lambda/shared/validate.ts).
+ */
+export const USERNAME_RE = /^[A-Za-z0-9_-]{3,20}$/;
+export const USERNAME_RULE = '3–20 characters: letters, numbers, _ and -';
+
+/** Case-insensitive key of a username (comparisons). */
+export function usernameKey(name) {
+    return typeof name === 'string' ? name.trim().toLowerCase() : '';
+}
+
+/** True when two usernames are the same handle, in any case. */
+export function sameUsername(a, b) {
+    const k = usernameKey(a);
+    return !!k && k === usernameKey(b);
+}
+
 export function parseRoute(location = window.location) {
     const path = location.pathname.replace(/\/+$/, '') || '/';
     let m = /^\/p\/([^/]+)$/.exec(path);
     if (m) return { name: 'project', id: decodeURIComponent(m[1]) };
     m = /^\/u\/([^/]+)$/.exec(path);
-    if (m) return { name: 'user', username: decodeURIComponent(m[1]).toLowerCase() };
+    if (m) return { name: 'user', username: decodeURIComponent(m[1]) };
     m = /^\/explore(?:\/(demos|community|mine))?$/.exec(path);
     if (m) return { name: 'explore', tab: m[1] || null };
     const legacy = new URLSearchParams(location.search).get('project');

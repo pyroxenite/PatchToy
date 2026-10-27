@@ -1,7 +1,7 @@
 import { UIHelpers, h, avatarColor, initials } from './UIHelpers.js';
 import { icon } from './icons.js';
 import { DEMOS } from './demoManifest.js';
-import { navigate, paths, setMeta, userPageUrl } from '../core/router.js';
+import { navigate, paths, setMeta, userPageUrl, sameUsername } from '../core/router.js';
 import './community.css';
 import { visibilityOf } from '../managers/ProjectManager.js';
 import { VISIBILITY_LABELS } from '../managers/CommunityManager.js';
@@ -140,7 +140,8 @@ export class ProjectBrowser {
     }
 
     state(view = this.view) {
-        if (!this.states[view] || (view === 'user' && this.states.user.username !== this.username)) {
+        // Usernames are case-insensitive: /u/sirkitboi and /u/SirKitBoi are the same page
+        if (!this.states[view] || (view === 'user' && !sameUsername(this.states.user.username, this.username))) {
             this.states[view] = {
                 username: view === 'user' ? this.username : null,
                 items: [],
@@ -170,7 +171,7 @@ export class ProjectBrowser {
      */
     open({ view = null, username = null, welcome = false, updateUrl = true, presentation = null } = {}) {
         const next = view || DEFAULT_VIEW;
-        if (next === 'user') this.username = String(username || '').toLowerCase();
+        if (next === 'user') this.username = String(username || '').trim();
         this.welcome = welcome;
 
         const wanted = presentation || (this.isOpen() ? this.presentation : 'modal');
@@ -282,8 +283,15 @@ export class ProjectBrowser {
         fileBtn.classList.add('pb-file-btn');
         fileBtn.setAttribute('data-tip', 'Import a project file (.json)');
         fileBtn.setAttribute('data-kbd', comboText(['Shift', 'Mod', 'O']));
-        this.closeBtn = UIHelpers.button('Close', { variant: 'ghost', onClick: () => this.close() });
-        m.footer.append(hints, h('div', { className: 'pt-spacer' }), fileBtn, this.closeBtn);
+        // New project (the welcome screen: just close onto the empty canvas)
+        this.newBtn = UIHelpers.button('New project', {
+            variant: 'primary', icon: 'filePlus', onClick: () => {
+                const welcome = this.welcome;
+                this.close({ reason: 'opened' });
+                if (!welcome) this.app.handleNewProject();
+            }
+        });
+        m.footer.append(hints, h('div', { className: 'pt-spacer' }), fileBtn, this.newBtn);
     }
 
     /** The load-from-file dialog (hidden #loadFileInput); the browser closes first. */
@@ -453,12 +461,12 @@ export class ProjectBrowser {
             this.setHeading(welcome ? 'Welcome to PatchToy' : 'Open', welcome ? 'Start from a demo' : 'Demos',
                 welcome ? 'Every demo is a live node graph. Open one to see how it is patched, then tweak anything.'
                     : 'Open a demo to see how it is patched. It replaces the graph on the canvas.');
-            this.closeBtn.setLabel(welcome ? 'Start from scratch' : 'Close');
+            this.newBtn.setLabel(welcome ? 'Start from scratch' : 'New project');
             meta({ title: 'Demos' });
             this.renderDemos();
             return;
         }
-        this.closeBtn.setLabel('Close');
+        this.newBtn.setLabel('New project');
 
         const legacy = this.api.isEnabled() && this.api.isLegacy();
         if (view === 'community') {
@@ -670,6 +678,7 @@ export class ProjectBrowser {
                 items = res.projects || [];
                 cursor = res.cursor || null;
                 st.user = res.user || null;
+                this.adoptUserSpelling(st);
             }
             if (seq !== st.seq || this.states[view] !== st) return; // superseded (search / sort changed)
             const known = new Set(st.items.map(p => p.id));
@@ -765,7 +774,7 @@ export class ProjectBrowser {
                     actions: [['Save current patch', () => { this.close({ reason: 'opened' }); this.app.saveProject(); }, 'primary'], ['Open file…', () => this.openFile()]]
                 });
             } else if (this.view === 'user') {
-                const self = this.api.getCurrentUser()?.username === this.username;
+                const self = sameUsername(this.api.getCurrentUser()?.username, this.username);
                 this.showState({
                     icon: 'gallery',
                     title: self ? 'You haven’t shared any projects yet' : `@${this.username} hasn’t shared any projects yet`,
@@ -815,7 +824,7 @@ export class ProjectBrowser {
         const copy = UIHelpers.button('Copy page link', { size: 'sm', icon: 'link' });
         copy.addEventListener('click', () => this.app.community?.copyText(userPageUrl(name), copy));
         actions.appendChild(copy);
-        if (this.api.getCurrentUser()?.username === name) {
+        if (sameUsername(this.api.getCurrentUser()?.username, name)) {
             actions.appendChild(UIHelpers.button('Edit profile', { size: 'sm', icon: 'pencil', onClick: () => this.app.community?.showProfileDialog() }));
         }
 
@@ -943,8 +952,23 @@ export class ProjectBrowser {
     }
 
     openUser(username) {
-        this.username = String(username).toLowerCase();
+        this.username = String(username).trim();
         this.setView('user');
+    }
+
+    /**
+     * The page was opened as typed (/u/sirkitboi): show the owner's spelling (@SirKitBoi)
+     * once the API answered, and put it in the address bar.
+     */
+    adoptUserSpelling(st) {
+        const shown = st.user?.username;
+        if (!shown || shown === this.username || !sameUsername(shown, this.username)) return;
+        if (this.states.user !== st) return;
+        this.username = shown;
+        st.username = shown;
+        if (this.isOpen() && this.view === 'user' && /^\/u\/[^/]+\/?$/.test(window.location.pathname)) {
+            navigate(paths.user(shown), { silent: true, replace: true });
+        }
     }
 
     async openProject(p, card) {

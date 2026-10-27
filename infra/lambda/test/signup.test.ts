@@ -112,9 +112,10 @@ describe('verify-email', () => {
     const ok = await verifyWith(token);
     assert.equal(ok.statusCode, 200, ok.body);
     const body = json(ok);
-    assert.equal(body.username, 'ada');
+    assert.equal(body.username, 'Ada', 'spelling kept');
     assert.equal(body.email, 'ada@example.com');
-    assert.equal(json(await verify.handler(event({ token: body.token }))).username, 'ada', 'the session works');
+    assert.equal(await store.getHandleOwner('ada'), body.userId, 'reserved under its key');
+    assert.equal(json(await verify.handler(event({ token: body.token }))).username, 'Ada', 'the session works');
     const user = await store.getUserByEmail('ada@example.com');
     assert.ok(user && user.emailVerifiedAt && user.tokenVersion === 0 && user.projectCount === 0);
     assert.equal((await signin('ada')).statusCode, 200, 'password chosen at sign-up');

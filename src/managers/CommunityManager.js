@@ -2,7 +2,7 @@ import { UIHelpers, h } from '../ui/UIHelpers.js';
 import { AuthDialogs } from '../ui/AuthDialogs.js';
 import { FloatingCodeEditor } from '../ui/FloatingCodeEditor.js';
 import { fitGraphToView, mainPreview } from '../ui/DemoGallery.js';
-import { parseRoute, navigate, onRouteChange, paths, projectShareUrl, setMeta, takeVerifyToken } from '../core/router.js';
+import { parseRoute, navigate, onRouteChange, paths, projectShareUrl, setMeta, takeVerifyToken, sameUsername, USERNAME_RE, USERNAME_RULE } from '../core/router.js';
 import { captureThumbnail } from '../services/thumbnail.js';
 import { icon } from '../ui/icons.js';
 import { visibilityOf } from './ProjectManager.js';
@@ -458,7 +458,7 @@ export class CommunityManager {
      */
     async copyShareLink(project, { onChange = null } = {}) {
         const url = projectShareUrl(project.id);
-        const own = this.api.getCurrentUser()?.username === project.username || project.isOwner;
+        const own = sameUsername(this.api.getCurrentUser()?.username, project.username) || project.isOwner;
         // The 1.x list doesn't report visibility: ask as if private, without claiming it is
         const unknown = project.visibility === undefined && project.isPublic === undefined;
         if (visibilityOf(project) === 'private' && own) {
@@ -674,20 +674,20 @@ export class CommunityManager {
                 ? `Your projects are shown as @${user.username}. Keep it or pick another one.`
                 : 'Your username and display name appear on your page and on your public projects. Your email is never shown.'
         });
-        const username = UIHelpers.field({ label: 'Username', value: user.username, hint: '3–20 characters: lowercase letters, numbers, _ and -. Your page: /u/<username>', autocomplete: 'username' });
+        const username = UIHelpers.field({ label: 'Username', value: user.username, hint: `${USERNAME_RULE}. Capitals are kept, but @Name and @name are the same handle. Your page: /u/<username>`, autocomplete: 'username' });
         username.input.maxLength = 20;
         const display = UIHelpers.field({ label: 'Display name (optional)', value: this.api.profile?.displayName || user.displayName || '', placeholder: 'Ada Lovelace' });
         display.input.maxLength = 40;
         m.body.append(username.field, display.field);
         const save = UIHelpers.button(firstTime ? 'Keep this username' : 'Save', { variant: 'primary' });
         username.input.addEventListener('input', () => {
-            if (firstTime) save.setLabel(username.input.value.trim().toLowerCase() === user.username ? 'Keep this username' : 'Save');
+            if (firstTime) save.setLabel(username.input.value.trim() === user.username ? 'Keep this username' : 'Save');
         });
         m.footer.append(UIHelpers.button('Cancel', { variant: 'ghost', onClick: () => m.close() }), save);
 
         const submit = async () => {
-            const name = username.input.value.trim().toLowerCase();
-            if (!/^[a-z0-9_-]{3,20}$/.test(name)) return m.setError('Usernames are 3–20 characters: lowercase letters, numbers, _ and -.');
+            const name = username.input.value.trim();
+            if (!USERNAME_RE.test(name)) return m.setError(`Usernames are ${USERNAME_RULE}.`);
             save.disabled = true;
             try {
                 const body = { username: name };

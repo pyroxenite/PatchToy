@@ -64,7 +64,8 @@ export const GENERIC_TITLE = 'PatchToy — Node-based GLSL shader playground';
 export const GENERIC_DESCRIPTION = 'PatchToy is a node-based GLSL shader editor: patch nodes together like a modular synth and watch live WebGL previews update as you go.';
 
 const PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const USERNAME_RE = /^[a-z0-9_-]{3,20}$/;
+/** Usernames keep their spelling ("SirKitBoi") and are case-insensitive (same rule as shared/validate.ts). */
+const USERNAME_RE = /^[A-Za-z0-9_-]{3,20}$/;
 
 // ------------------------------------------------------------------ text helpers
 
@@ -107,7 +108,7 @@ export function routeOf(uri: string): Route | null {
   }
   m = /^\/u\/([^/]+)$/.exec(path);
   if (m) {
-    const username = safeDecode(m[1])?.toLowerCase();
+    const username = safeDecode(m[1]);
     return username && USERNAME_RE.test(username) ? { kind: 'user', username } : null;
   }
   return null;
@@ -232,11 +233,16 @@ export function projectPreview(cfg: PreviewConfig, id: string, p: any): Meta | n
   };
 }
 
-/** A user page as a preview (public profile + public projects only), or null. */
+/**
+ * A user page as a preview (public profile + public projects only), or null. `username` is
+ * the path's, in any case; the preview shows the spelling the API returns ("SirKitBoi").
+ */
 export function userPreview(cfg: PreviewConfig, username: string, body: any): Meta | null {
   const user = body?.user;
-  if (!user || typeof user !== 'object' || String(user.username || '').toLowerCase() !== username) return null;
-  const handle = `@${username}`;
+  if (!user || typeof user !== 'object' || typeof user.username !== 'string') return null;
+  const shown = user.username;
+  if (!USERNAME_RE.test(shown) || shown.toLowerCase() !== username.toLowerCase()) return null;
+  const handle = `@${shown}`;
   const display = cleanText(user.displayName, 40);
   const projects = Array.isArray(body.projects) ? body.projects.filter((c: any) => c && c.isPublic === true && (c.visibility ?? 'public') === 'public') : [];
   const count = projects.length ? ` · ${projects.length}${body.cursor ? '+' : ''} public project${projects.length === 1 && !body.cursor ? '' : 's'}` : '';
@@ -245,7 +251,7 @@ export function userPreview(cfg: PreviewConfig, username: string, body: any): Me
   return {
     title: display ? `${display} (${handle})` : handle,
     description: `Shader patches by ${handle} on PatchToy${count}.`,
-    url: `${cfg.siteUrl}/u/${encodeURIComponent(username)}`,
+    url: `${cfg.siteUrl}/u/${encodeURIComponent(shown)}`,
     image,
     imageAlt: image ? `A project by ${handle}` : undefined,
     type: 'profile',
@@ -289,7 +295,7 @@ export function createHandler(cfg: PreviewConfig | null | undefined, { fetchImpl
   }
 
   async function routeMeta(c: PreviewConfig, route: Route, budget: number): Promise<Meta | null> {
-    const key = route.kind === 'project' ? `p:${route.id}` : `u:${route.username}`;
+    const key = route.kind === 'project' ? `p:${route.id}` : `u:${route.username.toLowerCase()}`;
     const hit = metaCache.get(key);
     if (hit && hit.expires > now()) return hit.value;
     const url = route.kind === 'project'

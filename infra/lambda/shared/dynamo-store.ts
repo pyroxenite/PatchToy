@@ -11,8 +11,9 @@ import {
 import {
   Store, User, UserPatch, Project, ProjectPatch, ProjectSummary, Page,
   PublicListOptions, UserProjectsOptions, encodeCursor, decodeCursor,
-  byPopularity, InvalidCursorError, ResetTokenRecord, AuthFailures, PendingSignup,
+  byPopularity, matchesQuery, InvalidCursorError, ResetTokenRecord, AuthFailures, PendingSignup,
 } from './store';
+import { usernameKey } from './validate';
 
 const USERS_TABLE = () => process.env.USERS_TABLE || 'PatchToy-Users';
 const PROJECTS_TABLE = () => process.env.PROJECTS_TABLE || 'PatchToy-Projects';
@@ -37,7 +38,12 @@ const MAX_PAGE_ITEMS = 100;
 const OWN_LIST_CAP = 500;
 /** User page fallback (no user-public index yet): pages of the public index scanned for one author. */
 const USER_PAGE_FALLBACK_PAGES = 2;
-/** Reservation items in the users table that make usernames unique. */
+/**
+ * Reservation items in the users table (`userId = "username#<key>"`, `handleOwner`): they make
+ * usernames unique and are the case-insensitive username index (key = usernameKey(name)).
+ * 1.x accounts reserved by the first backfill may still have an item spelled as typed
+ * ("username#SirKitBoi"); sign-in and the backfill replace it with the key item.
+ */
 const HANDLE_PREFIX = 'username#';
 
 /** Attributes returned for project cards (everything but the graph data and view bookkeeping). */
@@ -116,6 +122,23 @@ export class DynamoStore implements Store {
   }
 
   async getUserByUsername(username: string): Promise<User | null> {
+    const raw = String(username || '').trim();
+    const key = usernameKey(raw);
+    if (!key) return null;
+    const owner = await this.getHandleOwner(key);
+    if (owner) {
+      const user = await this.getUser(owner);
+      // A stale reservation (owner renamed since, release failed) falls through to the index
+      if (user && usernameKey(user.username) === key) return user;
+    }
+    // No reservation (accounts the backfill hasn't reached): exact match, as typed then as the key
+    const exact = await this.queryUsername(raw);
+    if (exact || key === raw) return exact;
+    return this.queryUsername(key);
+  }
+
+  /** username-index, exact (case-sensitive) match. */
+  private async queryUsername(username: string): Promise<User | null> {
     const r = await this.db.send(new QueryCommand({
       TableName: USERS_TABLE(),
       IndexName: 'username-index',
@@ -161,10 +184,12 @@ export class DynamoStore implements Store {
   }
 
   async reserveUsername(username: string, userId: string): Promise<boolean> {
+    const key = usernameKey(username);
+    if (!key) return false;
     try {
       await this.db.send(new PutCommand({
         TableName: USERS_TABLE(),
-        Item: { userId: HANDLE_PREFIX + username, handleOwner: userId, createdAt: new Date().toISOString() },
+        Item: { userId: HANDLE_PREFIX + key, handleOwner: userId, createdAt: new Date().toISOString() },
         ConditionExpression: 'attribute_not_exists(userId) OR handleOwner = :owner',
         ExpressionAttributeValues: { ':owner': userId },
       }));
@@ -176,10 +201,24 @@ export class DynamoStore implements Store {
   }
 
   async releaseUsername(username: string, userId: string): Promise<void> {
+    const raw = String(username || '').trim();
+    const key = usernameKey(raw);
+    if (key) await this.releaseHandle(key, userId);
+    if (raw && raw !== key) await this.releaseHandle(raw, userId);
+  }
+
+  async getHandleOwner(name: string): Promise<string | null> {
+    if (!name) return null;
+    const r = await this.db.send(new GetCommand({ TableName: USERS_TABLE(), Key: { userId: HANDLE_PREFIX + name } }));
+    return typeof r.Item?.handleOwner === 'string' ? r.Item.handleOwner : null;
+  }
+
+  async releaseHandle(name: string, userId: string): Promise<void> {
+    if (!name) return;
     try {
       await this.db.send(new DeleteCommand({
         TableName: USERS_TABLE(),
-        Key: { userId: HANDLE_PREFIX + username },
+        Key: { userId: HANDLE_PREFIX + name },
         ConditionExpression: 'handleOwner = :owner',
         ExpressionAttributeValues: { ':owner': userId },
       }));
@@ -199,6 +238,7 @@ export class DynamoStore implements Store {
     const item: Project = {
       ...project,
       nameLower: project.name.toLowerCase(),
+      usernameLower: (project.username || '').toLowerCase(),
       views: project.views || 0,
       forks: project.forks || 0,
     };
@@ -240,7 +280,10 @@ export class DynamoStore implements Store {
     if (patch.data !== undefined) set('data', patch.data);
     if (patch.nodeCount !== undefined) set('nodeCount', patch.nodeCount);
     if (patch.hasJS !== undefined) set('hasJS', patch.hasJS);
-    if (patch.username !== undefined) set('username', patch.username);
+    if (patch.username !== undefined) {
+      set('username', patch.username);
+      set('usernameLower', patch.username.toLowerCase());
+    }
     if (patch.publishedAt !== undefined) set('publishedAt', patch.publishedAt);
     if (patch.thumbKey === null) remove('thumbKey');
     else if (patch.thumbKey !== undefined) set('thumbKey', patch.thumbKey);
@@ -279,18 +322,21 @@ export class DynamoStore implements Store {
   /**
    * Run a query until `limit` items were collected, the index is exhausted or
    * `maxPages` pages were read (filtered queries can return short pages).
+   * `keep` filters each page in memory, like a FilterExpression (same reads billed),
+   * for matches DynamoDB can't express (case-insensitive author search).
    */
-  private async collect(input: QueryCommandInput, limit: number, start: Record<string, any> | undefined, maxPages = 5) {
+  private async collect(input: QueryCommandInput, limit: number, start: Record<string, any> | undefined, maxPages = 5, keep?: (item: any) => boolean) {
     const items: any[] = [];
+    const filtered = !!input.FilterExpression || !!keep;
     let key = start;
     let pages = 0;
     do {
       const r = await this.db.send(new QueryCommand({
         ...input,
-        Limit: Math.min(MAX_PAGE_ITEMS, input.FilterExpression ? Math.max(limit, 50) : limit - items.length),
+        Limit: Math.min(MAX_PAGE_ITEMS, filtered ? Math.max(limit, 50) : limit - items.length),
         ExclusiveStartKey: key,
       }));
-      items.push(...(r.Items || []));
+      items.push(...(keep ? (r.Items || []).filter(keep) : (r.Items || [])));
       key = r.LastEvaluatedKey;
       pages++;
     } while (key && items.length < limit && pages < maxPages);
@@ -365,15 +411,15 @@ export class DynamoStore implements Store {
       ExpressionAttributeValues: values,
       ScanIndexForward: false,
     };
-    if (opts.q) {
-      names['#nameLower'] = 'nameLower';
-      names['#username'] = 'username';
-      values[':q'] = opts.q;
-      base.FilterExpression = 'contains(#nameLower, :q) OR contains(#username, :q)';
-    }
+    // Search (title or author, case-insensitive): matched in memory on the card attributes.
+    // DynamoDB's contains() is case-sensitive, and `usernameLower` isn't projected into the
+    // public indexes (a GSI's projection can't change without rebuilding it), so the
+    // author is lowercased here; the reads billed are the same as with a FilterExpression.
+    const q = opts.q;
+    const keep = q ? (item: any) => matchesQuery(item, q) : undefined;
 
     if (opts.sort === 'popular' && POPULAR_INDEX()) {
-      const { items, lastKey } = await this.collect({ ...base, IndexName: POPULAR_INDEX() }, opts.limit, startKey(opts.cursor, 'popular', { visibility: 'public' }));
+      const { items, lastKey } = await this.collect({ ...base, IndexName: POPULAR_INDEX() }, opts.limit, startKey(opts.cursor, 'popular', { visibility: 'public' }), 5, keep);
       return { items: items as ProjectSummary[], cursor: lastKey ? encodeCursor(lastKey) : null };
     }
 
@@ -382,14 +428,14 @@ export class DynamoStore implements Store {
       const c = decodeCursor<{ o: number }>(opts.cursor);
       if (c && (typeof c.o !== 'number' || c.o < 0 || c.o > POPULAR_SCAN_CAP)) throw new InvalidCursorError();
       const offset = c ? c.o : 0;
-      const { items } = await this.collect({ ...base, IndexName: PUBLIC_INDEX() }, POPULAR_SCAN_CAP, undefined, POPULAR_SCAN_PAGES);
+      const { items } = await this.collect({ ...base, IndexName: PUBLIC_INDEX() }, POPULAR_SCAN_CAP, undefined, POPULAR_SCAN_PAGES, keep);
       const ranked = (items as ProjectSummary[]).sort(byPopularity);
       const page = ranked.slice(offset, offset + opts.limit);
       const next = offset + page.length;
       return { items: page, cursor: next < ranked.length ? encodeCursor({ o: next }) : null };
     }
 
-    const { items, lastKey } = await this.collect({ ...base, IndexName: PUBLIC_INDEX() }, opts.limit, startKey(opts.cursor, 'public', { visibility: 'public' }));
+    const { items, lastKey } = await this.collect({ ...base, IndexName: PUBLIC_INDEX() }, opts.limit, startKey(opts.cursor, 'public', { visibility: 'public' }), 5, keep);
     return { items: items as ProjectSummary[], cursor: lastKey ? encodeCursor(lastKey) : null };
   }
 

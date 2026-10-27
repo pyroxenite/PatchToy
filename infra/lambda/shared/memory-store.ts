@@ -3,6 +3,7 @@ import {
   PublicListOptions, UserProjectsOptions, toSummary, encodeCursor, decodeCursor,
   byPopularity, matchesQuery, InvalidCursorError, Visibility, ResetTokenRecord, AuthFailures, PendingSignup,
 } from './store';
+import { usernameKey } from './validate';
 
 const clone = <T>(v: T): T => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
 
@@ -24,7 +25,7 @@ function applyVisibility(p: Project, v: Visibility) {
  */
 export class MemoryStore implements Store {
   users = new Map<string, User>();
-  handles = new Map<string, string>(); // username -> userId
+  handles = new Map<string, string>(); // reservation item name (the username key; 1.x items as spelled) -> userId
   projects = new Map<string, Project>();
   /** Security table: rate counters, claims, sign-in failures, reset tokens (key -> { value, expires }). */
   security = new Map<string, { value: any; expires: number }>();
@@ -57,7 +58,16 @@ export class MemoryStore implements Store {
   }
 
   async getUserByUsername(username: string) {
-    for (const u of this.users.values()) if (u.username === username) return clone(u);
+    const raw = String(username || '').trim();
+    const key = usernameKey(raw);
+    if (!key) return null;
+    const owner = this.handles.get(key);
+    const held = owner ? this.users.get(owner) : undefined;
+    // A stale reservation (owner renamed since) falls through to the index
+    if (held && usernameKey(held.username) === key) return clone(held);
+    for (const name of key === raw ? [raw] : [raw, key]) {
+      for (const u of this.users.values()) if (u.username === name) return clone(u);
+    }
     return null;
   }
 
@@ -77,14 +87,26 @@ export class MemoryStore implements Store {
   }
 
   async reserveUsername(username: string, userId: string) {
-    const holder = this.handles.get(username);
+    const key = usernameKey(username);
+    if (!key) return false;
+    const holder = this.handles.get(key);
     if (holder && holder !== userId) return false;
-    this.handles.set(username, userId);
+    this.handles.set(key, userId);
     return true;
   }
 
   async releaseUsername(username: string, userId: string) {
-    if (this.handles.get(username) === userId) this.handles.delete(username);
+    const raw = String(username || '').trim();
+    await this.releaseHandle(usernameKey(raw), userId);
+    if (raw !== usernameKey(raw)) await this.releaseHandle(raw, userId);
+  }
+
+  async getHandleOwner(name: string) {
+    return this.handles.get(name) ?? null;
+  }
+
+  async releaseHandle(name: string, userId: string) {
+    if (this.handles.get(name) === userId) this.handles.delete(name);
   }
 
   async getProject(projectId: string) {
@@ -94,6 +116,7 @@ export class MemoryStore implements Store {
   async createProject(project: Project) {
     const p = clone(project);
     p.nameLower = p.name.toLowerCase();
+    p.usernameLower = (p.username || '').toLowerCase();
     applyVisibility(p, project.visibility === 'public' ? 'public' : p.isPublic ? 'unlisted' : 'private');
     p.views = p.views || 0;
     p.forks = p.forks || 0;
@@ -112,7 +135,10 @@ export class MemoryStore implements Store {
     if (patch.data !== undefined) p.data = clone(patch.data);
     if (patch.nodeCount !== undefined) p.nodeCount = patch.nodeCount;
     if (patch.hasJS !== undefined) p.hasJS = patch.hasJS;
-    if (patch.username !== undefined) p.username = patch.username;
+    if (patch.username !== undefined) {
+      p.username = patch.username;
+      p.usernameLower = patch.username.toLowerCase();
+    }
     if (patch.publishedAt !== undefined) p.publishedAt = patch.publishedAt;
     if (patch.thumbKey === null) delete p.thumbKey;
     else if (patch.thumbKey !== undefined) p.thumbKey = patch.thumbKey;
@@ -167,7 +193,11 @@ export class MemoryStore implements Store {
   }
 
   async renameUserProjects(userId: string, username: string) {
-    for (const p of this.projects.values()) if (p.userId === userId) p.username = username;
+    for (const p of this.projects.values()) {
+      if (p.userId !== userId) continue;
+      p.username = username;
+      p.usernameLower = username.toLowerCase();
+    }
   }
 
   async incrementTokenVersion(userId: string) {

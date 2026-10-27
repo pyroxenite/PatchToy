@@ -122,6 +122,14 @@ AWS_REGION=eu-west-3 node infra/scripts/backfill-community.mjs --apply  # writes
 Idempotent. It lists any user without a username (they get one derived from their email
 on next login, and are asked to keep or change it).
 
+**Usernames are case-preserving, case-insensitive.** The stored `username` keeps the
+spelling the user chose (`SirKitBoi`); lookups (`/u/sirkitboi`, sign-in) and uniqueness go
+through the reservation item named after the lowercase key (`username#sirkitboi`). The
+backfill writes those key items, deletes mixed-case items an earlier run wrote
+(`username#SirKitBoi`) once the same user holds the key, reports names that collide only by
+case between two users, and adds `usernameLower` to projects. Re-run it after deploying a
+backend that has this change; accounts it hasn't reached are fixed on their next sign-in.
+
 API smoke test:
 
 ```bash

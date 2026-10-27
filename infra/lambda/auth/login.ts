@@ -4,8 +4,9 @@ import * as jwt from '../shared/jwt';
 import * as password from '../shared/password';
 import { getStore, Store, User } from '../shared/store';
 import { handle, parseBody, clientIp, enforceLimit, HttpError } from '../shared/http';
-import { usernameFromEmail, normalizeUsername, usernameError } from '../shared/validate';
+import { usernameFromEmail } from '../shared/validate';
 import { profileOf } from '../shared/profile';
+import { ensureUsernameReservation } from '../shared/usernames';
 import { LIMITS, loginLockMs } from '../shared/limits';
 
 /**
@@ -14,7 +15,11 @@ import { LIMITS, loginLockMs } from '../shared/limits';
  * prompts the user to keep or change it (user.usernameGenerated).
  */
 export async function ensureUsername(db: Store, user: User): Promise<User> {
-  if (user.username) return lowercaseLegacyUsername(db, user);
+  if (user.username) {
+    // 1.x handles: reserve the case-insensitive key; the spelling is kept as is
+    await ensureUsernameReservation(db, user);
+    return user;
+  }
   const base = usernameFromEmail(user.email);
   for (let i = 0; i < 50; i++) {
     const candidate = i === 0 ? base : `${base.slice(0, 20 - String(i + 1).length)}${i + 1}`;
@@ -24,32 +29,6 @@ export async function ensureUsername(db: Store, user: User): Promise<User> {
     return { ...user, username: candidate, usernameGenerated: true };
   }
   throw new Error('Could not derive a username');
-}
-
-/**
- * 1.x stored usernames as typed ("SirKitBoi"); 2.0 looks handles up lowercased, so
- * such accounts had no user page and could not sign in by username. On sign-in the
- * handle becomes lowercase (reserved, projects re-labelled, old reservation released)
- * and the original spelling is kept as the display name. Left as is if the lowercase
- * handle is invalid or taken by someone else.
- */
-export async function lowercaseLegacyUsername(db: Store, user: User): Promise<User> {
-  const lower = normalizeUsername(user.username);
-  if (lower === user.username) return user;
-  try {
-    if (usernameError(lower)) return user;
-    const holder = await db.getUserByUsername(lower);
-    if (holder && holder.userId !== user.userId) return user;
-    if (!(await db.reserveUsername(lower, user.userId))) return user;
-    const displayName = user.displayName || user.username;
-    await db.updateUser(user.userId, { username: lower, displayName });
-    await db.renameUserProjects(user.userId, lower);
-    await db.releaseUsername(user.username, user.userId);
-    return { ...user, username: lower, displayName };
-  } catch (err: any) {
-    console.warn('Login: lowercasing the username failed', err?.name || err);
-    return user;
-  }
 }
 
 const INVALID = 'Invalid credentials';
@@ -71,10 +50,10 @@ export const handler = handle('Login', async (event: APIGatewayProxyEvent) => {
 
   await enforceLimit('login-ip', clientIp(event), LIMITS.loginPerIp.limit, LIMITS.loginPerIp.windowSec);
 
-  // Find user by email or username
+  // Find user by email or username (any case: SirKitBoi, sirkitboi)
   const loginLower = login.trim().toLowerCase();
   let user = await db.getUserByEmail(loginLower);
-  if (!user) user = await db.getUserByUsername(loginLower);
+  if (!user && !loginLower.includes('@')) user = await db.getUserByUsername(login.trim());
 
   const failureKey = user ? `u#${user.userId}` : `n#${loginLower}`;
   const now = new Date();

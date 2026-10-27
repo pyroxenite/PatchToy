@@ -154,13 +154,69 @@ describe('DynamoStore', () => {
     await assert.rejects(s.listUserProjects('me', { cursor: encodeCursor({ projectId: 'a', userId: 'other', updatedAt: 'T' }) }), InvalidCursorError);
   });
 
-  test('search uses a filter on title and author', async () => {
-    const r = recorder(() => ({ Items: [] }));
+  test('search matches title or author case-insensitively (in memory, on card attributes)', async () => {
+    const r = recorder(() => ({
+      Items: [
+        { projectId: 'a', name: 'Orbit', nameLower: 'orbit', username: 'x' },
+        { projectId: 'b', name: 'Glow', nameLower: 'glow', username: 'SirKitBoi' },
+        { projectId: 'c', name: 'Other', nameLower: 'other', username: 'zed' },
+      ],
+    }));
     const s = new DynamoStore(r.client);
-    await s.listPublicProjects({ sort: 'new', limit: 10, q: 'orbit' });
+    const byTitle = await s.listPublicProjects({ sort: 'new', limit: 10, q: 'orbit' });
+    assert.deepEqual(byTitle.items.map(p => p.projectId), ['a']);
     const { input } = r.sent[0];
-    assert.equal(input.FilterExpression, 'contains(#nameLower, :q) OR contains(#username, :q)');
-    assert.equal(input.ExpressionAttributeValues[':q'], 'orbit');
+    assert.equal(input.FilterExpression, undefined, 'contains() is case-sensitive: not used');
+    assert.ok(input.Limit >= 50, 'filtered pages read like a FilterExpression');
+    const byAuthor = await s.listPublicProjects({ sort: 'new', limit: 10, q: 'sirkit' });
+    assert.deepEqual(byAuthor.items.map(p => p.projectId), ['b']);
+    const popular = await s.listPublicProjects({ sort: 'popular', limit: 10, q: 'kitboi' });
+    assert.deepEqual(popular.items.map(p => p.projectId), ['b']);
+  });
+
+  test('usernames: reservations under the lowercase key; lookups in any case, legacy rows through the index', async () => {
+    const users: Record<string, any> = { u1: { userId: 'u1', username: 'SirKitBoi' }, u2: { userId: 'u2', username: 'Legacy' } };
+    const handles: Record<string, string> = { 'username#sirkitboi': 'u1' };
+    const r = recorder((cmd) => {
+      const n = cmd.constructor.name;
+      const inp = cmd.input;
+      if (n === 'GetCommand') {
+        const id = inp.Key.userId;
+        if (handles[id]) return { Item: { userId: id, handleOwner: handles[id] } };
+        return { Item: users[id] };
+      }
+      if (n === 'QueryCommand' && inp.IndexName === 'username-index') {
+        const v = inp.ExpressionAttributeValues[':username'];
+        return { Items: Object.values(users).filter(u => u.username === v) };
+      }
+      return {};
+    });
+    const s = new DynamoStore(r.client);
+    assert.equal((await s.getUserByUsername('SIRKITBOI'))?.userId, 'u1');
+    assert.equal((await s.getUserByUsername('sirkitboi'))?.username, 'SirKitBoi');
+    assert.ok(!r.sent.some(c => c.input.IndexName === 'username-index'), 'the reservation answers, no index query');
+    // No reservation: exact spelling through the username index
+    assert.equal((await s.getUserByUsername('Legacy'))?.userId, 'u2');
+    assert.equal(await s.getUserByUsername('nobody'), null);
+
+    r.sent.length = 0;
+    await s.reserveUsername('SirKitBoi', 'u1');
+    assert.equal(r.sent[0].input.Item.userId, 'username#sirkitboi');
+    r.sent.length = 0;
+    await s.releaseUsername('SirKitBoi', 'u1');
+    assert.deepEqual(r.sent.map(c => c.input.Key.userId), ['username#sirkitboi', 'username#SirKitBoi']);
+    assert.ok(r.sent.every(c => c.input.ConditionExpression === 'handleOwner = :owner'));
+  });
+
+  test('projects carry usernameLower (display spelling kept in username)', async () => {
+    const r = recorder(() => ({ Attributes: { updatedAt: 'T' } }));
+    const s = new DynamoStore(r.client);
+    await s.createProject({ projectId: 'p', userId: 'u', username: 'SirKitBoi', name: 'N', data: {}, isPublic: false, createdAt: 'c', updatedAt: 'u' });
+    assert.equal(r.sent[0].input.Item.username, 'SirKitBoi');
+    assert.equal(r.sent[0].input.Item.usernameLower, 'sirkitboi');
+    await s.updateProject('p', { username: 'sirKitBoi' }, { touch: false });
+    assert.equal(r.sent[1].input.ExpressionAttributeValues[':username'], 'sirKitBoi');
+    assert.equal(r.sent[1].input.ExpressionAttributeValues[':usernameLower'], 'sirkitboi');
   });
 
   test('popular without the views index ranks the newest public projects in memory', async () => {

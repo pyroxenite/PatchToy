@@ -499,6 +499,39 @@ try {
     await p.close();
   });
 
+  await step('usernames keep capitals but ignore case (/u/ALICE, sign-up as DoraTheDev, "My page")', async () => {
+    // Any case reaches the page; the address bar and heading take the owner's spelling
+    const p = await anon.context.newPage();
+    await p.goto(url('/u/ALICE'), { waitUntil: 'domcontentloaded' });
+    await p.waitForSelector(`.pb-card[data-id="${projectId}"]`, { timeout: 20000 });
+    await p.waitForFunction(() => location.pathname === '/u/alice');
+    await p.close();
+
+    const { page, context } = await newUser('dora');
+    await page.goto(url('/'), { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.toy?.community);
+    await register(page, 'DoraTheDev');
+    const api = await (await fetch(`${API}/api/users/dorathedev`)).json();
+    assert(api.user?.username === 'DoraTheDev', `stored spelling ${JSON.stringify(api.user)}`);
+    // The same name in another case is taken
+    const dup = await fetch(`${API}/api/auth/register`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'dora2@example.com', username: 'dorathedev', password: 'correct horse battery' }),
+    });
+    assert(dup.status === 409, `duplicate in another case: ${dup.status}`);
+    // Own page in another case: still "mine" (Edit profile shown)
+    await page.evaluate(() => window.toy.projectBrowser.open({ view: 'user', username: 'DORATHEDEV' }));
+    await page.waitForSelector('.pb-user-actions >> text=Edit profile');
+    await page.waitForFunction(() => location.pathname === '/u/DoraTheDev');
+    // Case-only profile change: allowed, keeps the session
+    await page.locator('.pb-user-actions >> text=Edit profile').click();
+    await page.getByLabel('Username').fill('doraTheDev');
+    await page.locator('.pt-modal', { hasText: 'Edit profile' }).getByRole('button', { name: 'Save' }).click();
+    await page.waitForSelector('.pt-toast:has-text("Profile saved")');
+    await page.waitForFunction(() => window.toy.apiClient.getCurrentUser()?.username === 'doraTheDev');
+    await context.close();
+  });
+
   await step('routing keeps automation / dev query params (?bridge, ?bridgeToken, ?headless, ?api)', async () => {
     const { page } = await newUser('params');
     const qs = `bridge=off&headless=1&bridgeToken=tok123&api=${encodeURIComponent(API)}&devflag=1`;

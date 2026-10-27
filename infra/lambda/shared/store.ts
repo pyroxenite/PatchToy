@@ -9,6 +9,10 @@
 export interface User {
   userId: string;
   email: string;
+  /**
+   * Handle as the user spelled it ("SirKitBoi"); case-insensitive: lookups and
+   * uniqueness go through usernameKey() and the `username#<key>` reservation items.
+   */
   username: string;
   passwordHash: string;
   createdAt: string;
@@ -46,7 +50,10 @@ export interface ForkRef {
 export interface Project {
   projectId: string;
   userId: string;
-  username: string; // Denormalized for fast reads
+  /** Author's username, display spelling ("SirKitBoi"). Denormalized for fast reads. */
+  username: string;
+  /** Lowercased username (case-insensitive author search). Set by the stores from `username`. */
+  usernameLower?: string;
   name: string;
   /** Lowercased name, used for search. */
   nameLower?: string;
@@ -155,12 +162,22 @@ export interface UserProjectsOptions {
 export interface Store {
   getUser(userId: string): Promise<User | null>;
   getUserByEmail(email: string): Promise<User | null>;
+  /**
+   * The user with this username, in any case: the `username#<key>` reservation names the
+   * owner. Without one (accounts from before the reservations / 1.x), the username index:
+   * exact match on the input, then on the key.
+   */
   getUserByUsername(username: string): Promise<User | null>;
   createUser(user: User): Promise<void>;
   updateUser(userId: string, patch: UserPatch): Promise<void>;
-  /** Claim a username for a user. Resolves false when someone else holds it. */
+  /** Claim a username (its case-insensitive key) for a user. Resolves false when someone else holds it. */
   reserveUsername(username: string, userId: string): Promise<boolean>;
+  /** Free a username held by the user: its key item, and the item spelled as given (1.x / early 2.0 mixed-case items). */
   releaseUsername(username: string, userId: string): Promise<void>;
+  /** Owner of the reservation item named exactly `username#<name>` (no case folding), or null. */
+  getHandleOwner(name: string): Promise<string | null>;
+  /** Delete the reservation item named exactly `username#<name>` if the user holds it (no case folding). */
+  releaseHandle(name: string, userId: string): Promise<void>;
 
   getProject(projectId: string): Promise<Project | null>;
   createProject(project: Project): Promise<void>;
@@ -177,7 +194,7 @@ export interface Store {
    */
   recordView(projectId: string, viewerKey: string, now: Date, windowMs: number): Promise<number | null>;
   incrementForks(projectId: string): Promise<void>;
-  /** Rewrite the denormalized username on every project of a user. */
+  /** Rewrite the denormalized username (and usernameLower) on every project of a user. */
   renameUserProjects(userId: string, username: string): Promise<void>;
 
   /** Atomically bump a user's tokenVersion. Resolves the new value. */
@@ -266,9 +283,10 @@ export function byPopularity(a: { views?: number; updatedAt: string }, b: { view
   return (b.views || 0) - (a.views || 0) || (b.updatedAt < a.updatedAt ? -1 : b.updatedAt > a.updatedAt ? 1 : 0);
 }
 
-/** Search match on title or author (q already lowercased). */
-export function matchesQuery(p: { nameLower?: string; name: string; username: string }, q?: string): boolean {
+/** Search match on title or author, both case-insensitive (q already lowercased). */
+export function matchesQuery(p: { nameLower?: string; name: string; username: string; usernameLower?: string }, q?: string): boolean {
   if (!q) return true;
-  const name = p.nameLower ?? p.name.toLowerCase();
-  return name.includes(q) || (p.username || '').toLowerCase().includes(q);
+  const name = p.nameLower ?? (p.name || '').toLowerCase();
+  const author = p.usernameLower ?? (p.username || '').toLowerCase();
+  return name.includes(q) || author.includes(q);
 }

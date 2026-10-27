@@ -47,7 +47,9 @@ function iconNode(name, size = 16) {
 
 const AVATAR_COLORS = ['#f5c84b', '#4ade80', '#8ecbff', '#f472b6', '#a78bfa', '#fb923c', '#2dd4bf'];
 
+/** Colour for a username; case-insensitive (usernames are: @SirKitBoi = @sirkitboi). */
 export function avatarColor(seed = '') {
+    seed = String(seed).toLowerCase();
     let hash = 0;
     for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
     return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];

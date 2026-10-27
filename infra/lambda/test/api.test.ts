@@ -18,6 +18,7 @@ import * as thumbnail from '../projects/thumbnail';
 import * as getUser from '../users/get';
 import * as updateMe from '../users/update-me';
 import * as password from '../shared/password';
+import * as jwt from '../shared/jwt';
 import { MAX_DATA_BYTES } from '../shared/validate';
 
 let store: MemoryStore;
@@ -47,18 +48,18 @@ async function makePublic(token: string, id: string, isPublic = true) {
 describe('auth', () => {
   test('register, login (email or username) and verify', async () => {
     const a = await signup('Alice');
-    assert.equal(a.username, 'alice');
+    assert.equal(a.username, 'Alice', 'the spelling is kept');
 
     const byName = await login.handler(event({ body: { login: 'ALICE', password: 'correct horse' } }));
     assert.equal(byName.statusCode, 200);
     const byEmail = await login.handler(event({ body: { login: 'alice@example.com', password: 'correct horse' } }));
-    assert.equal(json(byEmail).username, 'alice');
+    assert.equal(json(byEmail).username, 'Alice');
 
     const bad = await login.handler(event({ body: { login: 'alice', password: 'nope nope' } }));
     assert.equal(bad.statusCode, 401);
 
     const v = await verify.handler(event({ token: a.token }));
-    assert.equal(json(v).username, 'alice');
+    assert.equal(json(v).username, 'Alice');
     assert.equal((await verify.handler(event({ token: 'garbage' }))).statusCode, 401);
   });
 
@@ -95,41 +96,6 @@ describe('auth', () => {
     const confirm = await updateMe.handler(event({ token: body.token, body: { username: 'old-timer-x2' } }));
     assert.equal(confirm.statusCode, 200, confirm.body);
     assert.equal(json(confirm).user.usernameGenerated, false);
-  });
-
-  test('1.x mixed-case usernames are lowercased on login (user page, username login)', async () => {
-    store.users.set('legacy-2', {
-      userId: 'legacy-2',
-      email: 'kit@example.com',
-      username: 'SirKitBoi',
-      passwordHash: await password.hash('correct horse'),
-      createdAt: '2025-01-01T00:00:00.000Z',
-    });
-    const first = await login.handler(event({ body: { login: 'kit@example.com', password: 'correct horse' } }));
-    assert.equal(first.statusCode, 200, first.body);
-    // A project published before the lowercasing (labelled with the old handle)
-    store.users.set('legacy-2', { ...store.users.get('legacy-2')!, username: 'SirKitBoi', displayName: undefined });
-    store.handles.delete('sirkitboi');
-    store.handles.set('SirKitBoi', 'legacy-2');
-    const p = await createProject(json(first).token);
-    await makePublic(json(first).token, p.id);
-    await store.updateProject(p.id, { username: 'SirKitBoi' }, { touch: false });
-
-    const res = await login.handler(event({ body: { login: 'kit@example.com', password: 'correct horse' } }));
-    assert.equal(res.statusCode, 200, res.body);
-    const body = json(res);
-    assert.equal(body.username, 'sirkitboi');
-    assert.equal(body.user.displayName, 'SirKitBoi');
-
-    const page = await getUser.handler(event({ path: { username: 'SirKitBoi' } }));
-    assert.equal(page.statusCode, 200, page.body);
-    assert.equal(json(page).projects.length, 1);
-    assert.equal(json(page).projects[0].username, 'sirkitboi');
-
-    const byName = await login.handler(event({ body: { login: 'SirKitBoi', password: 'correct horse' } }));
-    assert.equal(byName.statusCode, 200, byName.body);
-    assert.ok(!store.handles.has('SirKitBoi'), 'old reservation released');
-    assert.equal(store.handles.get('sirkitboi'), 'legacy-2');
   });
 
   test('malformed bodies are rejected', async () => {
@@ -337,15 +303,174 @@ describe('community', () => {
     const res = await updateMe.handler(event({ token: alice.token, body: { username: 'Alicia', displayName: ' Alice  Liddell ' } }));
     assert.equal(res.statusCode, 200, res.body);
     const body = json(res);
-    assert.equal(body.username, 'alicia');
+    assert.equal(body.username, 'Alicia');
     assert.equal(body.user.displayName, 'Alice Liddell');
-    assert.equal(json(await verify.handler(event({ token: body.token }))).username, 'alicia');
-    assert.equal((await store.getProject(p.id))!.username, 'alicia');
+    assert.equal(json(await verify.handler(event({ token: body.token }))).username, 'Alicia');
+    assert.equal((await store.getProject(p.id))!.username, 'Alicia');
+    assert.equal((await store.getProject(p.id))!.usernameLower, 'alicia');
+    assert.equal(await store.getHandleOwner('alice'), null, 'old handle released');
 
     // The old handle can be registered again
     await signup('alice', 'new-alice@example.com');
     const page = json(await getUser.handler(event({ path: { username: 'alicia' } })));
     assert.equal(page.user.displayName, 'Alice Liddell');
     assert.equal(page.projects.length, 1);
+  });
+});
+
+describe('usernames: spelling kept, case ignored', () => {
+  /** A 1.x account: username as typed, maybe a reservation item spelled the same way. */
+  async function legacyUser(userId: string, username: string, { mixedReservation = false } = {}) {
+    store.users.set(userId, {
+      userId,
+      email: `${userId}@example.com`,
+      username,
+      passwordHash: await password.hash('correct horse'),
+      createdAt: '2025-01-01T00:00:00.000Z',
+    });
+    if (mixedReservation) store.handles.set(username, userId);
+  }
+
+  test('sign-up keeps the spelling; another case of the name is taken (409)', async () => {
+    const s = await signup('SirKitBoi');
+    assert.equal(s.username, 'SirKitBoi');
+    assert.equal(store.handles.get('sirkitboi'), s.userId);
+    const dup = await register.handler(event({ body: { email: 'other@example.com', username: 'sirkitboi', password: 'correct horse' } }));
+    assert.equal(dup.statusCode, 409);
+    // Reserved names are refused in any case
+    const reserved = await register.handler(event({ body: { email: 'x@example.com', username: 'Admin', password: 'correct horse' } }));
+    assert.equal(reserved.statusCode, 400);
+    const bad = await register.handler(event({ body: { email: 'y@example.com', username: 'Sir Kit', password: 'correct horse' } }));
+    assert.equal(bad.statusCode, 400);
+    assert.ok(!/lowercase/i.test(bad.body), 'no "lowercase" in the message');
+  });
+
+  test('user pages resolve in any case and show the stored spelling', async () => {
+    const s = await signup('SirKitBoi');
+    await createProject(s.token, { visibility: 'public' });
+    for (const name of ['sirkitboi', 'SIRKITBOI', 'SirKitBoi']) {
+      const res = await getUser.handler(event({ path: { username: name } }));
+      assert.equal(res.statusCode, 200, name);
+      const page = json(res);
+      assert.equal(page.user.username, 'SirKitBoi');
+      assert.equal(page.projects.length, 1);
+      assert.equal(page.projects[0].username, 'SirKitBoi');
+    }
+  });
+
+  test('sign-in by username works in any case; the session carries the spelling', async () => {
+    await signup('SirKitBoi');
+    for (const name of ['sirkitboi', 'SIRKITBOI', ' SirKitBoi ']) {
+      const res = await login.handler(event({ body: { login: name, password: 'correct horse' } }));
+      assert.equal(res.statusCode, 200, name);
+      assert.equal(json(res).username, 'SirKitBoi');
+      assert.equal(json(await verify.handler(event({ token: json(res).token }))).username, 'SirKitBoi');
+    }
+  });
+
+  test('1.x account with a mixed-case reservation: resolves, and sign-in moves it to the key', async () => {
+    await legacyUser('legacy-sir', 'SirKitBoi', { mixedReservation: true });
+    assert.equal((await getUser.handler(event({ path: { username: 'SirKitBoi' } }))).statusCode, 200);
+
+    const res = await login.handler(event({ body: { login: 'SirKitBoi', password: 'correct horse' } }));
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(json(res).username, 'SirKitBoi');
+    assert.equal(store.users.get('legacy-sir')!.username, 'SirKitBoi', 'the spelling is never changed');
+    assert.equal(store.handles.get('sirkitboi'), 'legacy-sir');
+    assert.equal(store.handles.has('SirKitBoi'), false, 'mixed-case item released');
+
+    // Now any case works, and the name can't be taken in another case
+    const page = await getUser.handler(event({ path: { username: 'sirkitboi' } }));
+    assert.equal(json(page).user.username, 'SirKitBoi');
+    assert.equal((await login.handler(event({ body: { login: 'SIRKITBOI', password: 'correct horse' } }))).statusCode, 200);
+    const dup = await register.handler(event({ body: { email: 'z@example.com', username: 'sirKitBoi', password: 'correct horse' } }));
+    assert.equal(dup.statusCode, 409);
+  });
+
+  test('1.x account without any reservation: resolves, and sign-in reserves the key', async () => {
+    await legacyUser('legacy-bare', 'LordInateur');
+    const page = await getUser.handler(event({ path: { username: 'LordInateur' } }));
+    assert.equal(page.statusCode, 200);
+    const res = await login.handler(event({ body: { login: 'LordInateur', password: 'correct horse' } }));
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(store.handles.get('lordinateur'), 'legacy-bare');
+    assert.equal(store.users.get('legacy-bare')!.username, 'LordInateur');
+    assert.equal(json(await getUser.handler(event({ path: { username: 'lordinateur' } }))).user.username, 'LordInateur');
+    // Signing in again changes nothing
+    assert.equal((await login.handler(event({ body: { login: 'lordinateur', password: 'correct horse' } }))).statusCode, 200);
+    assert.deepEqual([...store.handles.entries()], [['lordinateur', 'legacy-bare']]);
+  });
+
+  test('a lowercase 1.x name without a reservation is found by the key', async () => {
+    await legacyUser('legacy-low', 'lordinateur');
+    assert.equal(json(await getUser.handler(event({ path: { username: 'LORDINATEUR' } }))).user.username, 'lordinateur');
+  });
+
+  test('a case-only change keeps the handle: no reservation change, sessions kept, projects relabelled', async () => {
+    const s = await signup('SirKitBoi');
+    await signup('bob');
+    const p = await createProject(s.token, { visibility: 'public' });
+    const tv = store.users.get(s.userId)!.tokenVersion || 0;
+
+    const res = await updateMe.handler(event({ token: s.token, body: { username: 'sirKitBoi' } }));
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(json(res).username, 'sirKitBoi');
+    assert.equal(store.users.get(s.userId)!.tokenVersion || 0, tv, 'no token bump');
+    assert.equal(store.users.get(s.userId)!.usernameChangedAt, undefined);
+    assert.equal(json(await verify.handler(event({ token: s.token }))).username, 'sirKitBoi', 'old session still works');
+    assert.equal(store.handles.get('sirkitboi'), s.userId);
+    assert.equal((await store.getProject(p.id))!.username, 'sirKitBoi');
+    assert.equal(json(await getUser.handler(event({ path: { username: 'SIRKITBOI' } }))).user.username, 'sirKitBoi');
+
+    // A different name still needs to be free; changing to it releases the key
+    assert.equal((await updateMe.handler(event({ token: s.token, body: { username: 'BOB' } }))).statusCode, 409);
+    const renamed = await updateMe.handler(event({ token: s.token, body: { username: 'KitCat' } }));
+    assert.equal(renamed.statusCode, 200, renamed.body);
+    assert.equal(store.handles.get('kitcat'), s.userId);
+    assert.equal(store.handles.has('sirkitboi'), false);
+    assert.ok((store.users.get(s.userId)!.tokenVersion || 0) > tv, 'a real rename ends other sessions');
+  });
+
+  test('a case-only change on a 1.x account replaces its mixed-case reservation', async () => {
+    await legacyUser('legacy-sir', 'SirKitBoi', { mixedReservation: true });
+    const token = await jwt.sign({ userId: 'legacy-sir', email: 'legacy-sir@example.com', username: 'SirKitBoi', tv: 0 });
+    const res = await updateMe.handler(event({ token, body: { username: 'Sirkitboi' } }));
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual([...store.handles.entries()], [['sirkitboi', 'legacy-sir']]);
+  });
+
+  test('a different-name rename of a 1.x account releases both the key and the mixed-case item', async () => {
+    await legacyUser('legacy-sir', 'SirKitBoi', { mixedReservation: true });
+    store.handles.set('sirkitboi', 'legacy-sir');
+    const token = await jwt.sign({ userId: 'legacy-sir', email: 'legacy-sir@example.com', username: 'SirKitBoi', tv: 0 });
+    const res = await updateMe.handler(event({ token, body: { username: 'Knight' } }));
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual([...store.handles.entries()], [['knight', 'legacy-sir']]);
+  });
+
+  test('search by author works in any case', async () => {
+    const s = await signup('SirKitBoi');
+    const p = await createProject(s.token, { name: 'Glow', visibility: 'public' });
+    assert.equal((await store.getProject(p.id))!.usernameLower, 'sirkitboi');
+    for (const q of ['sirkitboi', 'SIRKIT', 'KitBoi']) {
+      const res = json(await publicList.handler(event({ query: { q } })));
+      assert.deepEqual(res.projects.map((x: any) => x.id), [p.id], q);
+      assert.equal(res.projects[0].username, 'SirKitBoi');
+    }
+  });
+
+  test('forks record the source author with its spelling; updates refresh old project items', async () => {
+    const s = await signup('SirKitBoi');
+    const bob = await signup('bob');
+    const p = await createProject(s.token, { visibility: 'public' });
+    const fork = await createProject(bob.token, { forkedFrom: p.id });
+    assert.equal(fork.forkedFrom.username, 'SirKitBoi');
+
+    // An item written before usernameLower existed gets it on the next update
+    const item = store.projects.get(p.id)!;
+    delete item.usernameLower;
+    const res = await update.handler(event({ token: s.token, path: { id: p.id }, body: { name: 'Glow 2' } }));
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(store.projects.get(p.id)!.usernameLower, 'sirkitboi');
   });
 });

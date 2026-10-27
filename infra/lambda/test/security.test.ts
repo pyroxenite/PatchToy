@@ -32,7 +32,7 @@ import { FREE_LOGIN_FAILURES, RESET_TOKEN_TTL_MS } from '../shared/limits';
 import { MAX_PROJECTS_PER_USER, cleanText, usernameError } from '../shared/validate';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { planProjectUpdate } = require(path.resolve(__dirname, '../../../scripts/backfill-plan.cjs'));
+const { planProjectUpdate, planReservations } = require(path.resolve(__dirname, '../../../scripts/backfill-plan.cjs'));
 
 const SECRET = process.env.JWT_SECRET as string;
 const PW = 'correct horse';
@@ -392,6 +392,44 @@ describe('H4: visibility (private / unlisted / public)', () => {
     const listed = planProjectUpdate({ ...legacyShared, visibility: 'public', nameLower: 'shared', views: 0, forks: 0, nodeCount: 0, hasJS: false });
     assert.deepEqual(listed.remove, []);
     assert.equal(listed.set.publicOwner, 'u1');
+  });
+
+  test('the backfill adds usernameLower to projects and keeps the display spelling', () => {
+    const p = { projectId: 'p1', userId: 'u1', username: 'SirKitBoi', name: 'Glow', nameLower: 'glow', views: 0, forks: 0, nodeCount: 0, hasJS: false };
+    assert.deepEqual(planProjectUpdate(p).set, { usernameLower: 'sirkitboi' });
+    assert.deepEqual(planProjectUpdate({ ...p, usernameLower: 'sirkitboi' }).set, {}, 'idempotent');
+  });
+
+  test('the backfill reserves usernames by lowercase key, drops mixed-case items, reports collisions', () => {
+    // Production as of 2.0: lordinateur reserved as is, SirKitBoi reserved as typed
+    const prod = planReservations(
+      [{ userId: 'u-lord', username: 'lordinateur' }, { userId: 'u-sir', username: 'SirKitBoi' }],
+      new Map([['lordinateur', 'u-lord'], ['SirKitBoi', 'u-sir']]),
+    );
+    assert.deepEqual(prod.reserve, [{ key: 'sirkitboi', userId: 'u-sir', username: 'SirKitBoi' }]);
+    assert.deepEqual(prod.release, [{ name: 'SirKitBoi', userId: 'u-sir' }]);
+    assert.deepEqual(prod.conflicts, []);
+    assert.equal(prod.ok, 1);
+
+    // Second run (after apply): nothing to do
+    const again = planReservations(
+      [{ userId: 'u-lord', username: 'lordinateur' }, { userId: 'u-sir', username: 'SirKitBoi' }],
+      new Map([['lordinateur', 'u-lord'], ['sirkitboi', 'u-sir']]),
+    );
+    assert.deepEqual([again.reserve, again.release, again.conflicts, again.ok], [[], [], [], 2]);
+
+    // Two users whose names differ only in case: reported, nothing written for that key
+    const clash = planReservations(
+      [{ userId: 'a', username: 'Neo' }, { userId: 'b', username: 'neo' }],
+      new Map([['Neo', 'a']]),
+    );
+    assert.deepEqual(clash.reserve, []);
+    assert.deepEqual(clash.release, []);
+    assert.equal(clash.conflicts.length, 2, clash.conflicts.join('; '));
+    // Key held by another user
+    const taken = planReservations([{ userId: 'a', username: 'Zed' }], new Map([['zed', 'b']]));
+    assert.deepEqual(taken.reserve, []);
+    assert.equal(taken.conflicts.length, 1);
   });
 
   test('L3: making a project private drops its public thumbnail; keys are unguessable', async () => {

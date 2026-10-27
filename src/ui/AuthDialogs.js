@@ -1,4 +1,5 @@
 import { UIHelpers, h } from './UIHelpers.js';
+import { USERNAME_RE, USERNAME_RULE } from '../core/router.js';
 
 /**
  * Login / register / password reset dialogs (built on UIHelpers.createModal).
@@ -96,7 +97,7 @@ export class AuthDialogs {
         });
 
         const email = UIHelpers.field({ label: 'Email', type: 'email', placeholder: 'you@example.com', autocomplete: 'email' });
-        const username = UIHelpers.field({ label: 'Username', placeholder: 'shaderwizard', hint: '3–20 characters: letters, numbers, _ and -', autocomplete: 'username' });
+        const username = UIHelpers.field({ label: 'Username', placeholder: 'shaderwizard', hint: `${USERNAME_RULE}. Capitals are kept as you type them`, autocomplete: 'username' });
         const password = UIHelpers.field({ label: 'Password', type: 'password', placeholder: 'At least 8 characters', autocomplete: 'new-password' });
         m.body.append(email.field, username.field, password.field);
 
@@ -121,6 +122,10 @@ export class AuthDialogs {
 
             if (!emailValue || !usernameValue || !passwordValue) {
                 m.setError('All fields are required.');
+                return;
+            }
+            if (!USERNAME_RE.test(usernameValue)) {
+                m.setError(`Usernames are ${USERNAME_RULE}.`);
                 return;
             }
 

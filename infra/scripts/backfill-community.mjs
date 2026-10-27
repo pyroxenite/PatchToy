@@ -10,12 +10,17 @@
  *   - 1.x "share link" projects (`isPublic: true`) stay UNLISTED: link access only. They
  *     are NOT added to the Community feed or user pages (no `visibility` is set). Owners
  *     can list them with "Publish to Community". See backfill-plan.cjs.
- *   - every project gets `nameLower` (search), `views`/`forks` (0 if missing),
+ *   - every project gets `nameLower` and `usernameLower` (case-insensitive search),
+ *     `views`/`forks` (0 if missing),
  *     `nodeCount` and `hasJS` (cards) when missing
  * Users (PatchToy-Users):
- *   - every username gets a reservation item (`userId = "username#<name>"`) so
- *     uniqueness is enforced from now on; users without a username are listed
- *     (they get one derived from their email on their next login)
+ *   - every username gets a reservation item named after its lowercase key
+ *     (`userId = "username#<key>"`, e.g. "username#sirkitboi" for SirKitBoi): usernames keep
+ *     their spelling but are unique and looked up case-insensitively. Items an earlier run
+ *     wrote with the spelling as typed ("username#SirKitBoi") are deleted once the same user
+ *     holds the key item. Names that collide case-insensitively between different users are
+ *     reported (nothing is written for them). Users without a username are listed (they
+ *     get one derived from their email on their next login)
  *   - `projectCount` (per-user quota) is set from the projects scan when missing.
  *     `tokenVersion` is not written: a missing value means 0.
  *
@@ -28,8 +33,8 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(path.join(here, '../lambda/package.json'));
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, ScanCommand, UpdateCommand, PutCommand } = require('@aws-sdk/lib-dynamodb');
-const { planProjectUpdate, countProjects } = createRequire(import.meta.url)('./backfill-plan.cjs');
+const { DynamoDBDocumentClient, ScanCommand, UpdateCommand, PutCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
+const { planProjectUpdate, countProjects, planReservations } = createRequire(import.meta.url)('./backfill-plan.cjs');
 
 const APPLY = process.argv.includes('--apply');
 const PROJECTS_TABLE = process.env.PROJECTS_TABLE || 'PatchToy-Projects';
@@ -75,8 +80,8 @@ async function backfillProjects() {
 }
 
 async function backfillUsers() {
-  let users = 0, reserved = 0, missing = 0, counted = 0;
-  const holders = new Map();
+  let users = 0, reserved = 0, released = 0, missing = 0, counted = 0;
+  const people = [];
   const reservations = new Map();
   const withCount = new Set();
   for await (const u of scan(USERS_TABLE, '#id, username, handleOwner, projectCount', { '#id': 'userId' })) {
@@ -84,21 +89,40 @@ async function backfillUsers() {
     else {
       users++;
       if (typeof u.projectCount === 'number') withCount.add(u.userId);
-      if (u.username) holders.set(u.username, u.userId); else { missing++; console.log(`user ${u.userId} has no username (one is derived on next login)`); }
+      if (u.username) people.push({ userId: u.userId, username: u.username }); else { missing++; console.log(`user ${u.userId} has no username (one is derived on next login)`); }
     }
   }
-  for (const [name, userId] of holders) {
-    if (reservations.get(name) === userId) continue;
-    if (reservations.has(name)) { console.warn(`! username ${name} is reserved by another user (${reservations.get(name)}), check manually`); continue; }
+  const plan = planReservations(people, reservations);
+  for (const c of plan.conflicts) console.warn(`! ${c}`);
+  const failed = new Set();
+  for (const { key, userId, username } of plan.reserve) {
     reserved++;
-    console.log(`${APPLY ? 'reserve' : 'would reserve'} username ${name} for ${userId}`);
-    if (APPLY) {
+    console.log(`${APPLY ? 'reserve' : 'would reserve'} username#${key} for ${username} (${userId})`);
+    if (!APPLY) continue;
+    try {
       await db.send(new PutCommand({
         TableName: USERS_TABLE,
-        Item: { userId: `username#${name}`, handleOwner: userId, createdAt: new Date().toISOString() },
-        ConditionExpression: 'attribute_not_exists(userId)',
+        Item: { userId: `username#${key}`, handleOwner: userId, createdAt: new Date().toISOString() },
+        // Taken meanwhile (a sign-in reserved it: same owner is fine)
+        ConditionExpression: 'attribute_not_exists(userId) OR handleOwner = :owner',
+        ExpressionAttributeValues: { ':owner': userId },
       }));
+    } catch (err) {
+      failed.add(userId);
+      console.warn(`! could not reserve username#${key} for ${userId}: ${err.name}`);
     }
+  }
+  for (const { name, userId } of plan.release) {
+    if (failed.has(userId)) continue;
+    released++;
+    console.log(`${APPLY ? 'delete' : 'would delete'} mixed-case reservation username#${name} of ${userId} (replaced by username#${name.toLowerCase()})`);
+    if (!APPLY) continue;
+    await db.send(new DeleteCommand({
+      TableName: USERS_TABLE,
+      Key: { userId: `username#${name}` },
+      ConditionExpression: 'handleOwner = :owner',
+      ExpressionAttributeValues: { ':owner': userId },
+    })).catch((err) => console.warn(`! could not delete username#${name}: ${err.name}`));
   }
   for (const [userId, count] of countProjects(owners)) {
     if (withCount.has(userId)) continue;
@@ -115,7 +139,7 @@ async function backfillUsers() {
       })).catch((err) => console.warn(`! projectCount for ${userId}: ${err.name}`));
     }
   }
-  console.log(`users: ${users} scanned, ${reserved} reservations ${APPLY ? 'written' : 'to write'}, ${counted} project counts, ${missing} without username`);
+  console.log(`users: ${users} scanned, ${plan.ok} already reserved, ${reserved} reservations ${APPLY ? 'written' : 'to write'}, ${released} mixed-case reservations ${APPLY ? 'deleted' : 'to delete'}, ${plan.conflicts.length} conflicts, ${counted} project counts, ${missing} without username`);
 }
 
 console.log(`PatchToy community backfill (${APPLY ? 'APPLY' : 'dry run, pass --apply to write'})`);
