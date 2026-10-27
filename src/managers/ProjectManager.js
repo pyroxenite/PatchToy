@@ -346,24 +346,25 @@ export class ProjectManager {
         });
     }
 
+    /** The open patch as cloud project data (graph, the custom nodes it uses, editor states). */
+    currentProjectData() {
+        const graph = this.nodeGraph.serialize();
+        return {
+            version: '1.0',
+            graph,
+            customNodes: collectCustomNodes(graph),
+            editorStates: FloatingCodeEditor.getAllStates(),
+            timestamp: new Date().toISOString()
+        };
+    }
+
     async saveToCloud() {
         if (!this.apiClient.isLoggedIn()) {
             return { needsLogin: true };
         }
 
         try {
-            // The custom nodes the graph uses
-            const graph = this.nodeGraph.serialize();
-            const customNodes = collectCustomNodes(graph);
-
-            // Create project data with custom nodes
-            const projectData = {
-                version: '1.0',
-                graph,
-                customNodes: customNodes,
-                editorStates: FloatingCodeEditor.getAllStates(),
-                timestamp: new Date().toISOString()
-            };
+            const projectData = this.currentProjectData();
 
             const { source, isOwner, projectId } = this.projectState;
 

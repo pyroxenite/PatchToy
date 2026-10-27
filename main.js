@@ -2,7 +2,7 @@ import { NodeGraph } from './src/core/NodeGraph.js';
 import { ShaderCompiler } from './src/core/ShaderCompiler.js';
 import { NodeDefinitions } from './src/core/NodeDefinitions.js';
 import { ApiClient } from './src/services/ApiClient.js';
-import { ProjectManager } from './src/managers/ProjectManager.js';
+import { ProjectManager, visibilityOf } from './src/managers/ProjectManager.js';
 import { CompilationManager } from './src/managers/CompilationManager.js';
 import { UniformRegistry } from './src/managers/UniformRegistry.js';
 import { FeedbackRenderer } from './src/rendering/FeedbackRenderer.js';
@@ -355,58 +355,18 @@ class PatchToy {
             e.target.value = ''; // Reset file input
         });
 
-        // Project menu button
+        // Project menu button: actions on the open project (other projects: the Open panel)
         document.getElementById('projectMenuBtn').addEventListener('click', () => {
             ProjectDialogs.showProjectMenu({
                 apiClient: this.apiClient,
                 projectTitle: this.projectManager.projectTitle,
-                currentProjectId: this.projectManager.currentProjectId,
                 projectState: this.projectManager.projectState,
                 onProjectTitleChange: (title) => this.projectManager.setProjectTitle(title),
-                onNewProject: () => this.handleNewProject(),
-                onDownload: () => this.downloadProject(),
-                onSignIn: () => this.community.signIn(),
-                // The same panel as the top bar Open button (popover under it)
-                onBrowseProjects: () => this.projectBrowser.open({ view: 'mine', presentation: 'popover' }),
-                onBrowseCommunity: () => this.projectBrowser.open({ view: 'community', presentation: 'popover' }),
+                onSave: () => this.saveProject(),
+                onDuplicate: () => this.duplicateProject(),
                 onShare: () => this.community.shareCurrentProject(),
-                onShowCurrentProjectMenu: (anchorBtn) => {
-                    ProjectDialogs.showCurrentProjectMenu({
-                        anchorBtn,
-                        onDownload: () => this.downloadProject()
-                    });
-                },
-                onLoadLocalClick: () => document.getElementById('loadFileInput').click(),
-                onBrowseDemos: () => this.projectBrowser.open({ view: 'demos', presentation: 'popover' }),
-                onLoadCloudProject: async (projectId) => {
-                    // Close all open editors before loading cloud project
-                    FloatingCodeEditor.closeAll();
-
-                    const result = await this.projectManager.loadCloudProject(projectId, (name, glsl) => this.createCustomNode(name, glsl, true, { scope: 'project' }));
-                    if (result && result.success) {
-                        // Restore editor states if present
-                        if (result.editorStates && result.editorStates.length > 0) {
-                            FloatingCodeEditor.restoreAllStates(result.editorStates, this.nodeGraph.nodes);
-                        }
-                        this.compilationManager.scheduleCompile();
-                        // Update UI to show save button
-                        UIHelpers.updateAccountButton(this.apiClient);
-                    }
-                },
-                onShowProjectOptionsMenu: (project, anchorBtn, listItem) => {
-                    ProjectDialogs.showProjectOptionsMenu({
-                        project,
-                        anchorBtn,
-                        listItem,
-                        apiClient: this.apiClient,
-                        currentProjectId: this.projectManager.currentProjectId,
-                        onProjectDeleted: (deletedProjectId) => {
-                            if (this.projectManager.currentProjectId === deletedProjectId) {
-                                this.projectManager.clearProject();
-                            }
-                        }
-                    });
-                }
+                onPublish: () => this.togglePublishProject(),
+                onDownload: () => this.downloadProject()
             });
         });
 
@@ -597,6 +557,62 @@ class PatchToy {
             this.projectManager.markClean();
         }
         UIHelpers.toast('Project downloaded as .json', 'success');
+    }
+
+    /** Saved cloud project of my own open, saving first when needed (null if the user backed out). */
+    async ensureOwnCloudProject(reason) {
+        const ps = () => this.projectManager.projectState;
+        if (ps()?.source === 'cloud' && ps().isOwner && ps().projectId) return ps();
+        if (!this.apiClient.isLoggedIn()) {
+            this.community.signIn(); // the user picks the action again once signed in
+            return null;
+        }
+        {
+            const ok = await UIHelpers.confirm({
+                title: 'Save to the cloud first',
+                message: `${reason} Save this patch to your account first.`,
+                confirmLabel: 'Save to cloud'
+            });
+            if (!ok) return null;
+        }
+        await this.saveProject();
+        return ps()?.source === 'cloud' && ps().isOwner && ps().projectId ? ps() : null;
+    }
+
+    /** Project menu: a cloud copy of the open patch ("<title> (Copy)"); the original stays open. */
+    async duplicateProject() {
+        if (!this.apiClient.isLoggedIn()) {
+            this.community.signIn(() => this.duplicateProject());
+            return;
+        }
+        const name = `${this.projectManager.projectTitle || 'Untitled Project'} (Copy)`;
+        try {
+            const result = await this.apiClient.saveProject(name, this.projectManager.currentProjectData());
+            UIHelpers.toast(`Saved “${name}” to your projects`, 'success', {
+                title: 'Duplicated',
+                action: { label: 'Open copy', onClick: () => this.community.openCloudProject(result.id, { via: 'mine' }) }
+            });
+        } catch (err) {
+            UIHelpers.notify(err.message, 'error', { title: 'Duplicate failed' });
+        }
+    }
+
+    /** Project menu: publish the open project to Community, or take it off (it stays link-only). */
+    async togglePublishProject() {
+        const ps = await this.ensureOwnCloudProject('Only cloud projects can be published.');
+        if (!ps) return;
+        await this.apiClient.probeCapabilities?.();
+        const project = { id: ps.projectId, name: this.projectManager.projectTitle, isPublic: !!ps.isPublic, visibility: visibilityOf(ps) };
+        if (project.visibility === 'public') {
+            await this.community.setVisibility(project, 'unlisted');
+            return;
+        }
+        const ok = await UIHelpers.confirm({
+            title: `Publish “${project.name}”?`,
+            message: 'It will be listed in Community and on your page, and anyone can open it and save a copy.',
+            confirmLabel: 'Publish'
+        });
+        if (ok) await this.community.setVisibility(project, 'public');
     }
 
     /** Save button / Cmd+S: cloud when signed in, otherwise prompt sign-in (or download if no backend). */

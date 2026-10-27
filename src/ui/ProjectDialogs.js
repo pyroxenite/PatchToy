@@ -29,48 +29,35 @@ function relativeDate(value) {
 
 export class ProjectDialogs {
     /**
-     * Show the project popover (title, actions, cloud projects list) under the project button.
+     * Show the project popover under the project button: title, status and the actions
+     * on the open project (opening / browsing other projects lives in the Open panel).
      * @param {Object} options
      * @param {ApiClient} options.apiClient
      * @param {string} options.projectTitle
-     * @param {string} options.currentProjectId
      * @param {Object} [options.projectState] - ProjectManager.projectState (for meta line)
      * @param {Function} options.onProjectTitleChange - (newTitle)
-     * @param {Function} options.onNewProject
-     * @param {Function} options.onLoadLocalClick
-     * @param {Function} [options.onDownload]
-     * @param {Function} [options.onBrowseDemos] - open the demo gallery
-     * @param {Function} [options.onSignIn]
-     * @param {Function} [options.onBrowseProjects] - open the project browser on "My projects"
-     * @param {Function} [options.onBrowseCommunity] - open the project browser on "Community"
-     * @param {Function} [options.onShare] - share dialog for the current project
-     * @param {Function} options.onLoadCloudProject - (projectId) (legacy list, unused with onBrowseProjects)
-     * @param {Function} options.onShowCurrentProjectMenu - (anchorBtn)
-     * @param {Function} options.onShowProjectOptionsMenu - (project, anchorBtn, listItem)
+     * @param {Function} options.onSave - save to the cloud (a copy when viewing someone else's project)
+     * @param {Function} [options.onDuplicate] - save a cloud copy of the open project
+     * @param {Function} [options.onShare] - share dialog for the open project
+     * @param {Function} [options.onPublish] - publish to / unpublish from Community
+     * @param {Function} options.onDownload - download as .json
      */
     static showProjectMenu({
         apiClient,
         projectTitle,
-        currentProjectId,
         projectState = null,
         onProjectTitleChange,
-        onNewProject,
-        onLoadLocalClick,
-        onDownload,
-        onBrowseDemos,
-        onSignIn,
-        onBrowseProjects,
-        onBrowseCommunity,
+        onSave,
+        onDuplicate,
         onShare,
-        onLoadCloudProject,
-        onShowCurrentProjectMenu,
-        onShowProjectOptionsMenu
+        onPublish,
+        onDownload
     }) {
         const anchor = document.getElementById('projectMenuBtn');
         const content = h('div', { className: 'pt-project-menu-inner', style: { display: 'flex', flexDirection: 'column', minHeight: 0 } });
         let menu = null;
 
-        // ---- Head: title + more
+        // ---- Head: title
         const head = h('div', { className: 'pm-head' });
         head.appendChild(h('span', { className: 'pt-label', text: 'Project' }));
         const titleRow = h('div', { className: 'pm-title-row' });
@@ -93,18 +80,12 @@ export class ProjectDialogs {
                 menu?.close();
             }
         });
-
-        const moreBtn = h('button', { className: 'pt-icon-btn', 'aria-label': 'Project options', 'data-tip': 'More', html: icon('more') });
-        moreBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            onShowCurrentProjectMenu?.(moreBtn);
-        });
-        titleRow.append(titleInput, moreBtn);
+        titleRow.append(titleInput);
         head.appendChild(titleRow);
 
         // Meta line
         const meta = h('div', { className: 'pm-meta' });
-        const source = projectState?.source || (currentProjectId ? 'cloud' : 'new');
+        const source = projectState?.source || 'new';
         const sourceLabel = { cloud: 'Cloud', file: 'From file', new: 'Local' }[source] || 'Local';
         meta.appendChild(h('span', { className: 'pt-badge', text: sourceLabel }));
         if (source === 'cloud' && projectState?.isOwner) {
@@ -122,7 +103,7 @@ export class ProjectDialogs {
         head.appendChild(meta);
         content.appendChild(head);
 
-        // ---- Actions
+        // ---- Actions on the open project
         const actions = h('div', { className: 'pm-actions' });
         const action = (iconName, label, hint, onClick) => {
             const b = h('button', { className: 'pt-menu-item', role: 'menuitem' });
@@ -135,98 +116,20 @@ export class ProjectDialogs {
             });
             actions.appendChild(b);
         };
-        action('filePlus', 'New project', '', onNewProject);
-        action('folder', 'Open project file…', comboText(['Shift', 'Mod', 'O']), onLoadLocalClick);
-        if (onBrowseDemos) action('gallery', 'Browse demos', '', onBrowseDemos);
-        if (onBrowseCommunity && apiClient.isEnabled()) action('globe', 'Community projects', '', onBrowseCommunity);
-        if (onBrowseProjects && apiClient.isLoggedIn()) action('cloud', 'My projects', '', onBrowseProjects);
-        if (onShare && apiClient.isEnabled()) {
-            const viewing = source === 'cloud' && projectState && !projectState.isOwner;
-            action('link', viewing ? 'Copy link' : 'Share…', source === 'cloud' ? (viewing ? '' : ({ public: 'public', unlisted: 'link only', private: 'private' }[visibilityOf(projectState)])) : '', onShare);
+        const cloudOn = apiClient.isEnabled();
+        const viewing = source === 'cloud' && projectState && !projectState.isOwner;
+        const visibility = source === 'cloud' ? visibilityOf(projectState) : 'private';
+
+        if (cloudOn) action(viewing ? 'fork' : 'cloud', viewing ? 'Save a copy' : 'Save', comboText(['Mod', 'S']), onSave);
+        if (cloudOn && onDuplicate && !viewing) action('copy', 'Duplicate', '', onDuplicate);
+        if (cloudOn && onShare) {
+            action('link', viewing ? 'Copy link' : 'Share link…', viewing ? '' : ({ public: 'public', unlisted: 'link only', private: source === 'cloud' ? 'private' : '' }[visibility]), onShare);
         }
-        if (onDownload) action('download', 'Download as .json', '', onDownload);
+        if (cloudOn && onPublish && !viewing) {
+            action('globe', visibility === 'public' ? 'Unpublish from Community' : 'Publish to Community', '', onPublish);
+        }
+        action('download', 'Download as .json', '', onDownload);
         content.appendChild(actions);
-
-        // ---- Cloud projects (the full list lives in the project browser: onBrowseProjects)
-        const cloud = h('div', { className: 'pm-cloud' });
-        if (apiClient.isLoggedIn() && !onBrowseProjects) {
-            const user = apiClient.getCurrentUser();
-            const cloudHead = h('div', { className: 'pm-cloud-head' }, [
-                h('span', { className: 'pt-label', text: 'Cloud projects' }),
-                h('span', { className: 'pm-cloud-user', text: `@${user?.username || 'user'}` })
-            ]);
-            cloud.appendChild(cloudHead);
-
-            const list = h('div', { className: 'pm-list', role: 'list' });
-            for (let i = 0; i < 3; i++) list.appendChild(h('div', { className: 'pt-skeleton' }));
-            cloud.appendChild(list);
-
-            (async () => {
-                try {
-                    const result = await apiClient.listProjects();
-                    const projects = (result.projects || []).slice().sort((a, b) =>
-                        new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
-                    list.innerHTML = '';
-
-                    if (projects.length === 0) {
-                        list.appendChild(h('div', { className: 'pm-empty', html: 'No cloud projects yet.<br>Save this one with <kbd>⌘S</kbd>.' }));
-                        menu?.reposition();
-                        return;
-                    }
-
-                    for (const project of projects) {
-                        const isCurrent = currentProjectId === project.id;
-                        const item = h('div', { className: `pm-item${isCurrent ? ' is-current' : ''}`, role: 'listitem', tabindex: '0' });
-                        const t = thumbFor(project.name);
-                        const thumb = h('div', { className: 'pm-item-thumb', text: t.letters });
-                        thumb.style.color = t.color;
-                        thumb.style.borderColor = `${t.color}55`;
-
-                        const info = h('div', { className: 'pm-item-info' });
-                        info.appendChild(h('div', { className: 'pm-item-name', text: project.name }));
-                        const metaRow = h('div', { className: 'pm-item-meta' });
-                        metaRow.appendChild(h('span', { text: relativeDate(project.updatedAt) }));
-                        if (project.isPublic) metaRow.appendChild(h('span', { className: 'pt-badge', text: visibilityOf(project) === 'public' ? 'Public' : 'Link only' }));
-                        if (isCurrent) metaRow.appendChild(h('span', { className: 'pt-badge', text: 'Open' }));
-                        info.appendChild(metaRow);
-
-                        const optBtn = h('button', { className: 'pt-icon-btn pt-icon-btn--sm', 'aria-label': 'Project options', html: icon('more') });
-                        optBtn.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            onShowProjectOptionsMenu?.(project, optBtn, item);
-                        });
-
-                        const open = async () => {
-                            menu?.close();
-                            if (onLoadCloudProject) await onLoadCloudProject(project.id);
-                        };
-                        item.addEventListener('click', open);
-                        item.addEventListener('keydown', (e) => {
-                            if (e.key === 'Enter') open();
-                        });
-
-                        item.append(thumb, info, optBtn);
-                        list.appendChild(item);
-                    }
-                    menu?.reposition();
-                } catch (err) {
-                    list.innerHTML = '';
-                    list.appendChild(h('div', { className: 'pm-empty is-error', text: `Couldn’t load projects: ${err.message || 'network error'}` }));
-                }
-            })();
-        } else if (!apiClient.isLoggedIn() && apiClient.isEnabled()) {
-            const signin = h('div', { className: 'pm-signin' });
-            signin.appendChild(h('span', { className: 'pt-label', text: 'Cloud projects' }));
-            signin.appendChild(h('p', { text: 'Sign in to save projects to the cloud, open them anywhere and share them with a link.' }));
-            const btn = UIHelpers.button('Sign in', { size: 'sm', icon: 'user' });
-            btn.addEventListener('click', () => {
-                menu?.close();
-                onSignIn?.();
-            });
-            signin.appendChild(btn);
-            cloud.appendChild(signin);
-        }
-        if (cloud.childElementCount) content.appendChild(cloud);
 
         menu = UIHelpers.openMenu({
             anchor,
@@ -357,20 +260,6 @@ export class ProjectDialogs {
         m.footer.appendChild(UIHelpers.button('Done', { onClick: () => m.close() }));
         setTimeout(() => input.select(), 0);
         return m;
-    }
-
-    /**
-     * Options menu for the current project
-     */
-    static showCurrentProjectMenu({ anchorBtn, onDownload }) {
-        return UIHelpers.openMenu({
-            anchor: anchorBtn,
-            align: 'end',
-            className: 'current-project-menu',
-            items: [
-                { icon: 'download', label: 'Download as .json', onClick: () => onDownload?.() }
-            ]
-        });
     }
 
     /**
