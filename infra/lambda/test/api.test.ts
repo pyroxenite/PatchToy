@@ -97,6 +97,41 @@ describe('auth', () => {
     assert.equal(json(confirm).user.usernameGenerated, false);
   });
 
+  test('1.x mixed-case usernames are lowercased on login (user page, username login)', async () => {
+    store.users.set('legacy-2', {
+      userId: 'legacy-2',
+      email: 'kit@example.com',
+      username: 'SirKitBoi',
+      passwordHash: await password.hash('correct horse'),
+      createdAt: '2025-01-01T00:00:00.000Z',
+    });
+    const first = await login.handler(event({ body: { login: 'kit@example.com', password: 'correct horse' } }));
+    assert.equal(first.statusCode, 200, first.body);
+    // A project published before the lowercasing (labelled with the old handle)
+    store.users.set('legacy-2', { ...store.users.get('legacy-2')!, username: 'SirKitBoi', displayName: undefined });
+    store.handles.delete('sirkitboi');
+    store.handles.set('SirKitBoi', 'legacy-2');
+    const p = await createProject(json(first).token);
+    await makePublic(json(first).token, p.id);
+    await store.updateProject(p.id, { username: 'SirKitBoi' }, { touch: false });
+
+    const res = await login.handler(event({ body: { login: 'kit@example.com', password: 'correct horse' } }));
+    assert.equal(res.statusCode, 200, res.body);
+    const body = json(res);
+    assert.equal(body.username, 'sirkitboi');
+    assert.equal(body.user.displayName, 'SirKitBoi');
+
+    const page = await getUser.handler(event({ path: { username: 'SirKitBoi' } }));
+    assert.equal(page.statusCode, 200, page.body);
+    assert.equal(json(page).projects.length, 1);
+    assert.equal(json(page).projects[0].username, 'sirkitboi');
+
+    const byName = await login.handler(event({ body: { login: 'SirKitBoi', password: 'correct horse' } }));
+    assert.equal(byName.statusCode, 200, byName.body);
+    assert.ok(!store.handles.has('SirKitBoi'), 'old reservation released');
+    assert.equal(store.handles.get('sirkitboi'), 'legacy-2');
+  });
+
   test('malformed bodies are rejected', async () => {
     assert.equal((await register.handler(event({ rawBody: '{not json' }))).statusCode, 400);
     assert.equal((await login.handler(event({ rawBody: '[1,2]' }))).statusCode, 400);
