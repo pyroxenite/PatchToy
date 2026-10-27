@@ -1,337 +1,244 @@
 import { NodeDefinitions } from '../core/NodeDefinitions.js';
+import { UIHelpers, h } from './UIHelpers.js';
+import { icon } from './icons.js';
+import { collectCustomNodes } from '../core/customNodes.js';
+import { visibilityOf } from '../managers/ProjectManager.js';
+import { comboText } from './help/shortcuts.js';
+
+const THUMB_COLORS = ['#ff5c2b', '#f5c84b', '#4ade80', '#8ecbff', '#a78bfa', '#f472b6', '#2dd4bf', '#fb923c'];
+
+function thumbFor(name = '') {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+    const words = name.trim().split(/\s+/).filter(Boolean);
+    const letters = (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2)).toUpperCase();
+    return { letters, color: THUMB_COLORS[Math.abs(hash) % THUMB_COLORS.length] };
+}
+
+function relativeDate(value) {
+    if (!value) return '';
+    const d = new Date(value);
+    if (isNaN(d)) return '';
+    const diff = (Date.now() - d.getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} h ago`;
+    if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} d ago`;
+    return d.toLocaleDateString();
+}
 
 export class ProjectDialogs {
     /**
-     * Show the main project menu with current project info and cloud projects list
-     * @param {Object} options - Configuration object
-     * @param {ApiClient} options.apiClient - API client instance
-     * @param {string} options.projectTitle - Current project title
-     * @param {string} options.currentProjectId - Current project ID (if any)
-     * @param {Function} options.onProjectTitleChange - Callback when project title changes (newTitle)
-     * @param {Function} options.onNewProject - Callback when New Project button is clicked
-     * @param {Function} options.onLoadLocalClick - Callback when Load Local button is clicked
-     * @param {Function} options.onLoadCloudProject - Callback when cloud project is clicked (projectId)
-     * @param {Function} options.onShowCurrentProjectMenu - Callback to show current project menu (anchorBtn)
-     * @param {Function} options.onShowProjectOptionsMenu - Callback to show project options menu (project, anchorBtn, listItem)
+     * Show the project popover (title, actions, cloud projects list) under the project button.
+     * @param {Object} options
+     * @param {ApiClient} options.apiClient
+     * @param {string} options.projectTitle
+     * @param {string} options.currentProjectId
+     * @param {Object} [options.projectState] - ProjectManager.projectState (for meta line)
+     * @param {Function} options.onProjectTitleChange - (newTitle)
+     * @param {Function} options.onNewProject
+     * @param {Function} options.onLoadLocalClick
+     * @param {Function} [options.onDownload]
+     * @param {Function} [options.onBrowseDemos] - open the demo gallery
+     * @param {Function} [options.onSignIn]
+     * @param {Function} [options.onBrowseProjects] - open the project browser on "My projects"
+     * @param {Function} [options.onBrowseCommunity] - open the project browser on "Community"
+     * @param {Function} [options.onShare] - share dialog for the current project
+     * @param {Function} options.onLoadCloudProject - (projectId) (legacy list, unused with onBrowseProjects)
+     * @param {Function} options.onShowCurrentProjectMenu - (anchorBtn)
+     * @param {Function} options.onShowProjectOptionsMenu - (project, anchorBtn, listItem)
      */
     static showProjectMenu({
         apiClient,
         projectTitle,
         currentProjectId,
+        projectState = null,
         onProjectTitleChange,
         onNewProject,
         onLoadLocalClick,
+        onDownload,
+        onBrowseDemos,
+        onSignIn,
+        onBrowseProjects,
+        onBrowseCommunity,
+        onShare,
         onLoadCloudProject,
         onShowCurrentProjectMenu,
         onShowProjectOptionsMenu
     }) {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: transparent; z-index: 10001;';
+        const anchor = document.getElementById('projectMenuBtn');
+        const content = h('div', { className: 'pt-project-menu-inner', style: { display: 'flex', flexDirection: 'column', minHeight: 0 } });
+        let menu = null;
 
-        const menu = document.createElement('div');
-        menu.style.cssText = `
-            position: absolute;
-            top: 80px;
-            left: 20px;
-            background: rgba(45, 45, 45, 0.98);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(68, 68, 68, 0.5);
-            border-radius: 8px;
-            padding: 12px;
-            width: 400px;
-            max-width: calc(100vw - 40px);
-            max-height: calc(100vh - 120px);
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-            display: flex;
-            flex-direction: column;
-        `;
-
-        // Header with current project title
-        const header = document.createElement('div');
-        header.style.cssText = 'margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(68, 68, 68, 0.5);';
-
-        // Title input with options button
-        const titleRow = document.createElement('div');
-        titleRow.style.cssText = 'display: flex; gap: 8px; align-items: center;';
-
-        const titleInput = document.createElement('input');
-        titleInput.type = 'text';
+        // ---- Head: title + more
+        const head = h('div', { className: 'pm-head' });
+        head.appendChild(h('span', { className: 'pt-label', text: 'Project' }));
+        const titleRow = h('div', { className: 'pm-title-row' });
+        const titleInput = h('input', {
+            type: 'text',
+            className: 'pt-input',
+            placeholder: 'Untitled Project',
+            spellcheck: 'false',
+            'aria-label': 'Project title'
+        });
         titleInput.value = projectTitle;
-        titleInput.placeholder = 'Current Project';
-        titleInput.style.cssText = `
-            flex: 1;
-            padding: 8px 12px;
-            background: rgba(30, 30, 30, 0.8);
-            border: 1px solid #444;
-            color: #fff;
-            border-radius: 4px;
-            font-size: 14px;
-        `;
         titleInput.addEventListener('change', (e) => {
             const newTitle = e.target.value.trim() || 'Untitled Project';
-            if (onProjectTitleChange) {
-                onProjectTitleChange(newTitle);
+            onProjectTitleChange?.(newTitle);
+        });
+        titleInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                titleInput.blur();
+                menu?.close();
             }
         });
 
-        // Current project options button
-        const currentProjectMenuBtn = document.createElement('button');
-        currentProjectMenuBtn.textContent = '⋮';
-        currentProjectMenuBtn.style.cssText = 'padding: 8px 12px; background: rgba(30, 30, 30, 0.8); border: 1px solid #444; border-radius: 4px; color: #888; cursor: pointer; font-size: 16px; font-weight: bold;';
-        currentProjectMenuBtn.addEventListener('click', (e) => {
+        const moreBtn = h('button', { className: 'pt-icon-btn', 'aria-label': 'Project options', 'data-tip': 'More', html: icon('more') });
+        moreBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (onShowCurrentProjectMenu) {
-                onShowCurrentProjectMenu(currentProjectMenuBtn);
-            }
+            onShowCurrentProjectMenu?.(moreBtn);
         });
+        titleRow.append(titleInput, moreBtn);
+        head.appendChild(titleRow);
 
-        titleRow.appendChild(titleInput);
-        titleRow.appendChild(currentProjectMenuBtn);
-        header.appendChild(titleRow);
+        // Meta line
+        const meta = h('div', { className: 'pm-meta' });
+        const source = projectState?.source || (currentProjectId ? 'cloud' : 'new');
+        const sourceLabel = { cloud: 'Cloud', file: 'From file', new: 'Local' }[source] || 'Local';
+        meta.appendChild(h('span', { className: 'pt-badge', text: sourceLabel }));
+        if (source === 'cloud' && projectState?.isOwner) {
+            meta.appendChild(h('span', { className: 'pt-badge', text: { public: 'Public', unlisted: 'Link only', private: 'Private' }[visibilityOf(projectState)] }));
+        }
+        if (projectState?.ownerUsername && !projectState.isOwner) {
+            meta.appendChild(h('span', { text: `by @${projectState.ownerUsername} · saving creates your copy` }));
+        } else if (projectState?.isDirty) {
+            meta.appendChild(h('span', { text: source === 'cloud' ? 'Unsaved changes' : 'Autosaved in this browser' }));
+        } else if (source === 'cloud') {
+            meta.appendChild(h('span', { text: 'Saved to cloud' }));
+        } else {
+            meta.appendChild(h('span', { text: 'Autosaved in this browser' }));
+        }
+        head.appendChild(meta);
+        content.appendChild(head);
 
-        menu.appendChild(header);
+        // ---- Actions
+        const actions = h('div', { className: 'pm-actions' });
+        const action = (iconName, label, hint, onClick) => {
+            const b = h('button', { className: 'pt-menu-item', role: 'menuitem' });
+            b.innerHTML = `${icon(iconName)}<span class="pt-menu-item-label"></span>${hint ? '<span class="pt-menu-item-hint"></span>' : ''}`;
+            b.querySelector('.pt-menu-item-label').textContent = label;
+            if (hint) b.querySelector('.pt-menu-item-hint').textContent = hint;
+            b.addEventListener('click', () => {
+                menu?.close();
+                onClick?.();
+            });
+            actions.appendChild(b);
+        };
+        action('filePlus', 'New project', '', onNewProject);
+        action('folder', 'Open project file…', comboText(['Shift', 'Mod', 'O']), onLoadLocalClick);
+        if (onBrowseDemos) action('gallery', 'Browse demos', '', onBrowseDemos);
+        if (onBrowseCommunity && apiClient.isEnabled()) action('globe', 'Community projects', '', onBrowseCommunity);
+        if (onBrowseProjects && apiClient.isLoggedIn()) action('cloud', 'My projects', '', onBrowseProjects);
+        if (onShare && apiClient.isEnabled()) {
+            const viewing = source === 'cloud' && projectState && !projectState.isOwner;
+            action('link', viewing ? 'Copy link' : 'Share…', source === 'cloud' ? (viewing ? '' : ({ public: 'public', unlisted: 'link only', private: 'private' }[visibilityOf(projectState)])) : '', onShare);
+        }
+        if (onDownload) action('download', 'Download as .json', '', onDownload);
+        content.appendChild(actions);
 
-        // Projects header with New Project and Load Local buttons (below divider)
-        const projectsHeader = document.createElement('div');
-        projectsHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;';
-
-        const projectsTitle = document.createElement('div');
-        projectsTitle.textContent = 'Projects';
-        projectsTitle.style.cssText = 'color: #fff; font-size: 14px; font-weight: 600;';
-
-        const buttonsContainer = document.createElement('div');
-        buttonsContainer.style.cssText = 'display: flex; gap: 8px;';
-
-        const newProjectBtn = document.createElement('button');
-        newProjectBtn.textContent = 'New';
-        newProjectBtn.style.cssText = `
-            padding: 6px 12px;
-            background: transparent;
-            border: 1px solid #444;
-            color: #fff;
-            cursor: pointer;
-            border-radius: 4px;
-            font-size: 12px;
-        `;
-        newProjectBtn.addEventListener('mouseover', () => {
-            newProjectBtn.style.background = 'rgba(0, 122, 204, 0.2)';
-            newProjectBtn.style.borderColor = '#007acc';
-        });
-        newProjectBtn.addEventListener('mouseout', () => {
-            newProjectBtn.style.background = 'transparent';
-            newProjectBtn.style.borderColor = '#444';
-        });
-        newProjectBtn.addEventListener('click', () => {
-            overlay.remove();
-            if (onNewProject) {
-                onNewProject();
-            }
-        });
-
-        const loadLocalBtn = document.createElement('button');
-        loadLocalBtn.textContent = 'Load Local';
-        loadLocalBtn.style.cssText = `
-            padding: 6px 12px;
-            background: transparent;
-            border: 1px solid #444;
-            color: #fff;
-            cursor: pointer;
-            border-radius: 4px;
-            font-size: 12px;
-        `;
-        loadLocalBtn.addEventListener('mouseover', () => {
-            loadLocalBtn.style.background = 'rgba(0, 122, 204, 0.2)';
-            loadLocalBtn.style.borderColor = '#007acc';
-        });
-        loadLocalBtn.addEventListener('mouseout', () => {
-            loadLocalBtn.style.background = 'transparent';
-            loadLocalBtn.style.borderColor = '#444';
-        });
-        loadLocalBtn.addEventListener('click', () => {
-            overlay.remove();
-            if (onLoadLocalClick) {
-                onLoadLocalClick();
-            }
-        });
-
-        buttonsContainer.appendChild(newProjectBtn);
-        buttonsContainer.appendChild(loadLocalBtn);
-
-        projectsHeader.appendChild(projectsTitle);
-        projectsHeader.appendChild(buttonsContainer);
-        menu.appendChild(projectsHeader);
-
-        // Cloud projects list (if logged in)
-        if (apiClient.isLoggedIn()) {
-            const cloudSection = document.createElement('div');
-            cloudSection.style.cssText = 'flex: 1; overflow: hidden; display: flex; flex-direction: column;';
-
-            const cloudHeader = document.createElement('div');
-            cloudHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;';
-
-            const cloudTitle = document.createElement('div');
-            cloudTitle.textContent = 'Cloud Projects';
-            cloudTitle.style.cssText = 'color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;';
-
+        // ---- Cloud projects (the full list lives in the project browser: onBrowseProjects)
+        const cloud = h('div', { className: 'pm-cloud' });
+        if (apiClient.isLoggedIn() && !onBrowseProjects) {
             const user = apiClient.getCurrentUser();
-            const username = document.createElement('div');
-            username.textContent = `@${user?.username || 'user'}`;
-            username.style.cssText = 'color: #666; font-size: 11px;';
+            const cloudHead = h('div', { className: 'pm-cloud-head' }, [
+                h('span', { className: 'pt-label', text: 'Cloud projects' }),
+                h('span', { className: 'pm-cloud-user', text: `@${user?.username || 'user'}` })
+            ]);
+            cloud.appendChild(cloudHead);
 
-            cloudHeader.appendChild(cloudTitle);
-            cloudHeader.appendChild(username);
-            cloudSection.appendChild(cloudHeader);
+            const list = h('div', { className: 'pm-list', role: 'list' });
+            for (let i = 0; i < 3; i++) list.appendChild(h('div', { className: 'pt-skeleton' }));
+            cloud.appendChild(list);
 
-            // Loading state
-            const loading = document.createElement('div');
-            loading.textContent = 'Loading...';
-            loading.style.cssText = 'color: #888; padding: 20px; text-align: center; font-size: 13px;';
-            cloudSection.appendChild(loading);
-
-            menu.appendChild(cloudSection);
-
-            // Load projects asynchronously (don't block menu display)
             (async () => {
                 try {
                     const result = await apiClient.listProjects();
-                    const projects = result.projects || [];
+                    const projects = (result.projects || []).slice().sort((a, b) =>
+                        new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+                    list.innerHTML = '';
 
-                    loading.remove();
-
-                if (projects.length === 0) {
-                    const empty = document.createElement('div');
-                    empty.textContent = 'No cloud projects yet';
-                    empty.style.cssText = 'color: #666; padding: 20px; text-align: center; font-size: 13px;';
-                    cloudSection.appendChild(empty);
-                } else {
-                    const projectList = document.createElement('div');
-                    projectList.style.cssText = 'flex: 1; overflow-y: auto; margin-right: -8px; padding-right: 8px;';
+                    if (projects.length === 0) {
+                        list.appendChild(h('div', { className: 'pm-empty', html: 'No cloud projects yet.<br>Save this one with <kbd>⌘S</kbd>.' }));
+                        menu?.reposition();
+                        return;
+                    }
 
                     for (const project of projects) {
                         const isCurrent = currentProjectId === project.id;
+                        const item = h('div', { className: `pm-item${isCurrent ? ' is-current' : ''}`, role: 'listitem', tabindex: '0' });
+                        const t = thumbFor(project.name);
+                        const thumb = h('div', { className: 'pm-item-thumb', text: t.letters });
+                        thumb.style.color = t.color;
+                        thumb.style.borderColor = `${t.color}55`;
 
-                        const item = document.createElement('div');
-                        item.style.cssText = `
-                            background: ${isCurrent ? 'rgba(0, 122, 204, 0.15)' : 'transparent'};
-                            padding: 12px;
-                            margin-bottom: 4px;
-                            border-radius: 6px;
-                            cursor: pointer;
-                            display: flex;
-                            justify-content: space-between;
-                            align-items: center;
-                            transition: all 0.2s;
-                            border-left: 3px solid ${isCurrent ? '#007acc' : 'transparent'};
-                        `;
+                        const info = h('div', { className: 'pm-item-info' });
+                        info.appendChild(h('div', { className: 'pm-item-name', text: project.name }));
+                        const metaRow = h('div', { className: 'pm-item-meta' });
+                        metaRow.appendChild(h('span', { text: relativeDate(project.updatedAt) }));
+                        if (project.isPublic) metaRow.appendChild(h('span', { className: 'pt-badge', text: visibilityOf(project) === 'public' ? 'Public' : 'Link only' }));
+                        if (isCurrent) metaRow.appendChild(h('span', { className: 'pt-badge', text: 'Open' }));
+                        info.appendChild(metaRow);
 
-                        item.addEventListener('click', async () => {
-                            if (onLoadCloudProject) {
-                                await onLoadCloudProject(project.id);
-                            }
-                            overlay.remove();
-                        });
-
-                        item.addEventListener('mouseenter', () => {
-                            if (!isCurrent) {
-                                item.style.background = 'rgba(255, 255, 255, 0.05)';
-                            } else {
-                                item.style.background = 'rgba(0, 122, 204, 0.25)';
-                            }
-                        });
-                        item.addEventListener('mouseleave', () => {
-                            if (!isCurrent) {
-                                item.style.background = 'transparent';
-                            } else {
-                                item.style.background = 'rgba(0, 122, 204, 0.15)';
-                            }
-                        });
-
-                        const info = document.createElement('div');
-                        info.style.cssText = 'flex: 1; pointer-events: none;';
-
-                        const topRow = document.createElement('div');
-                        topRow.style.cssText = 'display: flex; align-items: center; gap: 6px; margin-bottom: 4px;';
-
-                        const projectName = document.createElement('div');
-                        projectName.textContent = project.name;
-                        projectName.style.cssText = `color: ${isCurrent ? '#fff' : '#ccc'}; font-size: 13px; font-weight: ${isCurrent ? '600' : '400'};`;
-
-                        // TODO: Add public/private icon when backend supports it
-                        // const visibilityIcon = document.createElement('span');
-                        // visibilityIcon.textContent = '🔒'; // or 🌐 for public
-                        // visibilityIcon.style.cssText = 'font-size: 11px; opacity: 0.6;';
-
-                        topRow.appendChild(projectName);
-                        // topRow.appendChild(visibilityIcon);
-
-                        const projectMeta = document.createElement('div');
-                        const date = new Date(project.updatedAt).toLocaleDateString();
-                        projectMeta.textContent = date;
-                        projectMeta.style.cssText = 'color: #666; font-size: 11px;';
-
-                        info.appendChild(topRow);
-                        info.appendChild(projectMeta);
-
-                        // Options menu button
-                        const menuBtn = document.createElement('button');
-                        menuBtn.textContent = '⋮';
-                        menuBtn.style.cssText = `padding: 4px 8px; background: transparent; border: 1px solid ${isCurrent ? '#007acc' : '#444'}; border-radius: 4px; color: ${isCurrent ? '#007acc' : '#888'}; cursor: pointer; font-size: 14px; font-weight: bold;`;
-                        menuBtn.addEventListener('click', (e) => {
+                        const optBtn = h('button', { className: 'pt-icon-btn pt-icon-btn--sm', 'aria-label': 'Project options', html: icon('more') });
+                        optBtn.addEventListener('click', (e) => {
                             e.stopPropagation();
-                            if (onShowProjectOptionsMenu) {
-                                onShowProjectOptionsMenu(project, menuBtn, item);
-                            }
-                        });
-                        menuBtn.addEventListener('mouseenter', () => {
-                            menuBtn.style.background = 'rgba(0, 122, 204, 0.2)';
-                            menuBtn.style.borderColor = '#007acc';
-                            menuBtn.style.color = '#fff';
-                        });
-                        menuBtn.addEventListener('mouseleave', () => {
-                            menuBtn.style.background = 'transparent';
-                            menuBtn.style.borderColor = isCurrent ? '#007acc' : '#444';
-                            menuBtn.style.color = isCurrent ? '#007acc' : '#888';
+                            onShowProjectOptionsMenu?.(project, optBtn, item);
                         });
 
-                        item.appendChild(info);
-                        item.appendChild(menuBtn);
+                        const open = async () => {
+                            menu?.close();
+                            if (onLoadCloudProject) await onLoadCloudProject(project.id);
+                        };
+                        item.addEventListener('click', open);
+                        item.addEventListener('keydown', (e) => {
+                            if (e.key === 'Enter') open();
+                        });
 
-                        projectList.appendChild(item);
+                        item.append(thumb, info, optBtn);
+                        list.appendChild(item);
                     }
-
-                    cloudSection.appendChild(projectList);
+                    menu?.reposition();
+                } catch (err) {
+                    list.innerHTML = '';
+                    list.appendChild(h('div', { className: 'pm-empty is-error', text: `Couldn’t load projects: ${err.message || 'network error'}` }));
                 }
-            } catch (err) {
-                loading.textContent = 'Error loading projects';
-                loading.style.color = '#f44336';
-            }
-        })();
+            })();
+        } else if (!apiClient.isLoggedIn() && apiClient.isEnabled()) {
+            const signin = h('div', { className: 'pm-signin' });
+            signin.appendChild(h('span', { className: 'pt-label', text: 'Cloud projects' }));
+            signin.appendChild(h('p', { text: 'Sign in to save projects to the cloud, open them anywhere and share them with a link.' }));
+            const btn = UIHelpers.button('Sign in', { size: 'sm', icon: 'user' });
+            btn.addEventListener('click', () => {
+                menu?.close();
+                onSignIn?.();
+            });
+            signin.appendChild(btn);
+            cloud.appendChild(signin);
         }
+        if (cloud.childElementCount) content.appendChild(cloud);
 
-        overlay.appendChild(menu);
-        document.body.appendChild(overlay);
-
-        // Close on click outside
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) {
-                overlay.remove();
-            }
+        menu = UIHelpers.openMenu({
+            anchor,
+            content,
+            className: 'pt-project-menu',
+            offset: 6
         });
-
-        // Focus the title input
-        setTimeout(() => titleInput.select(), 0);
+        return menu;
     }
 
     /**
-     * Show options menu for a cloud project (download, duplicate, delete)
-     * @param {Object} options - Configuration object
-     * @param {Object} options.project - Project object from cloud
-     * @param {HTMLElement} options.anchorBtn - Button element to anchor menu to
-     * @param {HTMLElement} options.listItem - List item element (for removal on delete)
-     * @param {ApiClient} options.apiClient - API client instance
-     * @param {string} options.currentProjectId - Current project ID
-     * @param {Function} options.onProjectDeleted - Callback when project is deleted
-     * @param {Function} options.onProjectDuplicated - Callback when project is duplicated
+     * Options menu for a cloud project (download, duplicate, share, delete)
      */
     static showProjectOptionsMenu({
         project,
@@ -342,277 +249,132 @@ export class ProjectDialogs {
         onProjectDeleted,
         onProjectDuplicated
     }) {
-        // Remove any existing menu
-        const existingMenu = document.querySelector('.project-options-menu');
-        if (existingMenu) existingMenu.remove();
-
-        const menu = document.createElement('div');
-        menu.className = 'project-options-menu';
-        menu.style.cssText = `
-            position: absolute;
-            background: rgba(45, 45, 45, 0.98);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(68, 68, 68, 0.5);
-            border-radius: 6px;
-            padding: 6px;
-            min-width: 160px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-            z-index: 10002;
-        `;
-
-        const createOption = (icon, text, onClick) => {
-            const option = document.createElement('button');
-            option.textContent = `${icon} ${text}`;
-            option.style.cssText = `
-                width: 100%;
-                padding: 8px 12px;
-                background: transparent;
-                border: none;
-                color: #fff;
-                text-align: left;
-                cursor: pointer;
-                border-radius: 4px;
-                font-size: 13px;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            `;
-            option.addEventListener('mouseenter', () => {
-                option.style.background = 'rgba(0, 122, 204, 0.2)';
-            });
-            option.addEventListener('mouseleave', () => {
-                option.style.background = 'transparent';
-            });
-            option.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                menu.remove();
-                await onClick();
-            });
-            return option;
-        };
-
-        // Download option
-        menu.appendChild(createOption('⬇️', 'Download', async () => {
-            try {
-                const fullProject = await apiClient.getProject(project.id);
-                const projectData = JSON.stringify(fullProject.data, null, 2);
-                const blob = new Blob([projectData], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${project.name}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-            } catch (err) {
-                alert('Failed to download project: ' + err.message);
-            }
-        }));
-
-        // Duplicate option
-        menu.appendChild(createOption('📋', 'Duplicate', async () => {
-            try {
-                const fullProject = await apiClient.getProject(project.id);
-                const newName = `${project.name} (Copy)`;
-                await apiClient.saveProject(newName, fullProject.data);
-                alert(`Project duplicated as "${newName}"`);
-
-                // Notify parent to refresh
-                if (onProjectDuplicated) {
-                    onProjectDuplicated(newName);
-                }
-            } catch (err) {
-                alert('Failed to duplicate project: ' + err.message);
-            }
-        }));
-
-        // Share option
-        menu.appendChild(createOption('🔗', project.isPublic ? 'Make Private' : 'Share Link', async () => {
-            try {
-                const newVisibility = !project.isPublic;
-                await apiClient.toggleProjectVisibility(project.id, newVisibility);
-                project.isPublic = newVisibility; // Update local state
-
-                if (newVisibility) {
-                    // Show share link dialog
-                    const shareUrl = `${window.location.origin}?project=${project.id}`;
-                    const overlay = document.createElement('div');
-                    overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.5); z-index: 10003; display: flex; align-items: center; justify-content: center;';
-
-                    const dialog = document.createElement('div');
-                    dialog.style.cssText = 'background: rgba(45, 45, 45, 0.98); border: 1px solid rgba(68, 68, 68, 0.5); border-radius: 8px; padding: 24px; max-width: 500px; width: calc(100vw - 40px);';
-
-                    const title = document.createElement('div');
-                    title.textContent = 'Share Project';
-                    title.style.cssText = 'color: #fff; font-size: 16px; font-weight: 600; margin-bottom: 16px;';
-
-                    const message = document.createElement('div');
-                    message.textContent = 'Anyone with this link can view your project:';
-                    message.style.cssText = 'color: #ccc; font-size: 13px; margin-bottom: 12px;';
-
-                    const linkContainer = document.createElement('div');
-                    linkContainer.style.cssText = 'display: flex; gap: 8px; margin-bottom: 16px;';
-
-                    const linkInput = document.createElement('input');
-                    linkInput.type = 'text';
-                    linkInput.value = shareUrl;
-                    linkInput.readOnly = true;
-                    linkInput.style.cssText = 'flex: 1; padding: 8px 12px; background: rgba(30, 30, 30, 0.8); border: 1px solid #444; color: #fff; border-radius: 4px; font-size: 13px;';
-
-                    const copyBtn = document.createElement('button');
-                    copyBtn.textContent = 'Copy';
-                    copyBtn.style.cssText = 'padding: 8px 16px; background: #007acc; border: none; color: #fff; cursor: pointer; border-radius: 4px; font-size: 13px;';
-                    copyBtn.addEventListener('click', () => {
-                        navigator.clipboard.writeText(shareUrl);
-                        copyBtn.textContent = 'Copied!';
-                        setTimeout(() => copyBtn.textContent = 'Copy', 2000);
-                    });
-
-                    const closeBtn = document.createElement('button');
-                    closeBtn.textContent = 'Close';
-                    closeBtn.style.cssText = 'width: 100%; padding: 8px; background: rgba(30, 30, 30, 0.8); border: 1px solid #444; color: #fff; cursor: pointer; border-radius: 4px; font-size: 13px;';
-                    closeBtn.addEventListener('click', () => overlay.remove());
-
-                    linkContainer.appendChild(linkInput);
-                    linkContainer.appendChild(copyBtn);
-                    dialog.appendChild(title);
-                    dialog.appendChild(message);
-                    dialog.appendChild(linkContainer);
-                    dialog.appendChild(closeBtn);
-                    overlay.appendChild(dialog);
-                    document.body.appendChild(overlay);
-
-                    // Auto-select the link
-                    linkInput.select();
-                } else {
-                    alert('Project is now private');
-                }
-            } catch (err) {
-                alert('Failed to toggle visibility: ' + err.message);
-            }
-        }));
-
-        // Delete option
-        menu.appendChild(createOption('🗑️', 'Delete', async () => {
-            if (confirm(`Delete "${project.name}"? This cannot be undone.`)) {
-                try {
-                    await apiClient.deleteProject(project.id);
-                    listItem.remove();
-
-                    // Notify parent if current project was deleted
-                    if (currentProjectId === project.id && onProjectDeleted) {
-                        onProjectDeleted(project.id);
+        anchorBtn.classList.add('is-active');
+        return UIHelpers.openMenu({
+            anchor: anchorBtn,
+            align: 'end',
+            className: 'project-options-menu',
+            onClose: () => anchorBtn.classList.remove('is-active'),
+            items: [
+                {
+                    icon: 'download', label: 'Download .json', onClick: async () => {
+                        try {
+                            const fullProject = await apiClient.getProject(project.id);
+                            const projectData = JSON.stringify(fullProject.data, null, 2);
+                            const blob = new Blob([projectData], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${project.name}.json`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                        } catch (err) {
+                            UIHelpers.notify(err.message, 'error', { title: 'Download failed' });
+                        }
                     }
-                } catch (err) {
-                    alert('Failed to delete project: ' + err.message);
+                },
+                {
+                    icon: 'copy', label: 'Duplicate', onClick: async () => {
+                        try {
+                            const fullProject = await apiClient.getProject(project.id);
+                            const newName = `${project.name} (Copy)`;
+                            await apiClient.saveProject(newName, fullProject.data);
+                            UIHelpers.toast(`Duplicated as “${newName}”`, 'success');
+                            onProjectDuplicated?.(newName);
+                        } catch (err) {
+                            UIHelpers.notify(err.message, 'error', { title: 'Duplicate failed' });
+                        }
+                    }
+                },
+                {
+                    icon: 'link', label: project.isPublic ? 'Make private' : 'Share link…', onClick: async () => {
+                        try {
+                            // "Share link" = anyone with the link (unlisted), not published to Community
+                            const newVisibility = !project.isPublic;
+                            await apiClient.setProjectVisibility(project.id, newVisibility ? 'unlisted' : 'private');
+                            project.isPublic = newVisibility;
+                            project.visibility = newVisibility ? 'unlisted' : 'private';
+
+                            if (newVisibility) {
+                                ProjectDialogs.showShareDialog(project);
+                            } else {
+                                UIHelpers.toast(`“${project.name}” is now private`, 'success');
+                            }
+                        } catch (err) {
+                            UIHelpers.notify(err.message, 'error', { title: 'Could not change visibility' });
+                        }
+                    }
+                },
+                { separator: true },
+                {
+                    icon: 'trash', label: 'Delete', danger: true, onClick: async () => {
+                        const ok = await UIHelpers.confirm({
+                            title: `Delete “${project.name}”?`,
+                            message: 'This permanently removes the project from the cloud. This cannot be undone.',
+                            confirmLabel: 'Delete project',
+                            danger: true
+                        });
+                        if (!ok) return;
+                        try {
+                            await apiClient.deleteProject(project.id);
+                            listItem?.remove();
+                            UIHelpers.toast(`Deleted “${project.name}”`, 'success');
+                            if (currentProjectId === project.id && onProjectDeleted) {
+                                onProjectDeleted(project.id);
+                            }
+                        } catch (err) {
+                            UIHelpers.notify(err.message, 'error', { title: 'Delete failed' });
+                        }
+                    }
                 }
-            }
-        }));
+            ]
+        });
+    }
 
-        // Position the menu
-        const rect = anchorBtn.getBoundingClientRect();
-        menu.style.top = `${rect.bottom + 5}px`;
-        menu.style.right = `${window.innerWidth - rect.right}px`;
-
-        document.body.appendChild(menu);
-
-        // Close menu when clicking outside
-        const closeMenu = (e) => {
-            if (!menu.contains(e.target) && e.target !== anchorBtn) {
-                menu.remove();
-                document.removeEventListener('click', closeMenu);
-            }
-        };
-        setTimeout(() => document.addEventListener('click', closeMenu), 0);
+    static showShareDialog(project) {
+        const shareUrl = `${window.location.origin}/p/${encodeURIComponent(project.id)}`;
+        const m = UIHelpers.createModal({
+            title: 'Share project',
+            subtitle: `Anyone with this link can open “${project.name}”.`,
+            className: 'pt-modal--wide'
+        });
+        const row = h('div', { className: 'pt-copy-row' });
+        const input = h('input', { type: 'text', className: 'pt-input pt-input--mono', readOnly: true });
+        input.value = shareUrl;
+        const copyBtn = UIHelpers.button('Copy link', { variant: 'primary', icon: 'copy' });
+        copyBtn.addEventListener('click', () => {
+            navigator.clipboard?.writeText(shareUrl).then(() => {
+                copyBtn.setLabel('Copied');
+                setTimeout(() => copyBtn.setLabel('Copy link'), 1800);
+            }, () => {
+                input.select();
+                UIHelpers.toast('Press ⌘C to copy the selected link', 'info');
+            });
+        });
+        row.append(input, copyBtn);
+        m.body.appendChild(row);
+        m.body.style.paddingBottom = '20px';
+        m.footer.appendChild(UIHelpers.button('Done', { onClick: () => m.close() }));
+        setTimeout(() => input.select(), 0);
+        return m;
     }
 
     /**
-     * Show options menu for current project (download)
-     * @param {Object} options - Configuration object
-     * @param {HTMLElement} options.anchorBtn - Button element to anchor menu to
-     * @param {Function} options.onDownload - Callback when download is clicked
+     * Options menu for the current project
      */
     static showCurrentProjectMenu({ anchorBtn, onDownload }) {
-        // Remove any existing menu
-        const existingMenu = document.querySelector('.current-project-menu');
-        if (existingMenu) existingMenu.remove();
-
-        const menu = document.createElement('div');
-        menu.className = 'current-project-menu';
-        menu.style.cssText = `
-            position: absolute;
-            background: rgba(45, 45, 45, 0.98);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(68, 68, 68, 0.5);
-            border-radius: 6px;
-            padding: 6px;
-            min-width: 160px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-            z-index: 10002;
-        `;
-
-        const createOption = (icon, text, onClick) => {
-            const option = document.createElement('button');
-            option.textContent = `${icon} ${text}`;
-            option.style.cssText = `
-                width: 100%;
-                padding: 8px 12px;
-                background: transparent;
-                border: none;
-                color: #fff;
-                text-align: left;
-                cursor: pointer;
-                border-radius: 4px;
-                font-size: 13px;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            `;
-            option.addEventListener('mouseenter', () => {
-                option.style.background = 'rgba(0, 122, 204, 0.2)';
-            });
-            option.addEventListener('mouseleave', () => {
-                option.style.background = 'transparent';
-            });
-            option.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                menu.remove();
-                await onClick();
-            });
-            return option;
-        };
-
-        // Download current project
-        menu.appendChild(createOption('⬇️', 'Download', () => {
-            if (onDownload) {
-                onDownload();
-            }
-        }));
-
-        // Position the menu
-        const rect = anchorBtn.getBoundingClientRect();
-        menu.style.top = `${rect.bottom + 5}px`;
-        menu.style.left = `${rect.left}px`;
-
-        document.body.appendChild(menu);
-
-        // Close menu when clicking outside
-        const closeMenu = (e) => {
-            if (!menu.contains(e.target) && e.target !== anchorBtn) {
-                menu.remove();
-                document.removeEventListener('click', closeMenu);
-            }
-        };
-        setTimeout(() => document.addEventListener('click', closeMenu), 0);
+        return UIHelpers.openMenu({
+            anchor: anchorBtn,
+            align: 'end',
+            className: 'current-project-menu',
+            items: [
+                { icon: 'download', label: 'Download as .json', onClick: () => onDownload?.() }
+            ]
+        });
     }
 
     /**
-     * Show dialog to save project to cloud
-     * @param {Object} options - Configuration object
-     * @param {ApiClient} options.apiClient - API client instance
-     * @param {string} options.projectTitle - Current project title
-     * @param {string} options.currentProjectId - Current project ID (if updating)
-     * @param {Function} options.serializeGraph - Function that returns serialized graph data
-     * @param {Function} options.onSaveSuccess - Callback when save succeeds (projectId, projectName)
+     * Dialog to save the project to the cloud
      */
     static showSaveProjectDialog({
         apiClient,
@@ -621,70 +383,34 @@ export class ProjectDialogs {
         serializeGraph,
         onSaveSuccess
     }) {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+        const m = UIHelpers.createModal({
+            title: 'Save to cloud',
+            subtitle: 'Give your patch a name. You can rename it any time.'
+        });
+        const name = UIHelpers.field({
+            label: 'Project name',
+            placeholder: 'My Awesome Shader',
+            value: projectTitle || `Project ${new Date().toLocaleDateString()}`
+        });
+        m.body.appendChild(name.field);
 
-        const dialog = document.createElement('div');
-        dialog.style.cssText = 'background: #2d2d2d; border: 1px solid #444; border-radius: 8px; padding: 20px; width: 400px; max-width: 90vw;';
-
-        const title = document.createElement('h2');
-        title.textContent = 'Save Project to Cloud';
-        title.style.cssText = 'margin: 0 0 20px 0; color: #fff; font-size: 18px;';
-        dialog.appendChild(title);
-
-        const label = document.createElement('label');
-        label.textContent = 'Project Name';
-        label.style.cssText = 'display: block; color: #ccc; margin-bottom: 5px;';
-
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.placeholder = 'My Awesome Shader';
-        input.value = projectTitle || `Project ${new Date().toLocaleDateString()}`;
-        input.style.cssText = 'width: 100%; padding: 8px; background: #1e1e1e; border: 1px solid #444; color: #fff; border-radius: 4px; margin-bottom: 20px; box-sizing: border-box;';
-
-        const errorMsg = document.createElement('div');
-        errorMsg.style.cssText = 'color: #f44336; margin-bottom: 15px; display: none;';
-
-        const buttonContainer = document.createElement('div');
-        buttonContainer.style.cssText = 'display: flex; gap: 10px;';
-
-        const saveBtn = document.createElement('button');
-        saveBtn.textContent = 'Save';
-        saveBtn.style.cssText = 'flex: 1; padding: 10px; background: #007acc; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 14px;';
-
-        const cancelBtn = document.createElement('button');
-        cancelBtn.textContent = 'Cancel';
-        cancelBtn.style.cssText = 'flex: 1; padding: 10px; background: #333; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 14px;';
+        const cancelBtn = UIHelpers.button('Cancel', { variant: 'ghost', onClick: () => m.close() });
+        const saveBtn = UIHelpers.button('Save', { variant: 'primary', icon: 'cloud' });
+        m.footer.append(cancelBtn, saveBtn);
 
         saveBtn.addEventListener('click', async () => {
-            const name = input.value.trim();
-            if (!name) {
-                errorMsg.textContent = 'Project name is required';
-                errorMsg.style.display = 'block';
+            const projectName = name.input.value.trim();
+            if (!projectName) {
+                m.setError('Project name is required.');
                 return;
             }
 
             try {
                 saveBtn.disabled = true;
-                saveBtn.textContent = 'Saving...';
+                saveBtn.setLabel('Saving…');
 
-                // Collect all custom nodes
-                const customNodes = {};
-                for (const [nodeName, def] of Object.entries(NodeDefinitions)) {
-                    if (def.isCustomNode) {
-                        customNodes[nodeName] = {
-                            category: def.category,
-                            inputs: def.inputs,
-                            outputs: def.outputs,
-                            customGLSL: def.customGLSL
-                        };
-                    }
-                }
-
-                // Get serialized graph data
                 const graphData = serializeGraph ? serializeGraph() : {};
-
-                // Create project data with custom nodes
+                const customNodes = collectCustomNodes(graphData);
                 const projectData = {
                     version: '1.0',
                     graph: graphData,
@@ -694,44 +420,26 @@ export class ProjectDialogs {
 
                 let result;
                 if (currentProjectId) {
-                    // Update existing project
-                    result = await apiClient.updateProject(currentProjectId, { name, data: projectData });
+                    result = await apiClient.updateProject(currentProjectId, { name: projectName, data: projectData });
                 } else {
-                    // Create new project
-                    result = await apiClient.saveProject(name, projectData);
+                    result = await apiClient.saveProject(projectName, projectData);
                 }
 
-                overlay.remove();
-
-                // Notify parent of successful save
-                if (onSaveSuccess) {
-                    onSaveSuccess(result.id || currentProjectId, name);
-                }
-
-                alert('Project saved to cloud!');
+                m.close();
+                onSaveSuccess?.(result.id || currentProjectId, projectName);
+                UIHelpers.toast(`Saved “${projectName}” to the cloud`, 'success');
             } catch (err) {
-                errorMsg.textContent = err.message || 'Failed to save project';
-                errorMsg.style.display = 'block';
+                m.setError(err.message || 'Failed to save project');
                 saveBtn.disabled = false;
-                saveBtn.textContent = 'Save';
+                saveBtn.setLabel('Save');
             }
         });
 
-        cancelBtn.addEventListener('click', () => overlay.remove());
-
-        input.addEventListener('keypress', (e) => {
+        name.input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') saveBtn.click();
         });
 
-        dialog.appendChild(label);
-        dialog.appendChild(input);
-        dialog.appendChild(errorMsg);
-        buttonContainer.appendChild(saveBtn);
-        buttonContainer.appendChild(cancelBtn);
-        dialog.appendChild(buttonContainer);
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-
-        setTimeout(() => input.select(), 0);
+        setTimeout(() => name.input.select(), 0);
+        return m;
     }
 }

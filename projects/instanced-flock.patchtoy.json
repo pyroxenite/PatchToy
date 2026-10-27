@@ -1,0 +1,1695 @@
+{
+  "name": "Instanced Flock",
+  "description": "2048 boids from a Feedback simulation drawn as real winged meshes by a Render 3D node: instanced bird meshes aligned with their velocity, wings flapped in the vertex shader, soft sun shadows on the ground, sky, fog and bloom. Reacts to music (separation bursts, beat flares). Parameters: Flock, Birds, Look, Music.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T20:19:40.217Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 0,
+        "type": "Comment",
+        "x": 80,
+        "y": -118,
+        "data": {
+          "text": "# Instanced Flock\n2048 boids simulated in one rgba32f Feedback and drawn as real winged meshes by a Render 3D node: one instanced draw call, wings flapped in the vertex shader, soft sun shadows on the ground, fog, sky and bloom.\n- Tweak it in the Parameters panel (P): Flock, Birds, Look, Music.\n- Orbit: the camera is an Orbital Camera (Camera speed / distance).",
+          "width": 420,
+          "height": 150,
+          "color": "yellow"
+        }
+      },
+      {
+        "id": 1,
+        "type": "Comment",
+        "x": 80,
+        "y": -78,
+        "data": {
+          "text": "## Boid sim\nFeedback 64 x 64 rgba32f: rows 0-31 = positions, 32-63 = velocities (Instance Data layout, blocks = 2). Every boid checks every other within the perception radius (2048^2 tests per frame).",
+          "width": 300,
+          "height": 110,
+          "color": "blue"
+        }
+      },
+      {
+        "id": 2,
+        "type": "Comment",
+        "x": 80,
+        "y": -88,
+        "data": {
+          "text": "## Birds\nBird Mesh instanced 2048 times: Instances From Texture puts each bird at its position and turns it along its velocity. Wing Flap (Mesh.displace) bends the wings per vertex; the material colours birds by instance id.",
+          "width": 320,
+          "height": 120,
+          "color": "violet"
+        }
+      },
+      {
+        "id": 3,
+        "type": "Comment",
+        "x": 80,
+        "y": -88,
+        "data": {
+          "text": "## Scene\nRender 3D: birds, ground, glowing grid, sun with a soft shadow map, sky light. The background is a sky shaded per camera ray (Camera Ray with the same camera), the fog fades to the horizon colour.",
+          "width": 320,
+          "height": 120,
+          "color": "green"
+        }
+      },
+      {
+        "id": 4,
+        "type": "Comment",
+        "x": 80,
+        "y": -58,
+        "data": {
+          "text": "## Post\nBright pass into a small Feedback, blurred back on top (bloom), vignette, highlight roll-off.",
+          "width": 280,
+          "height": 90,
+          "color": "orange"
+        }
+      },
+      {
+        "id": 5,
+        "type": "Comment",
+        "x": 80,
+        "y": -78,
+        "data": {
+          "text": "## Music\ndrive = music x smoothstep(0.02, 0.12, level): separation bursts and the flock speeds up with the music. Beat pulses flare the bloom and the wing tips: Beat (clock stable, gate fade) pulse x confidence, so they come from the stable beat clock and fade out while it is unsure (a track change) and with the audio off.",
+          "width": 300,
+          "height": 110,
+          "color": "pink"
+        }
+      },
+      {
+        "id": 6,
+        "type": "Param",
+        "x": 320,
+        "y": 80,
+        "data": {
+          "label": "Music reactivity",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Music",
+          "order": 40,
+          "description": "0 = ignore the music."
+        }
+      },
+      {
+        "id": 7,
+        "type": "Audio",
+        "x": 80,
+        "y": 228,
+        "data": {}
+      },
+      {
+        "id": 8,
+        "type": "Smoothstep",
+        "x": 320,
+        "y": 194,
+        "data": {
+          "edge0": 0.02,
+          "edge1": 0.12,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 9,
+        "type": "Multiply",
+        "x": 578,
+        "y": 235,
+        "data": {}
+      },
+      {
+        "id": 10,
+        "type": "Beat",
+        "x": 320,
+        "y": 332,
+        "data": {
+          "decay": 6,
+          "rate": 1,
+          "threshold": 0.5,
+          "clock": "stable",
+          "gate": "fade"
+        }
+      },
+      {
+        "id": 11,
+        "type": "Multiply",
+        "x": 578,
+        "y": 319,
+        "data": {}
+      },
+      {
+        "id": 12,
+        "type": "Multiply",
+        "x": 716,
+        "y": 277,
+        "data": {}
+      },
+      {
+        "id": 13,
+        "type": "Time",
+        "x": 80,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 14,
+        "type": "Param",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "label": "Separation",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 0,
+          "description": "Steering away from close neighbours."
+        }
+      },
+      {
+        "id": 15,
+        "type": "Param",
+        "x": 80,
+        "y": 194,
+        "data": {
+          "label": "Alignment",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 1,
+          "description": "Matching the neighbours' heading."
+        }
+      },
+      {
+        "id": 16,
+        "type": "Param",
+        "x": 80,
+        "y": 308,
+        "data": {
+          "label": "Cohesion",
+          "kind": "float",
+          "value": 0.6,
+          "default": 0.6,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 2,
+          "description": "Steering toward the neighbours' centre."
+        }
+      },
+      {
+        "id": 17,
+        "type": "Param",
+        "x": 80,
+        "y": 422,
+        "data": {
+          "label": "Speed",
+          "kind": "float",
+          "value": 5,
+          "default": 5,
+          "min": 0.5,
+          "max": 12,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 3,
+          "description": "Flight speed (units / s)."
+        }
+      },
+      {
+        "id": 18,
+        "type": "Param",
+        "x": 80,
+        "y": 536,
+        "data": {
+          "label": "Perception",
+          "kind": "float",
+          "value": 1.8,
+          "default": 1.8,
+          "min": 0.3,
+          "max": 5,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 4,
+          "description": "Neighbour radius."
+        }
+      },
+      {
+        "id": 19,
+        "type": "Param",
+        "x": 80,
+        "y": 650,
+        "data": {
+          "label": "Sky size",
+          "kind": "float",
+          "value": 11,
+          "default": 11,
+          "min": 4,
+          "max": 25,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 5,
+          "description": "Radius of the region the flock roams."
+        }
+      },
+      {
+        "id": 20,
+        "type": "FlockSim",
+        "x": 338,
+        "y": 334,
+        "data": {}
+      },
+      {
+        "id": 21,
+        "type": "Feedback",
+        "x": 80,
+        "y": 764,
+        "data": {
+          "width": 64,
+          "height": 64,
+          "format": "rgba32f",
+          "filter": "nearest",
+          "keepRunning": true
+        }
+      },
+      {
+        "id": 22,
+        "type": "Param",
+        "x": 956,
+        "y": 120,
+        "data": {
+          "label": "Bird size",
+          "kind": "float",
+          "value": 0.6,
+          "default": 0.6,
+          "min": 0.1,
+          "max": 1.5,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Birds",
+          "order": 10,
+          "description": "Scale of each bird."
+        }
+      },
+      {
+        "id": 23,
+        "type": "Param",
+        "x": 956,
+        "y": 318,
+        "data": {
+          "label": "Flap speed",
+          "kind": "float",
+          "value": 16,
+          "default": 16,
+          "min": 2,
+          "max": 40,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Birds",
+          "order": 11,
+          "description": "Wing beats (radians / s)."
+        }
+      },
+      {
+        "id": 24,
+        "type": "Param",
+        "x": 458,
+        "y": 257,
+        "data": {
+          "label": "Bird colour",
+          "kind": "color",
+          "value": [
+            0.95,
+            0.55,
+            0.3
+          ],
+          "default": [
+            0.95,
+            0.55,
+            0.3
+          ],
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Birds",
+          "order": 12,
+          "description": "Base hue of the flock.",
+          "alpha": false
+        }
+      },
+      {
+        "id": 25,
+        "type": "BirdMesh",
+        "x": 1214,
+        "y": 80,
+        "data": {
+          "size": 1,
+          "span": 1
+        }
+      },
+      {
+        "id": 26,
+        "type": "InstancesFromTexture",
+        "x": 1214,
+        "y": 196,
+        "data": {
+          "blocks": 2,
+          "scale": 0.1,
+          "scaleFromW": 0,
+          "color": "vec4(1.0)"
+        }
+      },
+      {
+        "id": 27,
+        "type": "Surface",
+        "x": 956,
+        "y": 432,
+        "data": {}
+      },
+      {
+        "id": 28,
+        "type": "WingFlap",
+        "x": 1214,
+        "y": 582,
+        "data": {}
+      },
+      {
+        "id": 29,
+        "type": "Surface",
+        "x": 80,
+        "y": 276,
+        "data": {}
+      },
+      {
+        "id": 30,
+        "type": "Multiply",
+        "x": 320,
+        "y": 369,
+        "data": {
+          "b": 0.618
+        }
+      },
+      {
+        "id": 31,
+        "type": "Fract",
+        "x": 458,
+        "y": 377,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 32,
+        "type": "CosinePalette",
+        "x": 716,
+        "y": 278,
+        "data": {
+          "b": [
+            0.45,
+            0.35,
+            0.3
+          ],
+          "c": [
+            1,
+            1,
+            1
+          ],
+          "d": [
+            0,
+            0.15,
+            0.3
+          ]
+        }
+      },
+      {
+        "id": 33,
+        "type": "Abs",
+        "x": 458,
+        "y": 471,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 34,
+        "type": "Multiply",
+        "x": 716,
+        "y": 460,
+        "data": {
+          "b": 2.5
+        }
+      },
+      {
+        "id": 35,
+        "type": "Multiply",
+        "x": 956,
+        "y": 234,
+        "data": {}
+      },
+      {
+        "id": 36,
+        "type": "PBRMaterial",
+        "x": 1214,
+        "y": 378,
+        "data": {
+          "roughness": 0.38,
+          "metallic": 0.15,
+          "alpha": 1,
+          "baseColor": "vec3(0.8)",
+          "emission": "vec3(0.0)",
+          "normal": "@n"
+        }
+      },
+      {
+        "id": 37,
+        "type": "Mesh",
+        "x": 1454,
+        "y": 287,
+        "data": {
+          "count": 0,
+          "castShadow": true,
+          "receiveShadow": true,
+          "cull": "back",
+          "blend": "auto",
+          "pointSize": 0.05,
+          "material": "Material(vec3(0.8), 1.0, 0.45, 0.0, vec3(0.0), r3N, 0.0, vec4(0.0), vec3(0.0))",
+          "position": "vec3(0.0)",
+          "rotation": "vec3(0.0)",
+          "scale": "vec3(1.0)",
+          "instances": "Instance(vec3(0.0), vec4(0.0, 0.0, 0.0, 1.0), vec3(1.0), vec4(1.0), 1.0)",
+          "displace": "vec3(0.0)"
+        }
+      },
+      {
+        "id": 38,
+        "type": "Param",
+        "x": 836,
+        "y": 80,
+        "data": {
+          "label": "Horizon",
+          "kind": "color",
+          "value": [
+            0.92,
+            0.66,
+            0.5
+          ],
+          "default": [
+            0.92,
+            0.66,
+            0.5
+          ],
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 20,
+          "description": "Sky colour at the horizon (and fog).",
+          "alpha": false
+        }
+      },
+      {
+        "id": 39,
+        "type": "Param",
+        "x": 836,
+        "y": 338,
+        "data": {
+          "label": "Zenith",
+          "kind": "color",
+          "value": [
+            0.2,
+            0.32,
+            0.58
+          ],
+          "default": [
+            0.2,
+            0.32,
+            0.58
+          ],
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 21,
+          "description": "Sky colour overhead.",
+          "alpha": false
+        }
+      },
+      {
+        "id": 40,
+        "type": "Param",
+        "x": 80,
+        "y": 579,
+        "data": {
+          "label": "Camera speed",
+          "kind": "float",
+          "value": 0.06,
+          "default": 0.06,
+          "min": 0,
+          "max": 0.4,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 22,
+          "description": "Orbit speed (radians / s)."
+        }
+      },
+      {
+        "id": 41,
+        "type": "Param",
+        "x": 338,
+        "y": 537,
+        "data": {
+          "label": "Camera distance",
+          "kind": "float",
+          "value": 24,
+          "default": 24,
+          "min": 10,
+          "max": 60,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 23,
+          "description": "Distance to the flock."
+        }
+      },
+      {
+        "id": 42,
+        "type": "Multiply",
+        "x": 338,
+        "y": 651,
+        "data": {}
+      },
+      {
+        "id": 43,
+        "type": "OrbitalCamera",
+        "x": 596,
+        "y": 545,
+        "data": {
+          "latitude": 0.16,
+          "target": [
+            0,
+            7,
+            0
+          ],
+          "fov": 50
+        }
+      },
+      {
+        "id": 44,
+        "type": "CameraRay",
+        "x": 836,
+        "y": 200,
+        "data": {}
+      },
+      {
+        "id": 45,
+        "type": "FlockSky",
+        "x": 1094,
+        "y": 148,
+        "data": {}
+      },
+      {
+        "id": 46,
+        "type": "Vec3",
+        "x": 836,
+        "y": 800,
+        "data": {
+          "x": -0.5,
+          "y": 0.55,
+          "z": -0.35,
+          "useUniform": false
+        }
+      },
+      {
+        "id": 47,
+        "type": "PlaneMesh",
+        "x": 836,
+        "y": 458,
+        "data": {
+          "width": 160,
+          "depth": 160,
+          "segments": 1
+        }
+      },
+      {
+        "id": 48,
+        "type": "PBRMaterial",
+        "x": 836,
+        "y": 596,
+        "data": {
+          "roughness": 0.9,
+          "metallic": 0,
+          "alpha": 1,
+          "baseColor": [
+            0.2,
+            0.17,
+            0.16
+          ],
+          "emission": "vec3(0.0)",
+          "normal": "@n"
+        }
+      },
+      {
+        "id": 49,
+        "type": "Mesh",
+        "x": 1094,
+        "y": 308,
+        "data": {
+          "count": 0,
+          "castShadow": false,
+          "receiveShadow": true,
+          "cull": "back",
+          "blend": "auto",
+          "pointSize": 0.05,
+          "material": "Material(vec3(0.8), 1.0, 0.45, 0.0, vec3(0.0), r3N, 0.0, vec4(0.0), vec3(0.0))",
+          "position": "vec3(0.0)",
+          "rotation": "vec3(0.0)",
+          "scale": "vec3(1.0)",
+          "instances": "Instance(vec3(0.0), vec4(0.0, 0.0, 0.0, 1.0), vec3(1.0), vec4(1.0), 1.0)",
+          "displace": "vec3(0.0)"
+        }
+      },
+      {
+        "id": 50,
+        "type": "GridMesh",
+        "x": 836,
+        "y": 938,
+        "data": {
+          "width": 160,
+          "depth": 160,
+          "divisions": 80
+        }
+      },
+      {
+        "id": 51,
+        "type": "UnlitMaterial",
+        "x": 836,
+        "y": 1076,
+        "data": {
+          "alpha": 1,
+          "color": [
+            0.12,
+            0.08,
+            0.06
+          ]
+        }
+      },
+      {
+        "id": 52,
+        "type": "Mesh",
+        "x": 1094,
+        "y": 876,
+        "data": {
+          "count": 0,
+          "castShadow": false,
+          "receiveShadow": true,
+          "cull": "back",
+          "blend": "add",
+          "pointSize": 0.05,
+          "material": "Material(vec3(0.8), 1.0, 0.45, 0.0, vec3(0.0), r3N, 0.0, vec4(0.0), vec3(0.0))",
+          "position": [
+            0,
+            0.02,
+            0
+          ],
+          "rotation": "vec3(0.0)",
+          "scale": "vec3(1.0)",
+          "instances": "Instance(vec3(0.0), vec4(0.0, 0.0, 0.0, 1.0), vec3(1.0), vec4(1.0), 1.0)",
+          "displace": "vec3(0.0)"
+        }
+      },
+      {
+        "id": 53,
+        "type": "DirectionalLight",
+        "x": 1094,
+        "y": 694,
+        "data": {
+          "intensity": 3.2,
+          "shadowSize": 18,
+          "castShadow": true,
+          "softness": 1.5,
+          "direction": "vec3(0.5, 1.0, 0.35)",
+          "color": [
+            1,
+            0.88,
+            0.72
+          ],
+          "shadowCenter": [
+            0,
+            7,
+            0
+          ]
+        }
+      },
+      {
+        "id": 54,
+        "type": "AmbientLight",
+        "x": 1094,
+        "y": 556,
+        "data": {
+          "intensity": 0.9,
+          "sky": [
+            0.42,
+            0.5,
+            0.7
+          ],
+          "ground": [
+            0.3,
+            0.2,
+            0.15
+          ]
+        }
+      },
+      {
+        "id": 55,
+        "type": "Render3D",
+        "x": 1334,
+        "y": 418,
+        "data": {
+          "size": "auto",
+          "width": 1280,
+          "height": 800,
+          "maxSize": 1920,
+          "msaa": 4,
+          "near": 0.05,
+          "far": 500,
+          "fog": 0.012,
+          "exposure": 1,
+          "tonemap": "gamma",
+          "clearColor": [
+            0.92,
+            0.66,
+            0.5,
+            1
+          ],
+          "shadowRes": 2048,
+          "items": 6,
+          "orbit": {
+            "yaw": 0.6,
+            "pitch": 0.35,
+            "distance": 5,
+            "target": [
+              0,
+              0,
+              0
+            ],
+            "fov": 45
+          }
+        }
+      },
+      {
+        "id": 56,
+        "type": "Param",
+        "x": 80,
+        "y": 100,
+        "data": {
+          "label": "Bloom",
+          "kind": "float",
+          "value": 0.9,
+          "default": 0.9,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 24,
+          "description": "Glow around bright highlights."
+        }
+      },
+      {
+        "id": 57,
+        "type": "Mix",
+        "x": 80,
+        "y": 214,
+        "data": {
+          "a": 1,
+          "b": 2,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 58,
+        "type": "Multiply",
+        "x": 338,
+        "y": 194,
+        "data": {}
+      },
+      {
+        "id": 59,
+        "type": "Param",
+        "x": 338,
+        "y": 80,
+        "data": {
+          "label": "Bloom threshold",
+          "kind": "float",
+          "value": 0.8,
+          "default": 0.8,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 25,
+          "description": "Brightness where the glow starts."
+        }
+      },
+      {
+        "id": 60,
+        "type": "BrightPass",
+        "x": 596,
+        "y": 88,
+        "data": {}
+      },
+      {
+        "id": 61,
+        "type": "Feedback",
+        "x": 338,
+        "y": 278,
+        "data": {
+          "width": 320,
+          "height": 200,
+          "format": "rgba16f",
+          "filter": "linear",
+          "keepRunning": false
+        }
+      },
+      {
+        "id": 62,
+        "type": "BloomGrade",
+        "x": 596,
+        "y": 204,
+        "data": {}
+      },
+      {
+        "id": 63,
+        "type": "Preview",
+        "x": 1798,
+        "y": 82,
+        "data": {},
+        "width": 300,
+        "height": 219.5,
+        "isBackground": true
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 11,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 6,
+        "toId": 11,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 11,
+        "fromOutput": 0,
+        "toId": 12,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 12,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 13,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 14,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 16,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 8,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 27,
+        "fromOutput": 6,
+        "toId": 28,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 27,
+        "fromOutput": 4,
+        "toId": 28,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 13,
+        "fromOutput": 0,
+        "toId": 28,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 23,
+        "fromOutput": 0,
+        "toId": 28,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 28,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 4,
+        "toId": 30,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 30,
+        "fromOutput": 0,
+        "toId": 31,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 31,
+        "fromOutput": 0,
+        "toId": 32,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 24,
+        "fromOutput": 0,
+        "toId": 32,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 6,
+        "toId": 33,
+        "toInput": 0,
+        "swizzle": ".a"
+      },
+      {
+        "fromId": 33,
+        "fromOutput": 0,
+        "toId": 34,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 12,
+        "fromOutput": 0,
+        "toId": 34,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 34,
+        "fromOutput": 0,
+        "toId": 35,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 0,
+        "toId": 35,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 35,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 36,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 13,
+        "fromOutput": 0,
+        "toId": 42,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 40,
+        "fromOutput": 0,
+        "toId": 42,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 42,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 41,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 43,
+        "fromOutput": 0,
+        "toId": 44,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 44,
+        "fromOutput": 1,
+        "toId": 45,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 38,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 39,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 46,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 46,
+        "fromOutput": 0,
+        "toId": 53,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 47,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 48,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 50,
+        "fromOutput": 0,
+        "toId": 52,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 51,
+        "fromOutput": 0,
+        "toId": 52,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 43,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 45,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 37,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 49,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 52,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 53,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 54,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 55,
+        "fromOutput": 0,
+        "toId": 60,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 59,
+        "fromOutput": 0,
+        "toId": 60,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 60,
+        "fromOutput": 0,
+        "toId": 61,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 12,
+        "fromOutput": 0,
+        "toId": 57,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 0,
+        "toId": 58,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 57,
+        "fromOutput": 0,
+        "toId": 58,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 55,
+        "fromOutput": 0,
+        "toId": 62,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 61,
+        "fromOutput": 0,
+        "toId": 62,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 58,
+        "fromOutput": 0,
+        "toId": 62,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 62,
+        "fromOutput": 0,
+        "toId": 63,
+        "toInput": 0,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 64,
+    "panX": 13.18533201189296,
+    "panY": 372.2279484638256,
+    "zoom": 0.535183349851338,
+    "groups": [
+      {
+        "id": "g1",
+        "name": "Boid sim",
+        "parentId": null,
+        "nodeIds": [
+          1,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21
+        ],
+        "x": 418,
+        "y": 140,
+        "color": "custom"
+      },
+      {
+        "id": "g2",
+        "name": "Birds",
+        "parentId": null,
+        "nodeIds": [
+          2,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37
+        ],
+        "x": 766,
+        "y": 133,
+        "color": "render3d"
+      },
+      {
+        "id": "g3",
+        "name": "Scene",
+        "parentId": null,
+        "nodeIds": [
+          3,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55
+        ],
+        "x": 1122,
+        "y": 140,
+        "color": "sdf3d"
+      },
+      {
+        "id": "g4",
+        "name": "Post",
+        "parentId": null,
+        "nodeIds": [
+          4,
+          56,
+          59,
+          57,
+          58,
+          60,
+          61,
+          62
+        ],
+        "x": 1460,
+        "y": 140,
+        "color": "effect"
+      },
+      {
+        "id": "g5",
+        "name": "Music",
+        "parentId": null,
+        "nodeIds": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "x": 80,
+        "y": 193,
+        "color": "source"
+      }
+    ]
+  },
+  "customNodes": {
+    "FlockSim": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "state",
+          "type": "sampler2D",
+          "paramName": "state"
+        },
+        {
+          "name": "time",
+          "type": "float",
+          "paramName": "time"
+        },
+        {
+          "name": "separation",
+          "type": "float",
+          "paramName": "separation"
+        },
+        {
+          "name": "alignment",
+          "type": "float",
+          "paramName": "alignment"
+        },
+        {
+          "name": "cohesion",
+          "type": "float",
+          "paramName": "cohesion"
+        },
+        {
+          "name": "speed",
+          "type": "float",
+          "paramName": "speed"
+        },
+        {
+          "name": "radius",
+          "type": "float",
+          "paramName": "radius"
+        },
+        {
+          "name": "bounds",
+          "type": "float",
+          "paramName": "bounds"
+        },
+        {
+          "name": "drive",
+          "type": "float",
+          "paramName": "drive"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec4"
+        }
+      ],
+      "customGLSL": "/*\n * @node flockSim\n * @title Flock Sim\n * @category custom\n * @description Euclidean boids in one rgba32f / nearest Feedback of W x 2H texels: rows 0..H-1 hold the positions (w = 1 once initialised), rows H..2H-1 the velocities (w = a per-bird speed factor). Each velocity texel visits every boid within radius: separation, alignment, cohesion, plus a wandering attractor, a soft spherical boundary and the ground. Positions advance with last frame's velocity (fixed 60 Hz step). drive (music) bursts the separation and speeds the flock up.\n */\nfloat flk_hash(vec2 p) {\n    vec3 p3 = fract(vec3(p.xyx) * 0.1031);\n    p3 += dot(p3, p3.yzx + 33.33);\n    return fract((p3.x + p3.y) * p3.z);\n}\n\nvec3 flk_hash3(float n) {\n    return vec3(flk_hash(vec2(n, 1.7)), flk_hash(vec2(n, 9.2)), flk_hash(vec2(n, 27.1)));\n}\n\nvec4 flockSim(sampler2D state, float time, float separation, float alignment, float cohesion, float speed, float radius, float bounds, float drive) {\n    ivec2 sz = textureSize(state, 0);\n    int W = sz.x;\n    int H = max(sz.y / 2, 1);\n    ivec2 p = ivec2(gl_FragCoord.xy);\n    bool velRow = p.y >= H;\n    ivec2 ip = ivec2(p.x, velRow ? p.y - H : p.y);\n    float id = float(ip.y * W + ip.x);\n    vec4 P = texelFetch(state, ip, 0);\n    vec4 V = texelFetch(state, ip + ivec2(0, H), 0);\n    vec3 home = vec3(0.0, bounds * 0.75, 0.0);\n    if (P.w < 0.5) {\n        vec3 r = flk_hash3(id) * 2.0 - 1.0;\n        vec3 vel = normalize(flk_hash3(id + 91.0) * 2.0 - 1.0 + vec3(1e-4)) * speed;\n        return velRow ? vec4(vel, 0.8 + 0.4 * flk_hash(vec2(id, 3.3))) : vec4(home + r * bounds * 0.5, 1.0);\n    }\n    float dt = 1.0 / 60.0;\n    if (!velRow) return vec4(P.xyz + V.xyz * dt, 1.0);\n    vec3 pos = P.xyz;\n    vec3 vel = V.xyz;\n    vec3 sep = vec3(0.0);\n    vec3 avgV = vec3(0.0);\n    vec3 avgP = vec3(0.0);\n    float n = 0.0;\n    float r2 = radius * radius;\n    float rs = radius * 0.45;\n    int N = W * H;\n    for (int j = 0; j < 8192; j++) {\n        if (j >= N) break;\n        ivec2 q = ivec2(j % W, j / W);\n        vec3 pj = texelFetch(state, q, 0).xyz;\n        vec3 d = pj - pos;\n        float d2 = dot(d, d);\n        if (d2 < r2 && d2 > 1e-8) {\n            vec3 vj = texelFetch(state, q + ivec2(0, H), 0).xyz;\n            n += 1.0;\n            avgV += vj;\n            avgP += pj;\n            float dl = sqrt(d2);\n            if (dl < rs) sep -= d / dl * (rs - dl) / rs;\n        }\n    }\n    vec3 acc = vec3(0.0);\n    if (n > 0.0) {\n        acc += sep * separation * (5.0 + 8.0 * drive);\n        acc += (avgV / n - vel) * alignment * 1.4;\n        acc += (avgP / n - pos) * cohesion * 0.7;\n    }\n    vec3 att = home + vec3(sin(time * 0.21) * 0.55, sin(time * 0.33) * 0.3, cos(time * 0.17) * 0.55) * bounds;\n    acc += (att - pos) * 0.08;\n    vec3 c = pos - home;\n    float l = length(c);\n    if (l > bounds) acc -= c / l * (l - bounds) * 2.5;\n    if (pos.y < 1.5) acc.y += (1.5 - pos.y) * 8.0;\n    vel += acc * dt;\n    float target = speed * V.w * (1.0 + 0.35 * drive);\n    float s = max(length(vel), 1e-4);\n    vel = vel / s * clamp(mix(s, target, 0.04), target * 0.6, target * 1.6);\n    return vec4(vel, V.w);\n}"
+    },
+    "WingFlap": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "vertexColor",
+          "type": "vec4",
+          "paramName": "vertexColor"
+        },
+        {
+          "name": "id",
+          "type": "float",
+          "paramName": "id"
+        },
+        {
+          "name": "time",
+          "type": "float",
+          "paramName": "time"
+        },
+        {
+          "name": "rate",
+          "type": "float",
+          "paramName": "rate"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "/*\n * @node wingFlap\n * @title Wing Flap\n * @category custom\n * @description Vertex offset that flaps the wings of a Bird Mesh: the wing weight lives in the vertex colour alpha (0 on the body, +-1 at the tips); each bird flaps at its own phase (instance id). Wire into Mesh.displace.\n */\nvec3 wingFlap(vec4 vertexColor, float id, float time, float rate) {\n    float w = abs(vertexColor.a);\n    float ph = time * rate * (0.85 + 0.3 * fract(id * 0.618)) + id * 1.37;\n    return vec3(0.0, w * sin(ph) * 0.42, -w * 0.06 * cos(ph));\n}"
+    },
+    "FlockSky": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "rd",
+          "type": "vec3",
+          "paramName": "rd"
+        },
+        {
+          "name": "horizon",
+          "type": "vec3",
+          "paramName": "horizon"
+        },
+        {
+          "name": "zenith",
+          "type": "vec3",
+          "paramName": "zenith"
+        },
+        {
+          "name": "sunDir",
+          "type": "vec3",
+          "paramName": "sunDir"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec4"
+        }
+      ],
+      "customGLSL": "/*\n * @node flockSky\n * @title Flock Sky\n * @category custom\n * @description Sky behind the flock for a camera ray rd: horizon to zenith gradient and a sun glow towards sunDir.\n */\nvec4 flockSky(vec3 rd, vec3 horizon, vec3 zenith, vec3 sunDir) {\n    float h = clamp(rd.y, -1.0, 1.0);\n    vec3 c = mix(horizon, zenith, pow(smoothstep(-0.02, 0.65, h), 0.7));\n    float s = max(dot(rd, normalize(sunDir)), 0.0);\n    c += vec3(1.0, 0.82, 0.55) * (pow(s, 90.0) * 2.5 + pow(s, 8.0) * 0.3);\n    return vec4(c, 1.0);\n}"
+    },
+    "BrightPass": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "tex",
+          "type": "sampler2D",
+          "paramName": "tex"
+        },
+        {
+          "name": "threshold",
+          "type": "float",
+          "paramName": "threshold"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec4"
+        }
+      ],
+      "customGLSL": "/*\n * @node brightPass\n * @title Bright Pass\n * @category custom\n * @description The bright parts of a texture (luma above threshold), averaged over 4 taps: render it into a small Feedback for bloom.\n */\nvec4 brightPass(sampler2D tex, float threshold) {\n    vec2 uv = gl_FragCoord.xy / u_resolution;\n    vec2 px = 1.0 / vec2(textureSize(tex, 0));\n    vec3 c = texture(tex, uv + px * vec2(-1.0, -1.0)).rgb + texture(tex, uv + px * vec2(1.0, -1.0)).rgb\n           + texture(tex, uv + px * vec2(-1.0, 1.0)).rgb + texture(tex, uv + px * vec2(1.0, 1.0)).rgb;\n    c *= 0.25;\n    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));\n    return vec4(c * smoothstep(threshold, threshold + 0.35, l), 1.0);\n}"
+    },
+    "BloomGrade": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "scene",
+          "type": "sampler2D",
+          "paramName": "scene"
+        },
+        {
+          "name": "bloom",
+          "type": "sampler2D",
+          "paramName": "bloom"
+        },
+        {
+          "name": "amount",
+          "type": "float",
+          "paramName": "amount"
+        },
+        {
+          "name": "vignette",
+          "type": "float",
+          "paramName": "vignette"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "/*\n * @node bloomGrade\n * @title Bloom Grade\n * @category custom\n * @description Adds a soft 7x7 bloom of the bright pass to the scene, then a vignette and a gentle highlight roll-off.\n */\nvec3 bloomGrade(sampler2D scene, sampler2D bloom, float amount, float vignette) {\n    vec2 uv = gl_FragCoord.xy / u_resolution;\n    vec3 c = texture(scene, uv).rgb;\n    vec2 px = 1.0 / vec2(textureSize(bloom, 0));\n    vec3 b = vec3(0.0);\n    float ws = 0.0;\n    for (int y = -3; y <= 3; y++) {\n        for (int x = -3; x <= 3; x++) {\n            float w = exp(-float(x * x + y * y) / 5.0);\n            b += texture(bloom, uv + vec2(float(x), float(y)) * px).rgb * w;\n            ws += w;\n        }\n    }\n    c += b / ws * amount;\n    float r = length((uv - 0.5) * vec2(1.0, 0.75));\n    c *= mix(1.0, smoothstep(0.9, 0.2, r), vignette);\n    return 1.0 - exp(-c * 1.4);\n}"
+    }
+  },
+  "editorStates": []
+}

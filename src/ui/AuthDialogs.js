@@ -1,497 +1,424 @@
+import { UIHelpers, h } from './UIHelpers.js';
+
+/**
+ * Login / register / password reset dialogs (built on UIHelpers.createModal).
+ */
 export class AuthDialogs {
     static showLogin(apiClient, onSuccess) {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+        const m = UIHelpers.createModal({
+            title: 'Welcome back',
+            subtitle: 'Sign in to save projects to the cloud and share links.',
+            brand: true
+        });
 
-        const dialog = document.createElement('div');
-        dialog.style.cssText = 'background: #2d2d2d; border: 1px solid #444; border-radius: 8px; padding: 20px; width: 400px; max-width: 90vw;';
+        const login = UIHelpers.field({ label: 'Email or username', placeholder: 'you@example.com', autocomplete: 'username' });
+        const password = UIHelpers.field({ label: 'Password', type: 'password', autocomplete: 'current-password' });
+        m.body.append(login.field, password.field);
 
-        const title = document.createElement('h2');
-        title.textContent = 'Login';
-        title.style.cssText = 'margin: 0 0 20px 0; color: #fff; font-size: 18px;';
-        dialog.appendChild(title);
+        const links = h('div', { className: 'pt-modal-links' });
+        const forgot = h('a', { href: '#', text: 'Forgot password?' });
+        forgot.addEventListener('click', (e) => {
+            e.preventDefault();
+            m.close();
+            AuthDialogs.showForgotPassword(apiClient);
+        });
+        // Shown after a failed sign-in: an unconfirmed sign-up fails like a wrong password
+        const resend = h('a', { href: '#', text: 'Didn’t confirm your email?', className: 'pt-auth-resend' });
+        resend.hidden = true;
+        resend.addEventListener('click', (e) => {
+            e.preventDefault();
+            const typed = login.input.value.trim();
+            m.close();
+            AuthDialogs.showResendVerification(apiClient, { email: typed.includes('@') ? typed : '', onSuccess });
+        });
+        const left = h('span');
+        left.appendChild(resend);
+        links.append(left, forgot);
+        m.body.appendChild(links);
 
-        // Login field (email or username)
-        const loginLabel = document.createElement('label');
-        loginLabel.textContent = 'Email or Username';
-        loginLabel.style.cssText = 'display: block; color: #ccc; margin-bottom: 5px;';
-        const loginInput = document.createElement('input');
-        loginInput.type = 'text';
-        loginInput.placeholder = 'email@example.com or username';
-        loginInput.style.cssText = 'width: 100%; padding: 8px; background: #1e1e1e; border: 1px solid #444; color: #fff; border-radius: 4px; margin-bottom: 15px; box-sizing: border-box;';
+        const loginBtn = UIHelpers.button('Sign in', { variant: 'primary', size: 'lg', block: true });
+        m.footer.appendChild(loginBtn);
 
-        // Password input
-        const passwordLabel = document.createElement('label');
-        passwordLabel.textContent = 'Password';
-        passwordLabel.style.cssText = 'display: block; color: #ccc; margin-bottom: 5px;';
-        const passwordInput = document.createElement('input');
-        passwordInput.type = 'password';
-        passwordInput.style.cssText = 'width: 100%; padding: 8px; background: #1e1e1e; border: 1px solid #444; color: #fff; border-radius: 4px; margin-bottom: 15px; box-sizing: border-box;';
-
-        // Error message
-        const errorMsg = document.createElement('div');
-        errorMsg.style.cssText = 'color: #f44336; margin-bottom: 15px; display: none;';
-
-        // Login button
-        const loginBtn = document.createElement('button');
-        loginBtn.textContent = 'Login';
-        loginBtn.style.cssText = 'width: 100%; padding: 10px; background: #007acc; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 14px; margin-bottom: 15px;';
+        const alt = h('div', { className: 'pt-modal-alt' });
+        alt.append('New to PatchToy? ');
+        const reg = h('a', { href: '#', text: 'Create an account' });
+        reg.addEventListener('click', (e) => {
+            e.preventDefault();
+            m.close();
+            AuthDialogs.showRegister(apiClient, onSuccess);
+        });
+        alt.appendChild(reg);
+        m.modal.appendChild(alt);
 
         const handleLogin = async () => {
-            const login = loginInput.value.trim();
-            const password = passwordInput.value;
+            const loginValue = login.input.value.trim();
+            const passwordValue = password.input.value;
 
-            if (!login || !password) {
-                errorMsg.textContent = 'All fields are required';
-                errorMsg.style.display = 'block';
+            if (!loginValue || !passwordValue) {
+                m.setError('Enter your email or username and password.');
                 return;
             }
 
             try {
                 loginBtn.disabled = true;
-                loginBtn.textContent = 'Logging in...';
+                loginBtn.setLabel('Signing in…');
+                m.setError(null);
 
-                await apiClient.login(login, password);
+                await apiClient.login(loginValue, passwordValue);
 
-                overlay.remove();
+                m.close();
+                UIHelpers.toast(`Signed in as @${apiClient.getCurrentUser()?.username || loginValue}`, 'success');
                 if (onSuccess) onSuccess();
             } catch (err) {
-                errorMsg.textContent = err.message || 'Login failed';
-                errorMsg.style.display = 'block';
+                m.setError(err.status === 401
+                    ? 'Wrong email, username or password. Signed up recently? Confirm your email first.'
+                    : (err.message || 'Login failed'));
+                if (err.status === 401) resend.hidden = false;
                 loginBtn.disabled = false;
-                loginBtn.textContent = 'Login';
+                loginBtn.setLabel('Sign in');
             }
         };
 
         loginBtn.addEventListener('click', handleLogin);
-
-        // Enter key to login
-        passwordInput.addEventListener('keypress', (e) => {
+        [login.input, password.input].forEach(inp => inp.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') handleLogin();
-        });
+        }));
 
-        // Forgot password link
-        const forgotLink = document.createElement('div');
-        forgotLink.style.cssText = 'text-align: center; color: #888; margin-bottom: 10px; font-size: 12px;';
-        forgotLink.innerHTML = '<a href="#" style="color: #007acc; text-decoration: none;">Forgot password?</a>';
-        forgotLink.querySelector('a').addEventListener('click', (e) => {
-            e.preventDefault();
-            overlay.remove();
-            AuthDialogs.showForgotPassword(apiClient);
-        });
-
-        // Register link
-        const registerLink = document.createElement('div');
-        registerLink.style.cssText = 'text-align: center; color: #ccc; margin-top: 15px;';
-        registerLink.innerHTML = 'Don\'t have an account? <a href="#" style="color: #007acc; text-decoration: none;">Register</a>';
-        registerLink.querySelector('a').addEventListener('click', (e) => {
-            e.preventDefault();
-            overlay.remove();
-            AuthDialogs.showRegister(apiClient, onSuccess);
-        });
-
-        dialog.appendChild(loginLabel);
-        dialog.appendChild(loginInput);
-        dialog.appendChild(passwordLabel);
-        dialog.appendChild(passwordInput);
-        dialog.appendChild(errorMsg);
-        dialog.appendChild(loginBtn);
-        dialog.appendChild(forgotLink);
-        dialog.appendChild(registerLink);
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) overlay.remove();
-        });
-
-        setTimeout(() => loginInput.focus(), 0);
+        setTimeout(() => login.input.focus(), 0);
+        return m;
     }
 
     static showRegister(apiClient, onSuccess) {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+        const m = UIHelpers.createModal({
+            title: 'Create your account',
+            subtitle: 'Save patches to the cloud and share them with a link.',
+            brand: true
+        });
 
-        const dialog = document.createElement('div');
-        dialog.style.cssText = 'background: #2d2d2d; border: 1px solid #444; border-radius: 8px; padding: 20px; width: 400px; max-width: 90vw;';
+        const email = UIHelpers.field({ label: 'Email', type: 'email', placeholder: 'you@example.com', autocomplete: 'email' });
+        const username = UIHelpers.field({ label: 'Username', placeholder: 'shaderwizard', hint: '3–20 characters: letters, numbers, _ and -', autocomplete: 'username' });
+        const password = UIHelpers.field({ label: 'Password', type: 'password', placeholder: 'At least 8 characters', autocomplete: 'new-password' });
+        m.body.append(email.field, username.field, password.field);
 
-        const title = document.createElement('h2');
-        title.textContent = 'Create Account';
-        title.style.cssText = 'margin: 0 0 20px 0; color: #fff; font-size: 18px;';
-        dialog.appendChild(title);
+        const registerBtn = UIHelpers.button('Create account', { variant: 'primary', size: 'lg', block: true });
+        m.footer.appendChild(registerBtn);
 
-        // Email input
-        const emailLabel = document.createElement('label');
-        emailLabel.textContent = 'Email';
-        emailLabel.style.cssText = 'display: block; color: #ccc; margin-bottom: 5px;';
-        const emailInput = document.createElement('input');
-        emailInput.type = 'email';
-        emailInput.placeholder = 'email@example.com';
-        emailInput.style.cssText = 'width: 100%; padding: 8px; background: #1e1e1e; border: 1px solid #444; color: #fff; border-radius: 4px; margin-bottom: 15px; box-sizing: border-box;';
-
-        // Username input
-        const usernameLabel = document.createElement('label');
-        usernameLabel.textContent = 'Username';
-        usernameLabel.style.cssText = 'display: block; color: #ccc; margin-bottom: 5px;';
-        const usernameInput = document.createElement('input');
-        usernameInput.type = 'text';
-        usernameInput.placeholder = '3-20 characters (letters, numbers, _, -)';
-        usernameInput.style.cssText = 'width: 100%; padding: 8px; background: #1e1e1e; border: 1px solid #444; color: #fff; border-radius: 4px; margin-bottom: 15px; box-sizing: border-box;';
-
-        // Password input
-        const passwordLabel = document.createElement('label');
-        passwordLabel.textContent = 'Password';
-        passwordLabel.style.cssText = 'display: block; color: #ccc; margin-bottom: 5px;';
-        const passwordInput = document.createElement('input');
-        passwordInput.type = 'password';
-        passwordInput.placeholder = 'At least 8 characters';
-        passwordInput.style.cssText = 'width: 100%; padding: 8px; background: #1e1e1e; border: 1px solid #444; color: #fff; border-radius: 4px; margin-bottom: 15px; box-sizing: border-box;';
-
-        // Error message
-        const errorMsg = document.createElement('div');
-        errorMsg.style.cssText = 'color: #f44336; margin-bottom: 15px; display: none;';
-
-        // Register button
-        const registerBtn = document.createElement('button');
-        registerBtn.textContent = 'Create Account';
-        registerBtn.style.cssText = 'width: 100%; padding: 10px; background: #007acc; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 14px; margin-bottom: 15px;';
+        const alt = h('div', { className: 'pt-modal-alt' });
+        alt.append('Already have an account? ');
+        const loginLink = h('a', { href: '#', text: 'Sign in' });
+        loginLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            m.close();
+            AuthDialogs.showLogin(apiClient, onSuccess);
+        });
+        alt.appendChild(loginLink);
+        m.modal.appendChild(alt);
 
         const handleRegister = async () => {
-            const email = emailInput.value.trim();
-            const username = usernameInput.value.trim();
-            const password = passwordInput.value;
+            const emailValue = email.input.value.trim();
+            const usernameValue = username.input.value.trim();
+            const passwordValue = password.input.value;
 
-            if (!email || !username || !password) {
-                errorMsg.textContent = 'All fields are required';
-                errorMsg.style.display = 'block';
+            if (!emailValue || !usernameValue || !passwordValue) {
+                m.setError('All fields are required.');
                 return;
             }
 
             try {
                 registerBtn.disabled = true;
-                registerBtn.textContent = 'Creating account...';
+                registerBtn.setLabel('Creating account…');
+                m.setError(null);
 
-                await apiClient.register(email, username, password);
+                const result = await apiClient.register(emailValue, usernameValue, passwordValue);
 
-                overlay.remove();
+                m.close();
+                if (result.pending) {
+                    // Same answer whether or not the address already has an account (no enumeration)
+                    AuthDialogs.showCheckEmail(apiClient, { email: emailValue, onSuccess });
+                    return;
+                }
+                UIHelpers.toast(`Welcome, @${apiClient.getCurrentUser()?.username || usernameValue}!`, 'success');
                 if (onSuccess) onSuccess();
             } catch (err) {
-                errorMsg.textContent = err.message || 'Registration failed';
-                errorMsg.style.display = 'block';
+                m.setError(err.message || 'Registration failed');
                 registerBtn.disabled = false;
-                registerBtn.textContent = 'Create Account';
+                registerBtn.setLabel('Create account');
             }
         };
 
         registerBtn.addEventListener('click', handleRegister);
-
-        // Enter key to register
-        passwordInput.addEventListener('keypress', (e) => {
+        [email.input, username.input, password.input].forEach(inp => inp.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') handleRegister();
-        });
+        }));
 
-        // Login link
-        const loginLink = document.createElement('div');
-        loginLink.style.cssText = 'text-align: center; color: #ccc; margin-top: 15px;';
-        loginLink.innerHTML = 'Already have an account? <a href="#" style="color: #007acc; text-decoration: none;">Login</a>';
-        loginLink.querySelector('a').addEventListener('click', (e) => {
-            e.preventDefault();
-            overlay.remove();
+        setTimeout(() => email.input.focus(), 0);
+        return m;
+    }
+
+    /**
+     * After sign-up: "check your email". The link in the mail (/#verify=<token>) creates
+     * the account and signs in (completeSignup). Resend has a client-side cooldown on top
+     * of the server's per-address limits.
+     */
+    static showCheckEmail(apiClient, { email = '', onSuccess = null } = {}) {
+        const m = UIHelpers.createModal({
+            title: 'Check your email',
+            subtitle: '',
+            brand: true,
+            className: 'pt-modal--check-email'
+        });
+        m.subtitleEl.hidden = false;
+        m.subtitleEl.textContent = email
+            ? `We sent a link to ${email}. Open it to finish creating your account.`
+            : 'We sent you a link. Open it to finish creating your account.';
+        m.body.appendChild(h('p', {
+            className: 'pt-field-hint',
+            text: 'The link works once and expires in 24 hours. If this address already has an account, the email says so instead: sign in, or reset your password. Nothing in the mail? Check your spam folder, or send it again.'
+        }));
+
+        const backBtn = UIHelpers.button('Back to sign in', { variant: 'ghost' });
+        const resendBtn = UIHelpers.button('Resend email', { variant: 'primary' });
+        m.footer.append(backBtn, resendBtn);
+        backBtn.addEventListener('click', () => {
+            m.close();
             AuthDialogs.showLogin(apiClient, onSuccess);
         });
+        // The sign-up mail just went out: a resend makes sense after a minute
+        AuthDialogs.wireResend(m, resendBtn, apiClient, () => email, { coolingDown: true });
+        return m;
+    }
 
-        dialog.appendChild(emailLabel);
-        dialog.appendChild(emailInput);
-        dialog.appendChild(usernameLabel);
-        dialog.appendChild(usernameInput);
-        dialog.appendChild(passwordLabel);
-        dialog.appendChild(passwordInput);
-        dialog.appendChild(errorMsg);
-        dialog.appendChild(registerBtn);
-        dialog.appendChild(loginLink);
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) overlay.remove();
+    /** "Resend the confirmation email" (from the sign-in dialog). */
+    static showResendVerification(apiClient, { email = '', onSuccess = null } = {}) {
+        const m = UIHelpers.createModal({
+            title: 'Confirm your email',
+            subtitle: 'Signed up but lost the email? Enter your address and we’ll send a new link.'
         });
+        const field = UIHelpers.field({ label: 'Email', type: 'email', placeholder: 'you@example.com', value: email, autocomplete: 'email' });
+        m.body.appendChild(field.field);
+        const backBtn = UIHelpers.button('Back to sign in', { variant: 'ghost' });
+        const sendBtn = UIHelpers.button('Send link', { variant: 'primary' });
+        m.footer.append(backBtn, sendBtn);
+        backBtn.addEventListener('click', () => {
+            m.close();
+            AuthDialogs.showLogin(apiClient, onSuccess);
+        });
+        AuthDialogs.wireResend(m, sendBtn, apiClient, () => field.input.value.trim(), { label: 'Send link' });
+        field.input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !sendBtn.disabled) sendBtn.click();
+        });
+        setTimeout(() => field.input.focus(), 0);
+        return m;
+    }
 
-        setTimeout(() => emailInput.focus(), 0);
+    /** Resend button behaviour: one request, a generic answer, then a 60 s cooldown. */
+    static wireResend(m, btn, apiClient, getEmail, { label = 'Resend email', cooldown = 60, coolingDown = false } = {}) {
+        let timer = null;
+        const startCooldown = (seconds) => {
+            let left = seconds;
+            btn.disabled = true;
+            btn.setLabel(`${label} (${left}s)`);
+            timer = setInterval(() => {
+                left -= 1;
+                if (left <= 0 || m.closed) {
+                    clearInterval(timer);
+                    btn.disabled = false;
+                    btn.setLabel(label);
+                    return;
+                }
+                btn.setLabel(`${label} (${left}s)`);
+            }, 1000);
+        };
+        btn.addEventListener('click', async () => {
+            const email = getEmail();
+            if (!email) {
+                m.setMessage('Enter the email address you signed up with.', 'error');
+                return;
+            }
+            try {
+                btn.disabled = true;
+                btn.setLabel('Sending…');
+                const r = await apiClient.resendVerification(email);
+                m.setMessage(r?.message || 'If a sign-up is waiting for that address, a new link is on its way.', 'success');
+                startCooldown(cooldown);
+            } catch (err) {
+                m.setMessage(err.message || 'Could not send the email', 'error');
+                if (err.status === 429) startCooldown(cooldown);
+                else {
+                    btn.disabled = false;
+                    btn.setLabel(label);
+                }
+            }
+        });
+        if (coolingDown) startCooldown(cooldown);
+    }
+
+    /**
+     * Open a sign-up link (/#verify=<token>, read and removed from the URL by the router
+     * before anything else loads): creates the account and signs in.
+     */
+    static async completeSignup(apiClient, token, onSuccess = null) {
+        const failed = (message) => {
+            const m = UIHelpers.createModal({ title: 'Sign-up link expired', subtitle: '' });
+            m.subtitleEl.hidden = false;
+            m.subtitleEl.textContent = message;
+            m.body.remove();
+            const signInBtn = UIHelpers.button('Sign in', { variant: 'ghost' });
+            const again = UIHelpers.button('Send a new link', { variant: 'primary' });
+            signInBtn.addEventListener('click', () => {
+                m.close();
+                AuthDialogs.showLogin(apiClient, onSuccess);
+            });
+            again.addEventListener('click', () => {
+                m.close();
+                AuthDialogs.showResendVerification(apiClient, { onSuccess });
+            });
+            m.footer.append(signInBtn, again);
+            return m;
+        };
+        const generic = 'This sign-up link is invalid, expired or was already used. Links work once and expire after 24 hours. If you already confirmed your email, sign in.';
+        if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/.test(token)) {
+            failed(generic);
+            return false;
+        }
+        try {
+            const data = await apiClient.verifyEmail(token);
+            UIHelpers.toast('Your email is confirmed and you’re signed in.', 'success', { title: `Welcome, @${data.username}!` });
+            onSuccess?.();
+            return true;
+        } catch (err) {
+            if (err.status === 401 || err.code === 'verify_invalid') failed(generic);
+            else UIHelpers.notify(err.message || 'Could not finish signing up. Open the link again.', 'error', { title: 'Sign-up not finished' });
+            return false;
+        }
     }
 
     static showForgotPassword(apiClient) {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+        const m = UIHelpers.createModal({
+            title: 'Reset your password',
+            subtitle: 'Enter your email and we’ll send you a link to set a new password.'
+        });
 
-        const dialog = document.createElement('div');
-        dialog.style.cssText = 'background: #2d2d2d; border: 1px solid #444; border-radius: 8px; padding: 20px; width: 400px; max-width: 90vw;';
+        const email = UIHelpers.field({ label: 'Email', type: 'email', placeholder: 'you@example.com', autocomplete: 'email' });
+        m.body.appendChild(email.field);
 
-        const title = document.createElement('h2');
-        title.textContent = 'Reset Password';
-        title.style.cssText = 'margin: 0 0 10px 0; color: #fff; font-size: 18px;';
-        dialog.appendChild(title);
-
-        const instructions = document.createElement('p');
-        instructions.textContent = 'Enter your email address and we\'ll send you a link to reset your password.';
-        instructions.style.cssText = 'color: #ccc; margin-bottom: 20px; font-size: 14px;';
-        dialog.appendChild(instructions);
-
-        // Email input
-        const emailLabel = document.createElement('label');
-        emailLabel.textContent = 'Email';
-        emailLabel.style.cssText = 'display: block; color: #ccc; margin-bottom: 5px;';
-        const emailInput = document.createElement('input');
-        emailInput.type = 'email';
-        emailInput.placeholder = 'email@example.com';
-        emailInput.style.cssText = 'width: 100%; padding: 8px; background: #1e1e1e; border: 1px solid #444; color: #fff; border-radius: 4px; margin-bottom: 15px; box-sizing: border-box;';
-
-        // Success/Error message
-        const message = document.createElement('div');
-        message.style.cssText = 'margin-bottom: 15px; display: none;';
-
-        // Send reset link button
-        const sendBtn = document.createElement('button');
-        sendBtn.textContent = 'Send Reset Link';
-        sendBtn.style.cssText = 'width: 100%; padding: 10px; background: #007acc; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 14px; margin-bottom: 15px;';
+        const backBtn = UIHelpers.button('Back to sign in', { variant: 'ghost' });
+        const sendBtn = UIHelpers.button('Send reset link', { variant: 'primary' });
+        m.footer.append(backBtn, sendBtn);
+        backBtn.addEventListener('click', () => {
+            m.close();
+            AuthDialogs.showLogin(apiClient);
+        });
 
         const handleSend = async () => {
-            const email = emailInput.value.trim();
+            const emailValue = email.input.value.trim();
 
-            if (!email) {
-                message.textContent = 'Email is required';
-                message.style.color = '#f44336';
-                message.style.display = 'block';
+            if (!emailValue) {
+                m.setMessage('Email is required.', 'error');
                 return;
             }
 
             try {
                 sendBtn.disabled = true;
-                sendBtn.textContent = 'Sending...';
+                sendBtn.setLabel('Sending…');
 
-                await apiClient.requestPasswordReset(email);
+                await apiClient.requestPasswordReset(emailValue);
 
-                message.textContent = 'If that email exists in our system, a reset link has been sent.';
-                message.style.color = '#4caf50';
-                message.style.display = 'block';
-                emailInput.disabled = true;
-                sendBtn.style.display = 'none';
+                m.setMessage('If that email exists in our system, a reset link is on its way.', 'success');
+                email.input.disabled = true;
+                sendBtn.hidden = true;
 
-                // Show back to login link after success
                 setTimeout(() => {
-                    overlay.remove();
+                    if (m.closed) return;
+                    m.close();
                     AuthDialogs.showLogin(apiClient);
                 }, 3000);
             } catch (err) {
-                message.textContent = err.message || 'Failed to send reset link';
-                message.style.color = '#f44336';
-                message.style.display = 'block';
+                m.setMessage(err.message || 'Failed to send reset link', 'error');
                 sendBtn.disabled = false;
-                sendBtn.textContent = 'Send Reset Link';
+                sendBtn.setLabel('Send reset link');
             }
         };
 
         sendBtn.addEventListener('click', handleSend);
-
-        // Enter key to send
-        emailInput.addEventListener('keypress', (e) => {
+        email.input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') handleSend();
         });
 
-        // Back to login link
-        const backLink = document.createElement('div');
-        backLink.style.cssText = 'text-align: center; color: #ccc;';
-        backLink.innerHTML = '<a href="#" style="color: #007acc; text-decoration: none;">Back to login</a>';
-        backLink.querySelector('a').addEventListener('click', (e) => {
-            e.preventDefault();
-            overlay.remove();
-            AuthDialogs.showLogin(apiClient);
-        });
-
-        dialog.appendChild(emailLabel);
-        dialog.appendChild(emailInput);
-        dialog.appendChild(message);
-        dialog.appendChild(sendBtn);
-        dialog.appendChild(backLink);
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) overlay.remove();
-        });
-
-        setTimeout(() => emailInput.focus(), 0);
+        setTimeout(() => email.input.focus(), 0);
+        return m;
     }
 
     static showResetPassword(apiClient, token) {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+        // Reset links carry an opaque single-use token (32 random bytes, base64url); the
+        // server checks expiry (30 minutes) and use
+        const validateToken = () => typeof token === 'string' && /^[A-Za-z0-9_-]{43}$/.test(token);
 
-        const dialog = document.createElement('div');
-        dialog.style.cssText = 'background: #2d2d2d; border: 1px solid #444; border-radius: 8px; padding: 20px; width: 400px; max-width: 90vw;';
-
-        const title = document.createElement('h2');
-        title.textContent = 'Set New Password';
-        title.style.cssText = 'margin: 0 0 20px 0; color: #fff; font-size: 18px;';
-        dialog.appendChild(title);
-
-        // Validate token immediately on load
-        const validateToken = async () => {
-            try {
-                // Decode JWT to check expiry without server call
-                const parts = token.split('.');
-                if (parts.length !== 3) {
-                    throw new Error('Invalid token format');
-                }
-
-                const payload = JSON.parse(atob(parts[1]));
-                const now = Math.floor(Date.now() / 1000);
-
-                if (payload.exp && payload.exp < now) {
-                    throw new Error('EXPIRED');
-                }
-
-                if (payload.type !== 'password-reset') {
-                    throw new Error('Invalid token type');
-                }
-
-                return true;
-            } catch (err) {
-                return false;
-            }
-        };
-
-        // Check token validity before showing form
-        validateToken().then(isValid => {
-            if (!isValid) {
-                // Show error instead of form
-                const errorDiv = document.createElement('div');
-                errorDiv.style.cssText = 'color: #f44336; margin-bottom: 15px;';
-                errorDiv.innerHTML = `
-                    <p style="margin-bottom: 10px;">⚠️ This password reset link has expired or is invalid.</p>
-                    <p style="font-size: 12px; color: #ccc;">Password reset links expire after 1 minute for security.</p>
-                `;
-                dialog.appendChild(errorDiv);
-
-                const backBtn = document.createElement('button');
-                backBtn.textContent = 'Request New Link';
-                backBtn.style.cssText = 'width: 100%; padding: 10px; background: #007acc; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 14px;';
-                backBtn.addEventListener('click', () => {
-                    overlay.remove();
-                    AuthDialogs.showForgotPassword(apiClient);
-                });
-                dialog.appendChild(backBtn);
-
-                overlay.appendChild(dialog);
-                document.body.appendChild(overlay);
-
-                overlay.addEventListener('click', (e) => {
-                    if (e.target === overlay) overlay.remove();
-                });
-                return;
-            }
-
-            // Token is valid, show the form
-            showForm();
+        const m = UIHelpers.createModal({
+            title: 'Set a new password',
+            subtitle: ''
         });
 
-        const showForm = () => {
+        if (!validateToken()) {
+            m.titleEl.textContent = 'Reset link expired';
+            m.subtitleEl.hidden = false;
+            m.subtitleEl.textContent = 'This password reset link is invalid. Reset links work once and expire after 30 minutes.';
+            m.body.remove();
+            const again = UIHelpers.button('Request a new link', { variant: 'primary' });
+            again.addEventListener('click', () => {
+                m.close();
+                AuthDialogs.showForgotPassword(apiClient);
+            });
+            m.footer.appendChild(again);
+            return m;
+        }
 
-        // New password input
-        const passwordLabel = document.createElement('label');
-        passwordLabel.textContent = 'New Password';
-        passwordLabel.style.cssText = 'display: block; color: #ccc; margin-bottom: 5px;';
-        const passwordInput = document.createElement('input');
-        passwordInput.type = 'password';
-        passwordInput.placeholder = 'At least 8 characters';
-        passwordInput.style.cssText = 'width: 100%; padding: 8px; background: #1e1e1e; border: 1px solid #444; color: #fff; border-radius: 4px; margin-bottom: 15px; box-sizing: border-box;';
+        const password = UIHelpers.field({ label: 'New password', type: 'password', placeholder: 'At least 8 characters', autocomplete: 'new-password' });
+        const confirmField = UIHelpers.field({ label: 'Confirm password', type: 'password', placeholder: 'Re-enter password', autocomplete: 'new-password' });
+        m.body.append(password.field, confirmField.field);
 
-        // Confirm password input
-        const confirmLabel = document.createElement('label');
-        confirmLabel.textContent = 'Confirm Password';
-        confirmLabel.style.cssText = 'display: block; color: #ccc; margin-bottom: 5px;';
-        const confirmInput = document.createElement('input');
-        confirmInput.type = 'password';
-        confirmInput.placeholder = 'Re-enter password';
-        confirmInput.style.cssText = 'width: 100%; padding: 8px; background: #1e1e1e; border: 1px solid #444; color: #fff; border-radius: 4px; margin-bottom: 15px; box-sizing: border-box;';
-
-        // Error message
-        const errorMsg = document.createElement('div');
-        errorMsg.style.cssText = 'color: #f44336; margin-bottom: 15px; display: none;';
-
-        // Reset button
-        const resetBtn = document.createElement('button');
-        resetBtn.textContent = 'Reset Password';
-        resetBtn.style.cssText = 'width: 100%; padding: 10px; background: #007acc; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 14px;';
+        const resetBtn = UIHelpers.button('Update password', { variant: 'primary', size: 'lg', block: true });
+        m.footer.appendChild(resetBtn);
 
         const handleReset = async () => {
-            const password = passwordInput.value;
-            const confirm = confirmInput.value;
+            const pw = password.input.value;
+            const confirmValue = confirmField.input.value;
 
-            if (!password || !confirm) {
-                errorMsg.textContent = 'All fields are required';
-                errorMsg.style.display = 'block';
+            if (!pw || !confirmValue) {
+                m.setError('All fields are required.');
                 return;
             }
-
-            if (password !== confirm) {
-                errorMsg.textContent = 'Passwords do not match';
-                errorMsg.style.display = 'block';
+            if (pw !== confirmValue) {
+                m.setError('Passwords do not match.');
                 return;
             }
-
-            if (password.length < 8) {
-                errorMsg.textContent = 'Password must be at least 8 characters';
-                errorMsg.style.display = 'block';
+            if (pw.length < 8) {
+                m.setError('Password must be at least 8 characters.');
                 return;
             }
 
             try {
                 resetBtn.disabled = true;
-                resetBtn.textContent = 'Resetting...';
+                resetBtn.setLabel('Updating…');
 
-                await apiClient.resetPassword(token, password);
+                await apiClient.resetPassword(token, pw);
 
-                overlay.remove();
-                alert('Password successfully reset! Please log in with your new password.');
+                m.close();
+                UIHelpers.toast('You were signed out everywhere. Sign in with your new password.', 'success', { title: 'Password updated' });
                 AuthDialogs.showLogin(apiClient);
             } catch (err) {
-                // Improve error messages
-                let errorText = err.message || 'Failed to reset password';
-
-                if (errorText.includes('Authentication required') || errorText.includes('expired')) {
-                    errorText = 'Reset link has expired. Please request a new one.';
-                } else if (errorText.includes('Invalid') && errorText.includes('token')) {
-                    errorText = 'Invalid reset link. Please request a new one.';
-                }
-
-                errorMsg.textContent = errorText;
-                errorMsg.style.display = 'block';
+                m.setError(err.message || 'Failed to reset password');
                 resetBtn.disabled = false;
-                resetBtn.textContent = 'Reset Password';
+                resetBtn.setLabel('Update password');
             }
         };
 
         resetBtn.addEventListener('click', handleReset);
-
-        // Enter key to reset
-        confirmInput.addEventListener('keypress', (e) => {
+        confirmField.input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') handleReset();
         });
 
-        dialog.appendChild(passwordLabel);
-        dialog.appendChild(passwordInput);
-        dialog.appendChild(confirmLabel);
-        dialog.appendChild(confirmInput);
-        dialog.appendChild(errorMsg);
-        dialog.appendChild(resetBtn);
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) overlay.remove();
-        });
-
-        setTimeout(() => passwordInput.focus(), 0);
-        };
+        setTimeout(() => password.input.focus(), 0);
+        return m;
     }
 }

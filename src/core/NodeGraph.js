@@ -4,7 +4,17 @@ import { PreviewNode as PreviewNodeClass } from '../nodes/PreviewNode.js';
 import { QuickNodeSearch } from '../ui/QuickNodeSearch.js';
 import { SelectionManager } from '../graph/SelectionManager.js';
 import { NodeFactory } from '../graph/NodeFactory.js';
+import { GraphRenderer } from '../graph/GraphRenderer.js';
 import { TypeRegistry } from './TypeRegistry.js';
+import { NodeGroups } from '../graph/NodeGroups.js'; // node groups (subgraphs): view/organization metadata
+import { connectionRateError } from './control/rates.js'; // control vs pixel rate rules
+import { typesCompatible } from '../rendering/NodePainter.js';
+import { UIHelpers } from '../ui/UIHelpers.js';
+import { TYPE_COLORS, typeColor } from '../ui/theme.js';
+import { programCache } from '../rendering/glResources.js'; // shared GL programs (freed on project switch)
+import { resetProjectRuntime } from './simulation.js'; // per-project runtime state (registry, control plan, ...)
+
+const CONTROL_ONLY = new Set(['event', 'string', 'list']);
 
 // Re-export Node for backwards compatibility
 export { Node };
@@ -66,6 +76,18 @@ export class Connection {
         }
 
         const inputType = this.toNode.inputs[this.toInput].type;
+        this.rateError = null;
+
+        // Control-only values (event / string / list) and signal rates (src/core/control/rates.js)
+        if ((CONTROL_ONLY.has(outputType) || CONTROL_ONLY.has(inputType)) && !typesCompatible(outputType, inputType)) {
+            this.rateError = `A ${outputType} output cannot connect to a ${inputType} input`;
+            return false;
+        }
+        const rateError = connectionRateError(this.toNode.graph, this.fromNode, this.fromOutput, this.toNode, this.toInput, this.accessor);
+        if (rateError) {
+            this.rateError = rateError.message;
+            return false;
+        }
 
         // If input is 'any' type, defer validation to the node itself
         if (TypeRegistry.isAny(inputType)) {
@@ -86,7 +108,8 @@ export class Connection {
     getMidpoint() {
         // Safety check: if either node is null, return a default position
         if (!this.fromNode || !this.toNode) {
-            console.warn('Connection has null node reference');
+            // Runs per connection per mousemove: warn once per connection
+            if (!this._warnedMid) { this._warnedMid = true; console.warn('Connection has null node reference'); }
             return { x: 0, y: 0 };
         }
 
@@ -95,6 +118,8 @@ export class Connection {
 
         // Safety check: if port positions are invalid
         if (!from || !to) {
+            if (this._warnedMid) return { x: 0, y: 0 };
+            this._warnedMid = true;
             console.warn('Connection has invalid port position', {
                 fromNode: this.fromNode.id,
                 toNode: this.toNode.id,
@@ -125,8 +150,9 @@ export class Connection {
     containsPoint(px, py, threshold = 15) {
         const mid = this.getMidpoint();
         const label = this.getLabel();
-        const width = label.length * 7 + 10;
-        const height = 18;
+        // Size of the drawn accessor pill / midpoint handle (set by GraphRenderer)
+        const width = this._pillW || (label.length * 7 + 10);
+        const height = this._pillH || 18;
 
         return px >= mid.x - width / 2 && px <= mid.x + width / 2 &&
             py >= mid.y - height / 2 && py <= mid.y + height / 2;
@@ -146,6 +172,11 @@ export class Connection {
         }
         return null;
     }
+}
+
+/** Deep copy of plain serialized data (structuredClone, JSON fallback). */
+function cloneData(v) {
+    try { return structuredClone(v); } catch (e) { return JSON.parse(JSON.stringify(v)); }
 }
 
 export class NodeGraph {
@@ -202,8 +233,26 @@ export class NodeGraph {
         // Quick node search - extracted to separate class
         this.quickNodeSearch = new QuickNodeSearch(this);
 
+        // Canvas drawing (background, cables, nodes, overlays) + hover state
+        this.graphRenderer = new GraphRenderer(canvas, this.ctx);
+
+        // Node groups: graph.groups metadata + the scope (root or a group) being viewed.
+        // The compiled graph (nodes/connections) stays flat.
+        this.groups = [];
+        this.groupCtl = new NodeGroups(this, { Connection });
+
         this.setupEventListeners();
         this.startUpdateLoop();
+    }
+
+    /** Items drawn / hit-tested in the current scope (nodes, group boxes, boundary panels). */
+    getViewNodes() {
+        return this.groupCtl ? this.groupCtl.viewNodes() : this.nodes;
+    }
+
+    /** Cables drawn / hit-tested in the current scope (real connections + group-box links). */
+    getViewLinks() {
+        return this.groupCtl ? this.groupCtl.viewLinks() : this.connections;
     }
 
     setupEventListeners() {
@@ -213,6 +262,9 @@ export class NodeGraph {
         this.canvas.addEventListener('contextmenu', (e) => this.onContextMenu(e));
         this.canvas.addEventListener('dblclick', (e) => this.onDoubleClick(e));
         this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
+        this.canvas.addEventListener('mouseleave', () => {
+            if (this.graphRenderer.clearHover()) this.render();
+        });
 
         // Keyboard events
         window.addEventListener('keydown', (e) => this.onKeyDown(e));
@@ -220,6 +272,12 @@ export class NodeGraph {
     }
 
     onWheel(e) {
+        const gc = this.groupCtl;
+        const isZoom = e.ctrlKey || e.metaKey;
+        // Scrolling during a timed group enter/exit animation jumps to its end; a
+        // zoom-driven one keeps following zoom gestures and settles on a plain scroll
+        if (gc && gc.isTransitioning() && !(isZoom && gc.isScrubbing())) gc.cancelTransition();
+
         e.preventDefault();
 
         // Check if zoom gesture (Cmd/Ctrl + scroll, or pinch)
@@ -233,9 +291,21 @@ export class NodeGraph {
             const worldX = (mouseX - this.panX) / this.zoom;
             const worldY = (mouseY - this.panY) / this.zoom;
 
-            // Apply zoom
-            const zoomDelta = -e.deltaY * 0.001;
-            const newZoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom * (1 + zoomDelta)));
+            // Apply zoom (exponential so it feels the same at every zoom level).
+            // Trackpad pinches arrive as ctrl+wheel with small pixel deltas, so they get a
+            // stronger factor than Cmd + mouse-wheel notches (~100px each).
+            const unit = e.deltaMode === 1 ? 16 : (e.deltaMode === 2 ? 400 : 1);
+            const delta = Math.max(-120, Math.min(120, e.deltaY * unit));
+            const isPinch = e.ctrlKey && !e.metaKey;
+            const factor = Math.exp(-delta * (isPinch ? 0.01 : 0.002));
+
+            // Zooming into a group box's preview (or out of a group) walks through the group
+            if (gc && gc.zoomGesture(factor, mouseX, mouseY)) {
+                this.render();
+                return;
+            }
+
+            const newZoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom * factor));
 
             // Adjust pan to keep world position under cursor
             this.panX = mouseX - worldX * newZoom;
@@ -255,28 +325,38 @@ export class NodeGraph {
         e.preventDefault();
         const pos = this.getMousePos(e);
 
-        // Find clicked node
-        for (let i = this.nodes.length - 1; i >= 0; i--) {
-            if (this.nodes[i].containsPoint(pos.x, pos.y)) {
-                if (this.onNodeRightClick) {
-                    this.onNodeRightClick(this.nodes[i], e);
-                }
-                return;
-            }
+        // Context menu (node action such as "Edit GLSL…", group / ungroup / rename, delete...)
+        const items = this.getViewNodes();
+        let hit = null;
+        for (let i = items.length - 1; i >= 0; i--) {
+            if (items[i].containsPoint(pos.x, pos.y)) { hit = items[i]; break; }
         }
+        this.groupCtl.ui.showContextMenu(e, hit, pos);
     }
 
     onDoubleClick(e) {
         const pos = this.getMousePos(e);
 
-        // Find double-clicked node
-        for (let i = this.nodes.length - 1; i >= 0; i--) {
-            if (this.nodes[i].containsPoint(pos.x, pos.y)) {
-                if (this.onNodeRightClick) {
-                    this.onNodeRightClick(this.nodes[i], e);
+        // Find double-clicked node (group boxes open; their title renames)
+        const items = this.getViewNodes();
+        for (let i = items.length - 1; i >= 0; i--) {
+            const item = items[i];
+            if (item.containsPoint(pos.x, pos.y)) {
+                if (item.isViewOnly) {
+                    this.groupCtl.onDoubleClick(item, pos, e);
+                } else if (this.onNodeRightClick) {
+                    this.onNodeRightClick(item, e);
                 }
                 return;
             }
+        }
+
+        // Empty space inside a group (not on a cable): go back up a level
+        const overCable = this.graphRenderer && this.graphRenderer.hoverConn;
+        if (this.groupCtl && this.groupCtl.scope !== null && !overCable && !this.connectingFrom) {
+            this.selectionBox = null;
+            this.selectionStart = null;
+            this.groupCtl.exitUp();
         }
     }
 
@@ -295,8 +375,8 @@ export class NodeGraph {
                 }
             }
 
-            // Check if we need to render
-            const needsRender = this.focusedTextInput || this.nodes.some(n => n.isPreviewNode);
+            // Check if we need to render (previews, live meters, animated drag cable)
+            const needsRender = this.focusedTextInput || this.graphRenderer.needsAnimation(this);
 
             if (needsRender) {
                 this.render();
@@ -330,6 +410,9 @@ export class NodeGraph {
             // Allow Escape to always work (to close dialogs)
             return;
         }
+        // A modal dialog is open: canvas shortcuts (Delete, paste, group, Tab...) must not act
+        // on the graph behind it (Escape is handled by the dialog itself)
+        if (document.querySelector('.pt-modal-backdrop')) return;
 
         // If a canvas text input is focused, let it handle the key
         if (this.focusedTextInput) {
@@ -346,10 +429,18 @@ export class NodeGraph {
             }
         }
 
-        // Delete/Backspace - delete selected nodes
-        if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectionManager.selectedNodes.size > 0) {
+        // Groups: Cmd/Ctrl+G group, Cmd/Ctrl+Shift+G ungroup, Enter opens the selected group box
+        if (!isEditingText && this.groupCtl.handleKey(e)) return;
+
+        // Delete/Backspace - delete selected nodes (never during a cable drag: there Backspace
+        // edits the accessor hint, and Delete / Backspace with no hint cancel the drag below)
+        if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectionManager.selectedNodes.size > 0 && !this.connectingFrom) {
             e.preventDefault();
             this.deleteSelectedNodes();
+        } else if (e.key === 'Backspace' && !this.connectingFrom && !isEditingText && this.groupCtl.scope !== null) {
+            // Backspace with nothing selected: up one group level
+            e.preventDefault();
+            this.groupCtl.exitUp();
         }
 
         // Ctrl/Cmd+C - copy
@@ -386,6 +477,10 @@ export class NodeGraph {
                 e.preventDefault();
                 this.handleSwizzleInput(key);
                 this.render();
+            } else if (e.key === 'Delete' || (e.key === 'Backspace' && !this.swizzleHint)) {
+                // Delete (or Backspace with no hint to edit): cancel the drag
+                e.preventDefault();
+                this.cancelConnectionDrag();
             } else if (e.key === 'Backspace') {
                 e.preventDefault();
                 // Remove last character from swizzle hint
@@ -414,27 +509,59 @@ export class NodeGraph {
             }
         }
 
-        // Escape - clear selection or cancel ghost node
+        // Escape - clear selection or cancel ghost node (with nothing selected: up one group level)
         if (e.key === 'Escape') {
             if (this.quickNodeSearch.hasGhostNode()) {
                 this.quickNodeSearch.cancelGhostNode();
+            } else if (this.selectionManager.selectedNodes.size === 0 && this.groupCtl.scope !== null &&
+                !this.connectingFrom && !isEditingText && !document.querySelector('.pt-modal-backdrop, .pt-menu')) {
+                this.groupCtl.exitUp();
             } else {
                 this.clearSelection();
             }
         }
 
-        // Tab - open quick node search
+        // Tab - open quick node search (not while dragging a cable: there Tab accepts the swizzle suggestion)
         if (e.key === 'Tab') {
             e.preventDefault();
-            this.quickNodeSearch.show(this.addNodeButton);
+            if (!this.connectingFrom) this.quickNodeSearch.show(this.addNodeButton);
         }
     }
 
-    deleteSelectedNodes() {
+    /**
+     * Abort the cable being dragged: nothing is connected or created, and a cable that was
+     * pulled out of an input to start the drag goes back where it was.
+     */
+    cancelConnectionDrag() {
+        const cf = this.connectingFrom;
+        if (!cf) return false;
+        this.connectingFrom = null;
+        this.swizzleHint = '';
+        this.swizzleHintSuggestion = null;
+        if (this.swizzleHintTimer) {
+            clearTimeout(this.swizzleHintTimer);
+            this.swizzleHintTimer = null;
+        }
+        const restore = cf.restore || (cf.reattach && cf.reattach.conns) || null;
+        if (restore && restore.length) {
+            const live = new Set(this.nodes);
+            for (const c of restore) {
+                if (live.has(c.fromNode) && live.has(c.toNode) && !this.connections.includes(c)) this.connections.push(c);
+            }
+            if (this.onGraphChanged) this.onGraphChanged();
+        }
+        this.render();
+        return true;
+    }
+
+    deleteSelectedNodes(opts = {}) {
+        // Group boxes in the selection: ask "delete contents or just ungroup?" first
+        if (this.groupCtl.interceptDelete(opts)) return;
+
         // Add paired ForLoop nodes to selection if one is selected
-        const nodesToDelete = new Set(this.selectionManager.selectedNodes);
-        for (const node of this.selectionManager.selectedNodes) {
-            if ((node.isForLoopStartNode || node.isForLoopEndNode) && node.data.pairNodeId) {
+        const nodesToDelete = new Set([...this.selectionManager.selectedNodes].filter(n => !n.isViewOnly));
+        for (const node of nodesToDelete) {
+            if ((node.isForLoopStartNode || node.isForLoopEndNode) && node.data.pairNodeId != null) {
                 const pairNode = this.nodes.find(n => n.id === node.data.pairNodeId);
                 if (pairNode) {
                     nodesToDelete.add(pairNode);
@@ -461,6 +588,7 @@ export class NodeGraph {
 
         // Remove nodes
         this.nodes = this.nodes.filter(node => !nodesToDelete.has(node));
+        this.groupCtl.onNodesDeleted(nodesToDelete);
 
         // Check if we need to disable buttons after deletion
         this.updateDeviceButtonStates();
@@ -471,59 +599,37 @@ export class NodeGraph {
     }
 
     updateDeviceButtonStates() {
-        // Check if any camera nodes remain
-        const hasCameraNodes = this.nodes.some(n => n.isCameraNode);
-        if (!hasCameraNodes) {
-            const cameraBtn = document.getElementById('cameraBtn');
-            if (cameraBtn) {
-                cameraBtn.style.background = 'transparent';
-                cameraBtn.style.borderColor = '#444';
-                cameraBtn.title = 'Camera';
-            }
-        }
-
-        // Check if any microphone nodes remain
-        const hasMicNodes = this.nodes.some(n => n.isMicrophoneNode);
-        if (!hasMicNodes) {
-            const micBtn = document.getElementById('micBtn');
-            if (micBtn) {
-                micBtn.style.background = 'transparent';
-                micBtn.style.borderColor = '#444';
-                micBtn.title = 'Microphone';
-            }
-        }
-
-        // Check if any MIDI CC nodes remain
-        const hasMidiNodes = this.nodes.some(n => n.isMidiCCNode);
-        if (!hasMidiNodes) {
-            const midiBtn = document.getElementById('midiBtn');
-            if (midiBtn) {
-                midiBtn.style.background = 'transparent';
-                midiBtn.style.borderColor = '#444';
-                midiBtn.title = 'MIDI';
-            }
-        }
-
-        // Check if any screen capture nodes remain
-        const hasScreenCaptureNodes = this.nodes.some(n => n.isScreenCaptureNode);
-        if (!hasScreenCaptureNodes) {
-            const screenCaptureBtn = document.getElementById('screenCaptureBtn');
-            if (screenCaptureBtn) {
-                screenCaptureBtn.style.background = 'transparent';
-                screenCaptureBtn.style.borderColor = '#444';
-                screenCaptureBtn.title = 'Screen Capture';
-            }
-        }
+        // Reset top-bar device toggles whose node types are gone from the graph.
+        // (Visual state lives in CSS classes; AppShell keeps them in sync.)
+        const reset = (id, stillUsed) => {
+            if (stillUsed) return;
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            btn.classList.remove('is-on', 'is-error', 'is-available');
+            btn.style.removeProperty('background');
+            btn.style.removeProperty('border-color');
+            btn.removeAttribute('title');
+        };
+        reset('cameraBtn', this.nodes.some(n => n.isCameraNode));
+        reset('micBtn', this.nodes.some(n => n.isMicrophoneNode));
+        reset('midiBtn', this.nodes.some(n => n.isMidiCCNode));
+        reset('screenCaptureBtn', this.nodes.some(n => n.isScreenCaptureNode));
     }
 
     copySelectedNodes() {
-        const nodesToCopy = Array.from(this.selectionManager.selectedNodes);
+        // Group boxes copy their whole subtree (nodes + group records)
+        const expanded = this.groupCtl.expandForCopy(this.selectionManager.selectedNodes);
+        const nodesToCopy = expanded.nodes;
+        const copySet = new Set(nodesToCopy);
         const connectionsToCopy = this.connections.filter(conn =>
-            this.selectionManager.selectedNodes.has(conn.fromNode) && this.selectionManager.selectedNodes.has(conn.toNode)
+            copySet.has(conn.fromNode) && copySet.has(conn.toNode)
         );
 
         this.clipboard = {
-            nodes: nodesToCopy.map(n => n.serialize()),
+            groups: expanded.groups,
+            // Deep copies: the clipboard (and every paste) must not share nested data
+            // (ForLoop varTypes, scene lists...) with the original nodes
+            nodes: nodesToCopy.map(n => cloneData(n.serialize())),
             connections: connectionsToCopy.map(c => ({
                 fromId: c.fromNode.id,
                 fromOutput: c.fromOutput,
@@ -533,12 +639,12 @@ export class NodeGraph {
             }))
         };
 
-        console.log('Copied', nodesToCopy.length, 'nodes');
     }
 
     cutSelectedNodes() {
         this.copySelectedNodes();
-        this.deleteSelectedNodes();
+        this.deleteSelectedNodes({ groupContents: true });
+        this.history?.hint(`Cut ${this.clipboard.nodes.length} node${this.clipboard.nodes.length === 1 ? '' : 's'}`);
     }
 
     pasteNodes() {
@@ -546,15 +652,31 @@ export class NodeGraph {
 
         const idMap = new Map();
         const newNodes = [];
+        // New ids up front, so paired nodes (ForLoop Start / End) point at their pasted partner
+        const newIds = new Map();
+        for (const nodeData of this.clipboard.nodes) newIds.set(nodeData.id, this.nextNodeId++);
 
         // Create new nodes with new IDs, offset by 20px
-        for (const nodeData of this.clipboard.nodes) {
-            const newNode = deserializeNode({
-                ...nodeData,
-                id: this.nextNodeId++,
-                x: nodeData.x + 20,
-                y: nodeData.y + 20
-            }, this.canvas, this.videoElement, this.sharedGL);
+        for (const raw of this.clipboard.nodes) {
+            const nodeData = cloneData(raw);
+            if (nodeData.data && nodeData.data.pairNodeId != null) {
+                // A pair copied without its partner must not grab the original's partner
+                nodeData.data.pairNodeId = newIds.has(nodeData.data.pairNodeId) ? newIds.get(nodeData.data.pairNodeId) : null;
+            }
+            let newNode = null;
+            try {
+                newNode = deserializeNode({
+                    ...nodeData,
+                    id: newIds.get(raw.id),
+                    x: nodeData.x + 20,
+                    y: nodeData.y + 20
+                }, this.canvas, this.videoElement, this.sharedGL);
+            } catch (e) {
+                console.warn(`[graph] could not paste ${raw.type}:`, e);
+                newNode = null;
+            }
+            // Unknown type (e.g. a custom node deleted since the copy): skip it and its cables
+            if (!newNode) continue;
             newNode.graph = this;  // Set graph reference
 
             // Register preview renderer if it's a preview node
@@ -618,13 +740,19 @@ export class NodeGraph {
         this.clearSelection();
         newNodes.forEach(node => this.selectionManager.selectedNodes.add(node));
 
+        // Recreate pasted groups; loose nodes land in the current group scope
+        this.groupCtl.afterPaste(this.clipboard, idMap, newNodes);
+        this.history?.hint(`Paste ${newNodes.length} node${newNodes.length === 1 ? '' : 's'}`); // undo label (src/core/History.js)
+
         if (this.onGraphChanged) this.onGraphChanged();
         this.render();
     }
 
     selectAll() {
         this.selectionManager.selectedNodes.clear();
-        this.nodes.forEach(node => this.selectionManager.selectedNodes.add(node));
+        this.getViewNodes().forEach(node => {
+            if (!node.isBoundaryPanel) this.selectionManager.selectedNodes.add(node);
+        });
         this.render();
     }
 
@@ -680,8 +808,18 @@ export class NodeGraph {
     }
 
     onMouseDown(e) {
+        // Interacting during a group enter/exit animation jumps to its end
+        if (this.groupCtl && this.groupCtl.isTransitioning()) this.groupCtl.cancelTransition();
+
         // Ignore right-clicks (they're handled by onContextMenu)
         if (e.button === 2) {
+            return;
+        }
+
+        // Middle button drags the view; thumb buttons zoom (click steps, drag scrubs)
+        if (e.button === 1 || e.button === 3 || e.button === 4) {
+            e.preventDefault(); // no autoscroll, no browser back/forward
+            this.beginButtonNav(e);
             return;
         }
 
@@ -693,8 +831,10 @@ export class NodeGraph {
         }
 
         // Check nodes first (in reverse order for z-index) since they render on top
-        for (let i = this.nodes.length - 1; i >= 0; i--) {
-            const node = this.nodes[i];
+        // (in a group scope: that scope's nodes, group boxes and boundary panels)
+        const viewNodes = this.getViewNodes();
+        for (let i = viewNodes.length - 1; i >= 0; i--) {
+            const node = viewNodes[i];
 
             // First check ports (they extend beyond node bounds)
             const portAction = this.checkNodePorts(node, pos.x, pos.y);
@@ -714,7 +854,7 @@ export class NodeGraph {
         }
 
         // Check connections/swizzles last since they render under nodes
-        for (const conn of this.connections) {
+        for (const conn of this.getViewLinks()) {
             // If we find an orphaned connection, clean them all up immediately
             if (!conn.fromNode || !conn.toNode) {
                 console.warn('Found orphaned connection, cleaning up...');
@@ -764,6 +904,7 @@ export class NodeGraph {
         // Otherwise handle graph-level actions (connections, dragging, etc.)
         switch (result.type) {
             case 'START_CONNECTION_FROM_OUTPUT':
+                if (result.node.isViewOnly) { this.groupCtl.beginPortDrag(result); break; } // group box / boundary panel
                 this.connectingFrom = {
                     node: result.node,
                     outputIndex: result.outputIndex
@@ -771,6 +912,7 @@ export class NodeGraph {
                 break;
 
             case 'CLICKED_INPUT_PORT':
+                if (result.node.isViewOnly) { this.groupCtl.beginPortDrag(result); break; }
                 this.handleInputPortClick(result.node, result.inputIndex);
                 break;
 
@@ -791,6 +933,14 @@ export class NodeGraph {
                 this.canvas.style.cursor = result.cursor;
                 break;
 
+            // Node-internal controls that already applied their change
+            case 'TOGGLE_BOOL':
+            case 'TOGGLE_CLIP':
+            case 'TOGGLE_LEARN':
+            case 'VIDEO_CONTROL':
+                this.render();
+                break;
+
             default:
                 console.warn('Unknown action type:', result.type);
         }
@@ -807,8 +957,11 @@ export class NodeGraph {
             this.connectingFrom = {
                 node: existingConnection.fromNode,
                 outputIndex: existingConnection.fromOutput,
-                wasDisconnected: true // Track that this came from a disconnection
+                wasDisconnected: true, // Track that this came from a disconnection
+                restore: [existingConnection] // put back if the drag is cancelled
             };
+            // The source may sit outside the open group / inside a box: start the cable at its visible port
+            this.groupCtl.decorateDrag(this.connectingFrom);
 
             // Remove the old connection
             this.connections = this.connections.filter(
@@ -939,10 +1092,16 @@ export class NodeGraph {
         this.dragOffsetX = offsetX;
         this.dragOffsetY = offsetY;
 
-        // Move to front
-        const index = this.nodes.indexOf(node);
-        this.nodes.splice(index, 1);
-        this.nodes.push(node);
+        // Move to front (group boxes reorder among their sibling boxes)
+        if (node.isViewOnly) {
+            this.groupCtl.bringToFront(node);
+        } else {
+            const index = this.nodes.indexOf(node);
+            if (index >= 0) {
+                this.nodes.splice(index, 1);
+                this.nodes.push(node);
+            }
+        }
 
         this.render();
     }
@@ -953,12 +1112,14 @@ export class NodeGraph {
         // Skip render if mouse hasn't moved significantly
         const dx = Math.abs(pos.x - (this.mouseX || 0));
         const dy = Math.abs(pos.y - (this.mouseY || 0));
-        if (dx < 1 && dy < 1 && !this.connectingFrom && !this.draggingNode && !this.isPanning && !this.resizingNode) {
+        if (dx < 1 && dy < 1 && !this.connectingFrom && !this.draggingNode && !this.isPanning && !this.resizingNode && !this.buttonNav) {
             return;
         }
 
         this.mouseX = pos.x;
         this.mouseY = pos.y;
+
+        if (this.buttonNav) return; // handled by the window listener
 
         // Update ghost node position
         if (this.quickNodeSearch.updateGhostNodePosition(pos.x, pos.y)) {
@@ -968,6 +1129,13 @@ export class NodeGraph {
 
         if (this.draggingTextInput) {
             this.draggingTextInput.updateDrag(pos.x);
+            this.render();
+            return;
+        }
+
+        // Free-form resizing for nodes that handle it themselves (e.g. Comment notes)
+        if (this.resizingNode && this.resizingNode.node.resizeFree) {
+            this.resizingNode.node.resizeFree(this.resizingNode.edge, pos);
             this.render();
             return;
         }
@@ -990,7 +1158,6 @@ export class NodeGraph {
                 newWidth = pos.x - node.x;
             } else if (edge.includes('w')) {
                 newWidth = node.x + node.width - pos.x;
-                deltaX = node.width - newWidth;
             }
 
             // Apply minimum width constraint
@@ -1040,8 +1207,9 @@ export class NodeGraph {
             this.selectionBox.width = Math.abs(pos.x - this.selectionStart.x);
             this.selectionBox.height = Math.abs(pos.y - this.selectionStart.y);
 
-            // Select nodes within the box
-            for (const node of this.nodes) {
+            // Select nodes (and group boxes) within the box
+            for (const node of this.getViewNodes()) {
+                if (node.isBoundaryPanel) continue;
                 const nodeRight = node.x + node.width;
                 const nodeBottom = node.y + node.height;
                 const boxRight = this.selectionBox.x + this.selectionBox.width;
@@ -1059,10 +1227,20 @@ export class NodeGraph {
 
             this.render();
         } else {
+            // Hover feedback (ports, nodes, cable midpoints, inner controls)
+            if (this.graphRenderer.updateHover(this, pos.x, pos.y)) {
+                this.render();
+            }
+
             // Update cursor based on hover (use event bubbling)
             let cursorSet = false;
-            for (let i = this.nodes.length - 1; i >= 0; i--) {
-                const node = this.nodes[i];
+            if (this.graphRenderer.hoverPort) {
+                this.canvas.style.cursor = 'crosshair';
+                cursorSet = true;
+            }
+            const hoverItems = this.getViewNodes();
+            for (let i = hoverItems.length - 1; i >= 0 && !cursorSet; i--) {
+                const node = hoverItems[i];
                 if (node.containsPoint(pos.x, pos.y)) {
                     const action = node.handleMouseMove(pos.x, pos.y, null);
                     if (action && action.type === 'UPDATE_CURSOR') {
@@ -1078,7 +1256,91 @@ export class NodeGraph {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Mouse-button navigation: middle = pan, thumb buttons = zoom
+    // (forward zooms in, back zooms out; hold and drag up/down to zoom smoothly)
+    // ------------------------------------------------------------------
+
+    beginButtonNav(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        this.buttonNav = {
+            button: e.button,
+            mask: e.button === 1 ? 4 : (e.button === 3 ? 8 : 16),
+            x: e.clientX,
+            y: e.clientY,
+            sx: e.clientX - rect.left,
+            sy: e.clientY - rect.top,
+            panX: this.panX,
+            panY: this.panY,
+            zoom: this.zoom,
+            moved: false
+        };
+        if (e.button === 1) this.canvas.style.cursor = 'grabbing';
+        // Track on the window: the drag may pass over overlays or leave the canvas
+        this._navMove = (ev) => this.updateButtonNav(ev);
+        this._navUp = (ev) => { if (this.buttonNav && ev.button === this.buttonNav.button) this.endButtonNav(ev); };
+        window.addEventListener('mousemove', this._navMove, true);
+        window.addEventListener('mouseup', this._navUp, true);
+    }
+
+    updateButtonNav(e) {
+        const nav = this.buttonNav;
+        if (!nav) return;
+        // Released where no mouseup reached us: the move arrives without the button held
+        if (!(e.buttons & nav.mask)) {
+            this.endButtonNav(e, false);
+            return;
+        }
+        this.applyButtonNav(e);
+        this.render();
+    }
+
+    applyButtonNav(e) {
+        const nav = this.buttonNav;
+        const dx = e.clientX - nav.x;
+        const dy = e.clientY - nav.y;
+        if (Math.abs(dx) + Math.abs(dy) > 3) nav.moved = true;
+        if (nav.button === 1) {
+            this.panX = nav.panX + dx;
+            this.panY = nav.panY + dy;
+        } else if (nav.moved) {
+            this.canvas.style.cursor = 'ns-resize';
+            this.zoomAround(nav, nav.zoom * Math.exp(-dy * 0.008));
+        }
+    }
+
+    endButtonNav(e, released = true) {
+        const nav = this.buttonNav;
+        // Moves can be coalesced: settle on the release position
+        if (released && e && Number.isFinite(e.clientX)) this.applyButtonNav(e);
+        this.buttonNav = null;
+        window.removeEventListener('mousemove', this._navMove, true);
+        window.removeEventListener('mouseup', this._navUp, true);
+        if (e && e.preventDefault) e.preventDefault();
+        if (released && nav.button !== 1 && !nav.moved) {
+            this.zoomAround(nav, nav.zoom * (nav.button === 4 ? 1.25 : 0.8));
+        }
+        this.canvas.style.cursor = 'default';
+        this.render();
+    }
+
+    /** Zoom to `zoom`, keeping the graph point that was under nav.sx/sy (at press time) there. */
+    zoomAround(nav, zoom) {
+        const z = Math.max(this.minZoom, Math.min(this.maxZoom, zoom));
+        const wx = (nav.sx - nav.panX) / nav.zoom;
+        const wy = (nav.sy - nav.panY) / nav.zoom;
+        this.zoom = z;
+        this.panX = nav.sx - wx * z;
+        this.panY = nav.sy - wy * z;
+    }
+
     onMouseUp(e) {
+        // Middle / thumb releases are handled by the button navigation (window listener);
+        // thumb buttons would otherwise also navigate the browser back / forward
+        if (e.button === 1 || e.button === 3 || e.button === 4) {
+            e.preventDefault();
+            return;
+        }
         const pos = this.getMousePos(e);
 
         // Check if this was a click (not drag) on a text input
@@ -1134,14 +1396,23 @@ export class NodeGraph {
 
             if (this.connectingFrom.isReverse) {
                 // Reverse connection: dragging from input, looking for output
-                for (const node of this.nodes) {
+                for (const node of this.getViewNodes()) {
                     for (let i = 0; i < node.outputs.length; i++) {
                         const portPos = node.getOutputPortPosition(i);
                         if (!portPos) continue;
 
                         const dist = Math.hypot(pos.x - portPos.x, pos.y - portPos.y);
-                        if (dist < 8 && node !== this.connectingFrom.node) {
-                            // Remove any existing connection to this input
+                        if (dist < 8 && node !== (this.connectingFrom.viewNode || this.connectingFrom.node)) {
+                            // Group box port / boundary panel row: connects the underlying inner port
+                            if (node.isViewOnly) {
+                                connected = true;
+                                this.groupCtl.dropOnPort(node, 'out', i);
+                                break;
+                            }
+                            // Remove any existing connection to this input (restored if the new one is rejected)
+                            const replacedConns = this.connections.filter(
+                                conn => conn.toNode === this.connectingFrom.node && conn.toInput === this.connectingFrom.inputIndex
+                            );
                             this.connections = this.connections.filter(
                                 conn => !(conn.toNode === this.connectingFrom.node &&
                                          conn.toInput === this.connectingFrom.inputIndex)
@@ -1166,6 +1437,10 @@ export class NodeGraph {
 
                             // Validate the connection
                             if (!newConnection.isValid()) {
+                                if (newConnection.rateError) {
+                                    UIHelpers.toast(newConnection.rateError, 'warning', { title: 'Cannot connect' });
+                                    this.connections.push(...replacedConns);
+                                }
                                 console.warn('Invalid connection: type mismatch', {
                                     from: newConnection.getOutputType(),
                                     to: this.connectingFrom.node.inputs[this.connectingFrom.inputIndex]?.type,
@@ -1201,6 +1476,9 @@ export class NodeGraph {
                     if (connected) break;
                 }
 
+                // Dropped on a group box body (port picker), a boundary panel (expose) or back where it came from
+                if (!connected) connected = this.groupCtl.dropOnBody(pos, e);
+
                 // If not connected to anything, check if we should create a constant node
                 if (!connected) {
                     const inputDef = this.connectingFrom.node.inputs[this.connectingFrom.inputIndex];
@@ -1229,15 +1507,27 @@ export class NodeGraph {
                     }
                 }
             } else {
+                // Released back on the group-box port / panel row the cable was pulled from:
+                // restore it before hit-testing ports (they were re-indexed when it was removed,
+                // so the next port now sits under the cursor)
+                if (this.groupCtl.reattachIfBack(pos)) connected = true;
+
                 // Normal connection: dragging from output, looking for input
-                for (const node of this.nodes) {
+                if (!connected) for (const node of this.getViewNodes()) {
                     for (let i = 0; i < node.inputs.length; i++) {
                         const portPos = node.getInputPortPosition(i);
                         if (!portPos) continue;
 
                         const dist = Math.hypot(pos.x - portPos.x, pos.y - portPos.y);
-                        if (dist < 8 && node !== this.connectingFrom.node) {
-                            // Remove any existing connection to this input
+                        if (dist < 8 && node !== (this.connectingFrom.viewNode || this.connectingFrom.node)) {
+                            // Group box port / boundary panel row: connects the underlying inner port
+                            if (node.isViewOnly) {
+                                connected = true;
+                                this.groupCtl.dropOnPort(node, 'in', i);
+                                break;
+                            }
+                            // Remove any existing connection to this input (restored if the new one is rejected)
+                            const replacedConns = this.connections.filter(conn => conn.toNode === node && conn.toInput === i);
                             this.connections = this.connections.filter(
                                 conn => !(conn.toNode === node && conn.toInput === i)
                             );
@@ -1261,6 +1551,10 @@ export class NodeGraph {
 
                             // Validate the connection
                             if (!newConnection.isValid()) {
+                                if (newConnection.rateError) {
+                                    UIHelpers.toast(newConnection.rateError, 'warning', { title: 'Cannot connect' });
+                                    this.connections.push(...replacedConns);
+                                }
                                 console.warn('Invalid connection: type mismatch', {
                                     from: newConnection.getOutputType(),
                                     to: node.inputs[i]?.type,
@@ -1291,6 +1585,9 @@ export class NodeGraph {
                     }
                     if (connected) break;
                 }
+
+                // Dropped on a group box body (port picker), a boundary panel (expose) or back where it came from
+                if (!connected) connected = this.groupCtl.dropOnBody(pos, e);
 
                 // If dragging from output to void, create a preview node for float/vec types
                 // BUT NOT if this was a disconnection (user just wanted to disconnect)
@@ -1397,6 +1694,12 @@ export class NodeGraph {
             }
         }
 
+        // Nodes created from the UI land in the open group (MCP commands keep adding to the root)
+        this.groupCtl.adoptNew(node);
+        if (node.isForLoopStartNode && node.data.pairNodeId != null) {
+            this.groupCtl.adoptNew(this.nodes.find(n => n.id === node.data.pairNodeId));
+        }
+
         this.render();
         return node;
     }
@@ -1443,237 +1746,21 @@ export class NodeGraph {
     }
 
     performRender() {
-        const ctx = this.ctx;
-        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-        // Render background shader if active
-        if (this.backgroundRenderer) {
-            this.backgroundRenderer.render(ctx);
-        }
-
-        // Force consistent text rendering (Safari fix)
-        ctx.save();
-        ctx.textBaseline = 'middle';  // Use middle instead of alphabetic for more consistent results
-        ctx.textAlign = 'left';
-
-        // Apply pan and zoom transforms
-        ctx.translate(this.panX, this.panY);
-        ctx.scale(this.zoom, this.zoom);
-
-        // Draw all connections in a single batch
-        ctx.strokeStyle = '#007acc';
-        ctx.lineWidth = 2;
-
-        // Begin a single path for all non-labeled connections
-        ctx.beginPath();
-        for (const conn of this.connections) {
-            if (conn.swizzle) continue; // Draw these separately with labels
-
-            const fromPos = conn.fromNode.getOutputPortPosition(conn.fromOutput);
-            const toPos = conn.toNode.getInputPortPosition(conn.toInput);
-
-            if (!fromPos || !toPos) continue;
-
-            ctx.moveTo(fromPos.x, fromPos.y);
-
-            // Simplified bezier calculation
-            const xDiff = toPos.x - fromPos.x;
-            const ctrl = Math.min(Math.abs(xDiff) * 0.5, 100);
-            ctx.bezierCurveTo(
-                fromPos.x + ctrl, fromPos.y,
-                toPos.x - ctrl, toPos.y,
-                toPos.x, toPos.y
-            );
-        }
-        ctx.stroke();
-
-        // Draw clickable dots for non-swizzled connections
-        ctx.fillStyle = 'rgba(0, 122, 204, 0.4)';
-        for (const conn of this.connections) {
-            if (conn.swizzle) continue;
-            const mid = conn.getMidpoint();
-            ctx.beginPath();
-            ctx.arc(mid.x, mid.y, 4, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        // Draw labeled connections separately
-        for (const conn of this.connections) {
-            if (!conn.swizzle) continue;
-
-            const fromPos = conn.fromNode.getOutputPortPosition(conn.fromOutput);
-            const toPos = conn.toNode.getInputPortPosition(conn.toInput);
-
-            if (!fromPos || !toPos) continue;
-
-            ctx.beginPath();
-            ctx.moveTo(fromPos.x, fromPos.y);
-
-            const xDiff = toPos.x - fromPos.x;
-            const ctrl = Math.min(Math.abs(xDiff) * 0.5, 100);
-            ctx.bezierCurveTo(
-                fromPos.x + ctrl, fromPos.y,
-                toPos.x - ctrl, toPos.y,
-                toPos.x, toPos.y
-            );
-            ctx.stroke();
-
-            const mid = conn.getMidpoint();
-
-            // Draw connection label (only if swizzled)
-            if (conn.swizzle) {
-                const label = conn.getLabel();
-
-                // Cache text measurements
-                const cacheKey = `swizzle_${label}`;
-                let textWidth = this.textMeasureCache?.get(cacheKey);
-                if (!textWidth) {
-                    ctx.font = '10px -apple-system, sans-serif';
-                    textWidth = ctx.measureText(label).width;
-                    if (!this.textMeasureCache) this.textMeasureCache = new Map();
-                    this.textMeasureCache.set(cacheKey, textWidth);
-                } else {
-                    ctx.font = '10px -apple-system, sans-serif';
-                }
-
-                const padding = 4;
-                const labelHeight = 14;
-
-                // Background - semi-transparent with rounded corners
-                ctx.fillStyle = 'rgba(45, 45, 45, 0.85)';
-                ctx.beginPath();
-                ctx.roundRect(mid.x - textWidth / 2 - padding, mid.y - labelHeight / 2, textWidth + padding * 2, labelHeight, 3);
-                ctx.fill();
-
-                // Border - more subtle with rounded corners
-                ctx.strokeStyle = 'rgba(0, 122, 204, 0.5)';
-                ctx.lineWidth = 1;
-                ctx.stroke();
-
-                // Text - slightly dimmed
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-                ctx.fillText(label, mid.x - textWidth / 2, mid.y);
-
-                // Restore state for next connection
-                ctx.strokeStyle = '#007acc';
-                ctx.lineWidth = 2;
+        // All canvas drawing lives in GraphRenderer (src/graph/GraphRenderer.js)
+        this.graphRenderer.render(this);
+        // DOM editors over the canvas (note text, group rename) follow pan / zoom
+        if (this.overlays && this.overlays.size) {
+            for (const sync of this.overlays) {
+                try { sync(); } catch (e) { /* ignore */ }
             }
         }
+    }
 
-        // Draw temporary connection line
-        if (this.connectingFrom) {
-            let fromPos;
-            if (this.connectingFrom.isReverse) {
-                // Dragging from input port
-                fromPos = this.connectingFrom.node.getInputPortPosition(
-                    this.connectingFrom.inputIndex
-                );
-            } else {
-                // Dragging from output port
-                fromPos = this.connectingFrom.node.getOutputPortPosition(
-                    this.connectingFrom.outputIndex
-                );
-            }
-
-            if (fromPos) {
-                ctx.strokeStyle = '#0098ff';
-                ctx.setLineDash([5, 5]);
-                ctx.beginPath();
-                ctx.moveTo(fromPos.x, fromPos.y);
-                ctx.lineTo(this.mouseX, this.mouseY);
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-        }
-
-        // Draw nodes - wrap each in save/restore to prevent state leakage
-        for (const node of this.nodes) {
-            ctx.save();
-            // Reset text properties to defaults for each node
-            ctx.font = '12px "Pixeloid Sans"';
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'alphabetic';
-
-            node.draw(this.ctx, {
-                isSelected: this.selectionManager.selectedNodes.has(node),
-                connections: this.connections
-            });
-
-            ctx.restore();
-        }
-
-        // Draw ghost node if exists (semi-transparent)
-        this.quickNodeSearch.drawGhostNode(ctx);
-
-        // Draw rubberband selection box
-        if (this.selectionBox) {
-            ctx.strokeStyle = '#007acc';
-            ctx.fillStyle = 'rgba(0, 122, 204, 0.1)';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([5, 5]);
-            ctx.fillRect(this.selectionBox.x, this.selectionBox.y,
-                this.selectionBox.width, this.selectionBox.height);
-            ctx.strokeRect(this.selectionBox.x, this.selectionBox.y,
-                this.selectionBox.width, this.selectionBox.height);
-            ctx.setLineDash([]);
-        }
-
-        // Draw swizzle hint on top of everything when dragging connection
-        if (this.connectingFrom && this.swizzleHint) {
-            // Format text with chevrons instead of dots for multi-level access
-            const typedText = this.swizzleHint.replace(/\./g, ' › ');
-            const remainingSuggestion = this.swizzleHintSuggestion ?
-                this.swizzleHintSuggestion.substring(this.swizzleHint.length).replace(/\./g, ' › ') : null;
-
-            ctx.font = 'bold 14px -apple-system, sans-serif';
-
-            // Calculate widths for typed text and suggestion
-            const typedWidth = ctx.measureText(typedText).width;
-            const suggestionWidth = remainingSuggestion ? ctx.measureText(remainingSuggestion).width : 0;
-            const totalWidth = typedWidth + suggestionWidth;
-
-            const padding = 6;
-            const labelHeight = 20;
-            const offsetX = 15;
-            const offsetY = 15;
-
-            // Background with stronger visibility
-            ctx.fillStyle = 'rgba(0, 122, 204, 0.95)';
-            ctx.beginPath();
-            ctx.roundRect(
-                this.mouseX + offsetX,
-                this.mouseY + offsetY,
-                totalWidth + padding * 2,
-                labelHeight,
-                4
-            );
-            ctx.fill();
-
-            // Border
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-
-            // Draw typed text - white and bold for visibility
-            ctx.fillStyle = '#ffffff';
-            ctx.fillText(
-                typedText,
-                this.mouseX + offsetX + padding,
-                this.mouseY + offsetY + labelHeight / 2
-            );
-
-            // Draw autocomplete suggestion - grayed out
-            if (remainingSuggestion) {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-                ctx.fillText(
-                    remainingSuggestion,
-                    this.mouseX + offsetX + padding + typedWidth,
-                    this.mouseY + offsetY + labelHeight / 2
-                );
-            }
-        }
-
-        ctx.restore();
+    /** Keep a DOM overlay placed over the canvas: sync() runs after every render. Returns remove(). */
+    addOverlay(sync) {
+        const set = this.overlays || (this.overlays = new Set());
+        set.add(sync);
+        return () => set.delete(sync);
     }
 
     showConnectionMenu(conn, e) {
@@ -1685,41 +1772,24 @@ export class NodeGraph {
         // Even if no swizzle options, still show menu for type inspection
         // if (options.length === 0) return;
 
-        // Create menu
+        // Create menu (styled by .pt-swizzle-menu in style.css)
         const menu = document.createElement('div');
-        menu.style.position = 'fixed';
-        menu.style.left = e.clientX + 'px';
-        menu.style.top = e.clientY + 'px';
-        menu.style.background = '#2d2d2d';
-        menu.style.border = '1px solid #007acc';
-        menu.style.borderRadius = '4px';
-        menu.style.padding = '8px';
-        menu.style.zIndex = '10000';
-        menu.style.display = 'flex';
-        menu.style.flexDirection = 'column';
-        menu.style.gap = '4px';
+        menu.className = 'pt-swizzle-menu';
+        menu.setAttribute('role', 'menu');
 
-        // Add type header
+        // Type header, tinted with the cable's signal color
         const header = document.createElement('div');
+        header.className = 'pt-swizzle-type';
         header.textContent = outputType;
-        header.style.fontSize = '11px';
-        header.style.color = '#888';
-        header.style.textAlign = 'center';
-        header.style.paddingBottom = '4px';
-        header.style.borderBottom = '1px solid #444';
-        header.style.marginBottom = '4px';
-        header.style.userSelect = 'none';
+        header.style.setProperty('--tc', outputType ? typeColor(outputType) : TYPE_COLORS.struct);
         menu.appendChild(header);
 
         // Create grid for options
         const grid = document.createElement('div');
-        grid.style.display = 'grid';
-        grid.style.gap = '4px';
+        grid.className = 'pt-swizzle-grid';
 
         // Configure grid based on type
-        if (outputType === 'vec2') {
-            grid.style.gridTemplateColumns = 'repeat(2, 1fr)';
-        } else if (outputType === 'vec3' || outputType === 'vec4') {
+        if (outputType === 'vec2' || outputType === 'vec3' || outputType === 'vec4') {
             grid.style.gridTemplateColumns = 'repeat(2, 1fr)';
         }
 
@@ -1728,13 +1798,9 @@ export class NodeGraph {
         // Add options
         options.forEach(opt => {
             const item = document.createElement('div');
+            item.className = 'pt-swizzle-item';
             item.textContent = opt.label;
-            item.style.padding = '6px 10px';
-            item.style.color = '#fff';
-            item.style.fontSize = '12px';
-            item.style.textAlign = 'center';
-            item.style.borderRadius = '3px';
-            item.style.userSelect = 'none';
+            item._opt = opt;
 
             // Handle column spanning
             if (opt.span) {
@@ -1743,24 +1809,14 @@ export class NodeGraph {
 
             // Handle spacer items
             if (opt.spacer) {
-                item.style.cursor = 'default';
-                item.style.visibility = 'hidden';
+                item.classList.add('is-spacer');
                 item.dataset.spacer = 'true';
             } else {
-                item.style.cursor = 'pointer';
-
+                item.setAttribute('role', 'menuitem');
                 if (conn.swizzle === opt.value) {
-                    item.style.background = '#007acc';
+                    item.classList.add('is-current');
                 }
 
-                item.addEventListener('mouseenter', () => {
-                    item.style.background = '#007acc';
-                });
-                item.addEventListener('mouseleave', () => {
-                    if (conn.swizzle !== opt.value) {
-                        item.style.background = 'transparent';
-                    }
-                });
                 item.addEventListener('click', () => {
                     if (opt.custom) {
                         // Show custom input field instead of prompt
@@ -1769,6 +1825,8 @@ export class NodeGraph {
                         conn.accessor = opt.value;
                         conn.swizzle = opt.value; // Keep backwards compatibility
                         menu.remove();
+                        document.removeEventListener('keydown', handleKeyDown);
+                        document.removeEventListener('mousedown', closeMenu);
                         this.render();
                         if (this.onGraphChanged) this.onGraphChanged();
                     }
@@ -1780,20 +1838,21 @@ export class NodeGraph {
 
         document.body.appendChild(menu);
 
+        // Position at the cursor, clamped to the viewport
+        const mw = menu.offsetWidth;
+        const mh = menu.offsetHeight;
+        menu.style.left = Math.max(8, Math.min(e.clientX, window.innerWidth - mw - 8)) + 'px';
+        menu.style.top = Math.max(8, Math.min(e.clientY, window.innerHeight - mh - 8)) + 'px';
+
         // Track typed swizzle string
         let typedSwizzle = '';
         let typedTimer = null;
         let customInputActive = false;
 
         const selectOption = (swizzleValue) => {
-            const items = Array.from(grid.children).filter(item => !item.dataset.spacer);
-            items.forEach((item, i) => {
-                const opt = options[i];
-                if (opt && opt.value === swizzleValue) {
-                    item.style.background = '#007acc';
-                } else if (opt && conn.swizzle !== opt.value) {
-                    item.style.background = 'transparent';
-                }
+            Array.from(grid.children).forEach(item => {
+                const opt = item._opt;
+                item.classList.toggle('is-selected', !!opt && !opt.spacer && opt.value === swizzleValue);
             });
         };
 
@@ -1803,26 +1862,19 @@ export class NodeGraph {
             // Replace grid with text input
             grid.style.display = 'none';
 
-            // Create input field
             const inputContainer = document.createElement('div');
-            inputContainer.style.padding = '4px';
+            inputContainer.className = 'pt-swizzle-custom';
 
             const input = document.createElement('input');
             input.type = 'text';
-            input.placeholder = 'e.g., xy, xz, rgb, position.xy';
+            input.className = 'pt-input';
+            input.spellcheck = false;
+            input.placeholder = 'xy, rgb, position.xy';
             input.value = typedSwizzle || '';
-            input.style.width = '100%';
-            input.style.padding = '6px';
-            input.style.background = '#1e1e1e';
-            input.style.border = '1px solid #007acc';
-            input.style.borderRadius = '3px';
-            input.style.color = '#fff';
-            input.style.fontSize = '12px';
-            input.style.fontFamily = 'monospace';
-            input.style.outline = 'none';
 
             inputContainer.appendChild(input);
             menu.appendChild(inputContainer);
+            menu.style.minWidth = '200px';
 
             // Focus input
             setTimeout(() => input.focus(), 0);
@@ -2066,7 +2118,8 @@ export class NodeGraph {
 
     // Check if we can create a preview node for this type (float/vec outputs)
     canCreatePreviewFor(type) {
-        return type === 'float' || type === 'vec2' || type === 'vec3' || type === 'vec4';
+        // 'any' = generic library output not resolved yet; samplers preview as images
+        return ['float', 'int', 'bool', 'vec2', 'vec3', 'vec4', 'any', 'sampler2D'].includes(type);
     }
 
     // Create a constant node and connect it to the input
@@ -2164,23 +2217,71 @@ export class NodeGraph {
     }
 
     serialize() {
-        return {
-            nodes: this.nodes.map(n => n.serialize()),
-            connections: this.connections.map(c => ({
-                fromId: c.fromNode.id,
-                fromOutput: c.fromOutput,
-                toId: c.toNode.id,
-                toInput: c.toInput,
-                swizzle: c.swizzle
-            })),
+        // Always save the root view, whichever group is open (the open scope is not saved)
+        const view = this.groupCtl ? this.groupCtl.rootView() : { panX: this.panX, panY: this.panY, zoom: this.zoom };
+        // Nodes that couldn't be restored (unknown type) are written back unchanged
+        const live = new Set(this.nodes.map(n => n.id));
+        const missing = (this.missingNodes || []).filter(n => !live.has(n.id));
+        const missingIds = new Set(missing.map(n => n.id));
+        const known = (id) => live.has(id) || missingIds.has(id);
+        const data = {
+            nodes: [...this.nodes.map(n => n.serialize()), ...missing],
+            connections: [
+                ...this.connections.map(c => ({
+                    fromId: c.fromNode.id,
+                    fromOutput: c.fromOutput,
+                    toId: c.toNode.id,
+                    toInput: c.toInput,
+                    swizzle: c.swizzle
+                })),
+                ...(this.missingConnections || []).filter(c => known(c.fromId) && known(c.toId))
+            ],
             nextNodeId: this.nextNodeId,
-            panX: this.panX,
-            panY: this.panY,
-            zoom: this.zoom
+            panX: view.panX,
+            panY: view.panY,
+            zoom: view.zoom
         };
+        // Node groups (view/organization metadata; omitted when there are none)
+        const groups = this.groupCtl ? this.groupCtl.serializeGroups() : [];
+        if (groups.length) data.groups = groups;
+        return data;
+    }
+
+    /**
+     * Free what the given nodes hold - Preview renderers (render target, program reference),
+     * Feedback buffers, image / JS textures, camera / screen / video streams, MIDI and key
+     * listeners - before they are dropped without a delete (project load, New project).
+     */
+    disposeNodes(list) {
+        for (const node of list) {
+            if (node.isPreviewNode) {
+                try { node.renderer && node.renderer.destroy(); } catch (e) { /* ignore */ }
+                this.previewNodes.delete(node.id);
+            }
+            try {
+                if (node.cleanup) node.cleanup();
+            } catch (e) {
+                console.warn(`[graph] cleanup of ${node.type} #${node.id} failed:`, e);
+            }
+        }
     }
 
     deserialize(data) {
+        // Free the replaced nodes' GPU objects, streams and listeners (the renderers stop drawing)
+        this.disposeNodes(this.nodes);
+        if (this.sharedGL) { try { programCache(this.sharedGL).newEpoch(); } catch (e) { /* ignore */ } }
+        // Live uniform values, control plan, JS runtime and audio-texture history of the old project
+        resetProjectRuntime(this);
+        // Gestures in progress refer to the old nodes
+        this.connectingFrom = null;
+        this.swizzleHint = '';
+        this.swizzleHintSuggestion = null;
+        this.draggedNode = null;
+        this.resizingNode = null;
+        this.focusedTextInput = null;
+        this.focusedNode = null;
+        try { if (this.quickNodeSearch?.hasGhostNode?.()) this.quickNodeSearch.cancelGhostNode(); } catch (e) { /* ignore */ }
+
         // Clear existing
         this.nodes = [];
         this.connections = [];
@@ -2196,10 +2297,28 @@ export class NodeGraph {
         this.panY = data.panY || 0;
         this.zoom = data.zoom || 1.0;
 
-        // Recreate nodes
+        // Recreate nodes. A node whose type is unknown (e.g. a custom node that isn't
+        // registered) or that fails to build is kept as raw data (missingNodes) and
+        // written back by serialize(), so a partial load never loses it.
         const idMap = new Map();
-        for (const nodeData of data.nodes) {
-            const node = deserializeNode(nodeData, this.canvas, this.videoElement, this.sharedGL);
+        this.missingNodes = [];
+        this.missingConnections = [];
+        const missingIds = new Set();
+        for (const nodeData of (Array.isArray(data.nodes) ? data.nodes : [])) {
+            let node = null;
+            try {
+                node = deserializeNode(nodeData, this.canvas, this.videoElement, this.sharedGL);
+            } catch (e) {
+                console.warn(`[graph] node ${nodeData && nodeData.id} (${nodeData && nodeData.type}) could not be restored:`, e);
+                node = null;
+            }
+            if (!node) {
+                if (nodeData && typeof nodeData === 'object') {
+                    this.missingNodes.push(JSON.parse(JSON.stringify(nodeData)));
+                    missingIds.add(nodeData.id);
+                }
+                continue;
+            }
             node.graph = this;
             this.nodes.push(node);
             idMap.set(nodeData.id, node);
@@ -2210,8 +2329,12 @@ export class NodeGraph {
             }
         }
 
-        // Restore nextNodeId
+        // Restore nextNodeId (never reuse the id of a node kept as raw data)
         this.nextNodeId = data.nextNodeId || 0;
+        for (const raw of this.missingNodes) {
+            if (Number.isFinite(Number(raw.id)) && Number(raw.id) >= this.nextNodeId) this.nextNodeId = Number(raw.id) + 1;
+        }
+        if (!Array.isArray(data.connections)) data = { ...data, connections: [] };
 
         // First pass: Check blend nodes and add necessary inputs based on connections
         for (const node of this.nodes) {
@@ -2259,7 +2382,7 @@ export class NodeGraph {
         // Second pass: Update ForLoopEnd nodes to read from their paired ForLoopStart
         // ForLoopStart is the authoritative source, ForLoopEnd just reads from it
         for (const node of this.nodes) {
-            if (node.isForLoopEndNode && node.data.pairNodeId) {
+            if (node.isForLoopEndNode && node.data.pairNodeId != null) {
                 // Trigger port rebuild which will read from the paired ForLoopStart
                 node.updatePorts();
             }
@@ -2277,10 +2400,16 @@ export class NodeGraph {
                     connData.toInput,
                     connData.swizzle || null
                 ));
+            } else if (missingIds.has(connData.fromId) || missingIds.has(connData.toId)) {
+                // Wire of a node kept as raw data: keep it too
+                this.missingConnections.push({ ...connData });
             } else {
                 console.warn('Skipping orphaned connection:', connData);
             }
         }
+
+        // Node groups (older projects have none); always reopens at the root
+        this.groupCtl.load(data.groups || []);
 
         // Restore background renderer state if a preview node was marked as background
         const backgroundNode = this.nodes.find(n => n instanceof PreviewNodeClass && n.isBackground);

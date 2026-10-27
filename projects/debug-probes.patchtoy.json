@@ -1,0 +1,391 @@
+{
+  "name": "Debug Probes",
+  "description": "Debug / probe nodes: values read back from the GPU. Value Display on Time, sin(time) as a Plot and an LED, u_bass and u_beatPhase (plot with beat ticks), a palette colour sampled at the center, a NaN bug that blacks out a disk (Value Display + Frame Stats flag it) and an XY scope tracing a Lissajous curve.",
+  "version": "1.0",
+  "graph": {
+    "nodes": [
+      {
+        "id": 0,
+        "type": "Comment",
+        "x": -430,
+        "y": -30,
+        "data": {
+          "text": "# Debug probes\nProbe nodes (Library > Debug) evaluate their input on the GPU at one point and show the numbers.\n- Click the uv tag to move the sample point: uv 0,0 > center > mouse > custom uv.\n- Right-click a probe for its settings: precision, history length, range, beat ticks.\n- NaN and Inf show in red: the usual cause of black pixels.\n- Frame Stats / Histogram scan the whole frame on a coarse 64-wide grid.\n- MCP: read_probes returns every value (plus plot history).\n## In this patch\n- Time, and sin(time) as a plot and an LED\n- u_bass and u_beatPhase (play audio, or pick the metronome)\n- a palette colour sampled at the center\n- a NaN bug that blacks out a disk\n- an XY scope tracing a Lissajous curve",
+          "width": 370,
+          "height": 440,
+          "color": "blue"
+        }
+      },
+      {
+        "id": 1,
+        "type": "Time",
+        "x": 0,
+        "y": 0,
+        "data": {}
+      },
+      {
+        "id": 2,
+        "type": "ValueDisplay",
+        "x": 380,
+        "y": -30,
+        "data": {
+          "precision": 3,
+          "sample": "origin",
+          "u": 0.5,
+          "v": 0.5
+        }
+      },
+      {
+        "id": 3,
+        "type": "Sin",
+        "x": 170,
+        "y": 120,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 4,
+        "type": "Plot",
+        "x": 380,
+        "y": 90,
+        "data": {
+          "seconds": 5,
+          "range": "auto",
+          "min": -1,
+          "max": 1,
+          "beats": false,
+          "precision": 3,
+          "sample": "origin",
+          "u": 0.5,
+          "v": 0.5,
+          "width": 300,
+          "height": 150
+        }
+      },
+      {
+        "id": 5,
+        "type": "LED",
+        "x": 590,
+        "y": -30,
+        "data": {
+          "threshold": 0.5,
+          "sample": "origin",
+          "u": 0.5,
+          "v": 0.5
+        }
+      },
+      {
+        "id": 6,
+        "type": "Audio",
+        "x": 100,
+        "y": 300,
+        "data": {}
+      },
+      {
+        "id": 7,
+        "type": "ValueDisplay",
+        "x": 380,
+        "y": 290,
+        "data": {
+          "precision": 3,
+          "sample": "origin",
+          "u": 0.5,
+          "v": 0.5
+        }
+      },
+      {
+        "id": 8,
+        "type": "Beat",
+        "x": 100,
+        "y": 470,
+        "data": {
+          "decay": 6,
+          "rate": 1,
+          "threshold": 0.5,
+          "clock": "raw",
+          "gate": "off"
+        }
+      },
+      {
+        "id": 9,
+        "type": "Plot",
+        "x": 380,
+        "y": 390,
+        "data": {
+          "seconds": 4,
+          "range": "fixed",
+          "min": 0,
+          "max": 1,
+          "beats": true,
+          "precision": 3,
+          "sample": "origin",
+          "u": 0.5,
+          "v": 0.5,
+          "width": 300,
+          "height": 170
+        }
+      },
+      {
+        "id": 10,
+        "type": "UV",
+        "x": 780,
+        "y": -30,
+        "data": {
+          "mode": "stretch"
+        }
+      },
+      {
+        "id": 11,
+        "type": "CosinePalette",
+        "x": 780,
+        "y": 70,
+        "data": {}
+      },
+      {
+        "id": 12,
+        "type": "ColorDisplay",
+        "x": 1010,
+        "y": -30,
+        "data": {
+          "precision": 3,
+          "sample": "center",
+          "u": 0.5,
+          "v": 0.5
+        }
+      },
+      {
+        "id": 13,
+        "type": "Preview",
+        "x": 1250,
+        "y": -30,
+        "data": {},
+        "width": 240,
+        "height": 182,
+        "isBackground": false
+      },
+      {
+        "id": 14,
+        "type": "UV",
+        "x": 780,
+        "y": 230,
+        "data": {
+          "mode": "stretch"
+        }
+      },
+      {
+        "id": 15,
+        "type": "BuggyGlow",
+        "x": 780,
+        "y": 330,
+        "data": {}
+      },
+      {
+        "id": 16,
+        "type": "ValueDisplay",
+        "x": 1010,
+        "y": 200,
+        "data": {
+          "precision": 3,
+          "sample": "center",
+          "u": 0.5,
+          "v": 0.5
+        }
+      },
+      {
+        "id": 17,
+        "type": "FrameStats",
+        "x": 1010,
+        "y": 340,
+        "data": {
+          "precision": 3
+        }
+      },
+      {
+        "id": 18,
+        "type": "Preview",
+        "x": 1300,
+        "y": 200,
+        "data": {},
+        "width": 240,
+        "height": 182,
+        "isBackground": false
+      },
+      {
+        "id": 19,
+        "type": "Lissajous",
+        "x": 780,
+        "y": 560,
+        "data": {}
+      },
+      {
+        "id": 20,
+        "type": "XYScope",
+        "x": 1010,
+        "y": 500,
+        "data": {
+          "seconds": 6.5,
+          "range": "auto",
+          "min": -1,
+          "max": 1,
+          "aspectLock": true,
+          "precision": 3,
+          "sample": "origin",
+          "u": 0.5,
+          "v": 0.5,
+          "width": 230,
+          "height": 230
+        }
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 2,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 3,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 4,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 1,
+        "toId": 7,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 1,
+        "toId": 9,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 11,
+        "toInput": 0,
+        "swizzle": ".x"
+      },
+      {
+        "fromId": 11,
+        "fromOutput": 0,
+        "toId": 12,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 11,
+        "fromOutput": 0,
+        "toId": 13,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 14,
+        "fromOutput": 0,
+        "toId": 15,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 16,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 17,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 18,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 19,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 0,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 21,
+    "panX": 307.56345177664974,
+    "panY": 165.35532994923858,
+    "zoom": 0.5989847715736041
+  },
+  "customNodes": {
+    "BuggyGlow": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "UV",
+          "type": "vec2",
+          "paramName": "uv"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "/* \n * @node buggyGlow\n * @title buggyGlow\n * @category custom\n * \n * @input uv \"UV\"\n * \n * @description\n */\n\n// A glow around a ring with a bug: inside the ring d < 0 and\n// pow(negative, 0.5) is NaN -> the disk renders black.\n// Fix: pow(abs(d), 0.5)\nvec3 buggyGlow(vec2 uv) {\n    float d = length(uv - 0.5) - 0.2;\n    return vec3(1.0, 0.55, 0.2) * 0.06 / pow(d, 0.5);\n}"
+    },
+    "Lissajous": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "T",
+          "type": "float",
+          "paramName": "t"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec2"
+        }
+      ],
+      "customGLSL": "/* \n * @node lissajous\n * @title lissajous\n * @category custom\n * \n * @input t \"T\"\n * \n * @description\n */\n\n// A 3:2 Lissajous figure traced over time\nvec2 lissajous(float t) {\n    return vec2(sin(3.0 * t), sin(2.0 * t + 0.6));\n}"
+    }
+  },
+  "editorStates": [],
+  "timestamp": "2026-10-25T08:08:45.177Z"
+}

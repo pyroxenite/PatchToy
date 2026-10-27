@@ -1,5 +1,17 @@
 import { NodeDefinitions } from '../core/NodeDefinitions.js';
 import { CanvasTextInput } from '../rendering/CanvasTextInput.js';
+import { COLORS, FONTS, LAYOUT, CANVAS, NODE_LAYOUT } from '../ui/theme.js';
+import {
+    drawNodeBase, drawNodeBorder, drawTitle, drawTag, drawLabel, drawPort, drawIcon, iconSize, drawLed,
+    portColor, nodeAccent, prettyTitle, measure, getFontEpoch,
+    PORT_NORMAL, PORT_HOT, PORT_DIM
+} from '../rendering/NodePainter.js';
+
+import { portShape } from '../core/control/rates.js';
+import { formatValue } from '../core/control/vmath.js';
+
+const HEADER_H = LAYOUT.headerHeight;
+const ROW_H = LAYOUT.portSpacing;
 
 export class Node {
     constructor(id, type, x, y) {
@@ -33,162 +45,328 @@ export class Node {
 
     // Note: deserialize is handled in NodeGraph.js to avoid circular dependencies
 
+    // ------------------------------------------------------------------
+    // Geometry — single source of truth for drawing AND hit-testing.
+    // Header is LAYOUT.headerHeight tall; body rows are LAYOUT.portSpacing
+    // tall and start NODE_LAYOUT.bodyPadTop below the header. Input i and
+    // output i sit on row i (left / right edge).
+    // ------------------------------------------------------------------
+
+    /** Y of the vertical center of body row `row`. */
+    getRowCenterY(row) {
+        return this.y + HEADER_H + NODE_LAYOUT.bodyPadTop + ROW_H * row + ROW_H / 2;
+    }
+
+    /** Node height for a body of `rows` rows plus `extra` px of custom content. */
+    heightForRows(rows, extra = 0) {
+        return HEADER_H + NODE_LAYOUT.bodyPadTop + ROW_H * Math.max(0, rows) + extra + NODE_LAYOUT.bodyPadBottom;
+    }
+
+    /** Right-aligned header tag rect (offset shifts it left for a second tag). */
+    getHeaderTagRect(width = 14, offset = 0) {
+        return { x: this.x + this.width - 7 - width - offset, y: this.y + 7, w: width, h: 13 };
+    }
+
+    getUniformToggleRect() {
+        return this.getHeaderTagRect(14);
+    }
+
+    /** Legacy swatch area for definitions with hasColorPicker (ColorNode overrides). */
+    getColorSwatchRect() {
+        return {
+            x: this.x + 8,
+            y: this.y + this.height - NODE_LAYOUT.bodyPadBottom - 42,
+            w: this.width - 16,
+            h: 42
+        };
+    }
+
+    getDisplayTitle() {
+        return (this.definition && this.definition.displayTitle) || prettyTitle(this.type);
+    }
+
+    getAccentColor() {
+        return nodeAccent(this);
+    }
+
+    /** Output type with dynamic ('any') outputs resolved after compilation. */
+    getOutputPortType(index) {
+        const out = this.outputs[index];
+        const t = out ? out.type : null;
+        if ((!t || t === 'any') && this.resolvedOutputType) return this.resolvedOutputType;
+        return t;
+    }
+
+    /**
+     * Whether a port has a cable. The graph renderer stamps ports once per
+     * frame (O(connections)); outside of it we fall back to a scan.
+     */
+    isPortConnected(kind, index) {
+        if (this._renderStamp !== undefined) {
+            const arr = kind === 'in' ? this._inLinks : this._outLinks;
+            return !!arr && arr[index] === this._renderStamp;
+        }
+        const conns = this.graph && this.graph.connections;
+        if (!conns) return false;
+        for (const c of conns) {
+            if (kind === 'in' ? (c.toNode === this && c.toInput === index)
+                : (c.fromNode === this && c.fromOutput === index)) return true;
+        }
+        return false;
+    }
+
+    /** Is the (world-space) mouse inside rect? Used for hover styling only. */
+    isHoveringRect(options, rect, pad = 0) {
+        if (!options || options.mouseX === undefined || !rect) return false;
+        const mx = options.mouseX, my = options.mouseY;
+        return mx >= rect.x - pad && mx <= rect.x + rect.w + pad && my >= rect.y - pad && my <= rect.y + rect.h + pad;
+    }
+
+    /**
+     * Grow (never shrink below the class default) so title and port labels fit.
+     * Subclasses with bespoke layouts set this.fixedWidth = true.
+     */
+    fitWidthToContent(ctx) {
+        if (this.fixedWidth) return;
+        const epoch = getFontEpoch();
+        if (this._fitEpoch === epoch && this._fitIns === this.inputs && this._fitInLen === this.inputs.length &&
+            this._fitOuts === this.outputs && this._fitOutLen === this.outputs.length && this._fitType === this.type) {
+            return;
+        }
+        if (this._baseWidth === undefined) this._baseWidth = this.width;
+
+        let need = measure(ctx, FONTS.titleBold, this.getDisplayTitle()) + 20 + (this.hasUniformToggle ? 22 : 0) +
+            (this.definition && this.definition.isCustomNode ? 38 : 0);
+        const rows = Math.max(this.inputs.length, this.outputs.length);
+        for (let r = 0; r < rows; r++) {
+            const inL = r < this.inputs.length ? (this.getInputPortLabel ? this.getInputPortLabel(r) : this.inputs[r].name) : null;
+            const outL = r < this.outputs.length ? (this.getOutputPortLabel ? this.getOutputPortLabel(r) : this.outputs[r].name) : null;
+            let w = 24;
+            if (inL) w += measure(ctx, FONTS.title, inL);
+            if (outL) w += measure(ctx, FONTS.title, outL);
+            if (inL && outL) w += 16;
+            if (this.hasInputFields && r < this.inputs.length && this.textInputs && this.textInputs[this.inputs[r].name]) w += 60;
+            if (w > need) need = w;
+        }
+        this.width = Math.max(this._baseWidth, Math.ceil(need / 2) * 2);
+
+        this._fitEpoch = epoch;
+        this._fitIns = this.inputs;
+        this._fitInLen = this.inputs.length;
+        this._fitOuts = this.outputs;
+        this._fitOutLen = this.outputs.length;
+        this._fitType = this.type;
+    }
+
+    // ------------------------------------------------------------------
+    // Drawing
+    // options: { isSelected, isHovered, mouseX, mouseY (world), drag, hoverPort, time, zoom }
+    // ------------------------------------------------------------------
+
     draw(ctx, options = {}) {
-        const { isSelected = false } = options;
+        const selected = !!options.isSelected;
+        this.fitWidthToContent(ctx);
+        drawNodeBase(ctx, this.x, this.y, this.width, this.height, {
+            selected,
+            accent: this.getAccentColor()
+        });
+        this.drawHeader(ctx, options);
+        this.drawBody(ctx, options);
+        drawNodeBorder(ctx, this.x, this.y, this.width, this.height, {
+            selected,
+            error: this.isInErrorState(),
+            hovered: options.isHovered
+        });
+        this.drawPorts(ctx, options);
+    }
 
-        // Save context state before drawing
-        ctx.save();
+    /**
+     * Error styling (red outline + badge). Subclasses may add their own error sources.
+     * _ctlError: the node runs at control rate (src/core/control) and failed this frame,
+     * e.g. a division by zero gave Infinity.
+     */
+    isInErrorState() {
+        return !!this.hasError || !!this._ctlError;
+    }
 
-        // Draw shadow first (behind the node)
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-        ctx.shadowBlur = 12;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 4;
+    /** Optional pixel icon shown before the title (name from NodePainter ICONS). */
+    getHeaderIcon() {
+        return null;
+    }
 
-        // Node body - matching floating toolbar style
-        ctx.fillStyle = 'rgba(45, 45, 45, 0.95)';
-
-        // Draw node background with shadow
-        ctx.beginPath();
-        ctx.roundRect(this.x, this.y, this.width, this.height, 8);
-        ctx.fill();
-
-        // Restore context to clean state (removes all shadows and transformations)
-        ctx.restore();
-
-        // Now draw border without shadow (after restore to ensure clean state)
-        // Determine border color and width
-        let borderColor, borderWidth;
-        if (this.hasError) {
-            borderColor = '#f44336';
-            borderWidth = 2;
-        } else if (isSelected) {
-            borderColor = '#007acc';
-            borderWidth = 2;
-        } else {
-            borderColor = 'rgba(68, 68, 68, 0.5)';
-            borderWidth = 1;
+    /** Title (with optional icon) + right-aligned header tags. */
+    drawHeader(ctx, options = {}) {
+        const tagsLeft = this.drawHeaderTags(ctx, options);
+        let tx = this.x + 9;
+        const icon = this.getHeaderIcon();
+        if (icon) {
+            const s = iconSize(icon);
+            drawIcon(ctx, icon, tx, this.y + 14 - Math.ceil(s.h / 2), this.getAccentColor());
+            tx += s.w + 5;
         }
+        drawTitle(ctx, this.getDisplayTitle(), tx, this.y, tagsLeft - tx - 6);
+    }
 
-        ctx.strokeStyle = borderColor;
-        ctx.lineWidth = borderWidth;
+    /** Status LED at the right of the header; returns its left x. */
+    drawHeaderLed(ctx, on, color, offset = 0) {
+        const cx = this.x + this.width - 12 - offset;
+        drawLed(ctx, cx, this.y + 13.5, on, color);
+        return cx - 4;
+    }
 
-        // Draw border (clean state, no shadow)
-        ctx.beginPath();
-        ctx.roundRect(this.x, this.y, this.width, this.height, 8);
-        ctx.stroke();
-
-        // Normal node header
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '12px bold "Pixeloid Sans"';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'alphabetic';
-        // Use displayTitle from definition if available (for custom nodes), otherwise use type
-        const displayName = this.definition?.displayTitle || this.type;
-        ctx.fillText(displayName, this.x + 10, this.y + 18);
-
-        // Color picker content - fill entire node below title
-        if (this.hasColorPicker && this.data.r !== undefined) {
-            const titleBarHeight = 30;
-            const colorX = this.x;
-            const colorY = this.y + titleBarHeight;
-            const colorWidth = this.width;
-            const colorHeight = this.height - titleBarHeight;
-
-            const r = Math.floor(this.data.r * 255);
-            const g = Math.floor(this.data.g * 255);
-            const b = Math.floor(this.data.b * 255);
-
-            // Draw color fill with rounded bottom corners
-            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-            ctx.beginPath();
-            // Start at top-left (no rounding)
-            ctx.moveTo(colorX, colorY);
-            // Top-right (no rounding)
-            ctx.lineTo(colorX + colorWidth, colorY);
-            // Bottom-right (rounded)
-            ctx.lineTo(colorX + colorWidth, colorY + colorHeight - 8);
-            ctx.arcTo(colorX + colorWidth, colorY + colorHeight, colorX + colorWidth - 8, colorY + colorHeight, 8);
-            // Bottom edge
-            ctx.lineTo(colorX + 8, colorY + colorHeight);
-            // Bottom-left (rounded)
-            ctx.arcTo(colorX, colorY + colorHeight, colorX, colorY + colorHeight - 8, 8);
-            // Left edge back to top
-            ctx.lineTo(colorX, colorY);
-            ctx.closePath();
-            ctx.fill();
+    /**
+     * Cursor for interactive controls under (x, y), or null.
+     * Base: header uniform tag and inline fields.
+     */
+    getControlCursor(x, y) {
+        if (this.hasUniformToggle) {
+            const t = this.getUniformToggleRect();
+            if (x >= t.x - 3 && x <= t.x + t.w + 3 && y >= t.y - 3 && y <= t.y + t.h + 3) return 'pointer';
         }
-
-        // Inputs
-        ctx.textBaseline = 'middle'; // Center text vertically on ports
-        for (let i = 0; i < this.inputs.length; i++) {
-            const pos = this.getInputPortPosition(i);
-            if (!pos) continue; // Skip if port is hidden (e.g., in uniform mode)
-
-            ctx.fillStyle = '#007acc';
-            ctx.beginPath();
-            ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Get label (allow override via getInputPortLabel method)
-            const label = this.getInputPortLabel ? this.getInputPortLabel(i) : this.inputs[i].name;
-            if (label) {
-                ctx.fillStyle = '#aaa';
-                ctx.font = '11px "Pixeloid Mono"';
-                ctx.fillText(label, pos.x + 10, pos.y);
-            }
-        }
-
-        // Outputs
-        for (let i = 0; i < this.outputs.length; i++) {
-            const pos = this.getOutputPortPosition(i);
-            if (!pos) continue; // Skip if port is hidden
-
-            ctx.fillStyle = '#007acc';
-            ctx.beginPath();
-            ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Get label (allow override via getOutputPortLabel method)
-            const label = this.getOutputPortLabel ? this.getOutputPortLabel(i) : this.outputs[i].name;
-            if (label) {
-                ctx.fillStyle = '#aaa';
-                ctx.font = '11px "Pixeloid Mono"';
-                const labelWidth = ctx.measureText(label).width;
-                ctx.fillText(label, pos.x - labelWidth - 10, pos.y);
-            }
-        }
-
-        // Draw text inputs (unless subclass handles it)
-        if (this.hasInputFields && this.textInputs && !this.skipParentTextInputDraw) {
-            for (const field of Object.keys(this.data)) {
-                const input = this.textInputs[field];
-                if (input) {
-                    input.draw(ctx);
+        if (this.hasInputFields && this.textInputs) {
+            for (const key in this.textInputs) {
+                const input = this.textInputs[key];
+                if (input && input.containsPoint(x, y)) {
+                    return input.focused ? 'text' : (input.type === 'text' ? 'text' : 'ew-resize');
                 }
             }
         }
+        return null;
+    }
 
-        // Draw uniform toggle button
+    /** Draw header tags; returns the left-most x used (title must stop before it). */
+    drawHeaderTags(ctx, options = {}) {
         if (this.hasUniformToggle) {
-            const toggleSize = 16;
-            const toggleX = this.x + this.width - toggleSize - 6;
-            const toggleY = this.y + 6;
+            const r = this.getUniformToggleRect();
+            drawTag(ctx, r, 'U', !!this.data.useUniform, CANVAS.uniform, {
+                hovered: this.isHoveringRect(options, r, 2)
+            });
+            return r.x;
+        }
+        // Custom GLSL nodes get a "glsl" tag, like a Param's kind tag
+        if (this.definition && this.definition.isCustomNode) {
+            const r = { x: this.x + this.width - 7 - 32, y: this.y + 7, w: 32, h: 13 };
+            drawTag(ctx, r, 'glsl', false, CANVAS.uniform, { hovered: this.isHoveringRect(options, r, 2) });
+            return r.x;
+        }
+        return this.x + this.width - 4;
+    }
 
-            // Button background
-            ctx.fillStyle = this.data.useUniform ? '#007acc' : '#444';
+    /** Body content between header and border. Base: inline fields / legacy swatch. */
+    drawBody(ctx, options = {}) {
+        if (this.hasColorPicker && this.data.r !== undefined) {
+            const s = this.getColorSwatchRect();
+            const r = Math.floor(this.data.r * 255);
+            const g = Math.floor(this.data.g * 255);
+            const b = Math.floor(this.data.b * 255);
             ctx.beginPath();
-            ctx.roundRect(toggleX, toggleY, toggleSize, toggleSize, 3);
+            ctx.roundRect(s.x, s.y, s.w, s.h, 3);
+            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
             ctx.fill();
+        }
 
-            // "U" label
-            ctx.fillStyle = '#fff';
-            ctx.font = '11px "Pixeloid Mono"';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('U', toggleX + toggleSize / 2, toggleY + toggleSize / 2);
+        if (this.hasInputFields && this.textInputs && !this.skipParentTextInputDraw) {
+            this.updateTextInputPositions();
+            for (let i = 0; i < this.inputs.length; i++) {
+                const input = this.textInputs[this.inputs[i].name];
+                if (input && !this.isPortConnected('in', i)) {
+                    input.draw(ctx, options);
+                }
+            }
+        }
+    }
+
+    /** Port state for styling: hovered / drag-compatible / dimmed. */
+    getPortDrawState(kind, index, type, options) {
+        const drag = options.drag;
+        const hp = options.hoverPort;
+        if (drag) {
+            if (drag.node === this) {
+                const isOrigin = drag.reverse ? (kind === 'in' && index === drag.index)
+                    : (kind === 'out' && index === drag.index);
+                return isOrigin ? PORT_HOT : PORT_DIM;
+            }
+            if (!drag.accepts(kind, type)) return PORT_DIM;
+            if (drag.acceptsPort && !drag.acceptsPort(this, kind, index)) return PORT_DIM; // rate rules
+        }
+        if (hp && hp.node === this && hp.kind === kind && hp.index === index) return PORT_HOT;
+        return PORT_NORMAL;
+    }
+
+    /** Port shape from the control plan: circle (pixel), diamond (control), event. */
+    getPortShape(kind, index) {
+        const plan = this.graph && this.graph._controlPlan;
+        return plan ? portShape(plan, this, kind, index) : 'circle';
+    }
+
+    drawPorts(ctx, options = {}) {
+        for (let i = 0; i < this.inputs.length; i++) {
+            const pos = this.getInputPortPosition(i);
+            if (!pos) continue; // hidden (e.g. uniform mode)
+            const type = this.inputs[i].type;
+            const connected = this.isPortConnected('in', i);
+            const state = this.getPortDrawState('in', i, type, options);
+            const label = this.getInputPortLabel ? this.getInputPortLabel(i) : this.inputs[i].name;
+            if (label) {
+                drawLabel(ctx, label, pos.x + 10, pos.y, state === PORT_DIM ? COLORS.textFaint : COLORS.textDim);
+            }
+            // 'any' inputs take the color of whatever is patched into them
+            const shownType = (type === 'any' && connected && this._inLinkTypes) ? this._inLinkTypes[i] : type;
+            drawPort(ctx, pos.x, pos.y, portColor(shownType), connected, state, this.getPortShape('in', i));
+        }
+
+        for (let i = 0; i < this.outputs.length; i++) {
+            const pos = this.getOutputPortPosition(i);
+            if (!pos) continue;
+            const type = this.getOutputPortType(i);
+            const state = this.getPortDrawState('out', i, type, options);
+            const label = this.getOutputPortLabel ? this.getOutputPortLabel(i) : this.outputs[i].name;
+            if (label) {
+                drawLabel(ctx, label, pos.x - 10, pos.y, state === PORT_DIM ? COLORS.textFaint : COLORS.textDim, 'right');
+            }
+            drawPort(ctx, pos.x, pos.y, portColor(type), this.isPortConnected('out', i), state, this.getPortShape('out', i));
+        }
+        this.drawControlValues(ctx);
+    }
+
+    /**
+     * Math / vector nodes running at control rate show their live output values
+     * (left of the output labels; below the node when it has no labels).
+     */
+    drawControlValues(ctx) {
+        const plan = this.graph && this.graph._controlPlan;
+        const out = this._ctlOut;
+        if (!plan || !out || this.isControlNode || plan.kindOf(this) !== 'infer' || plan.rateOf(this) !== 'control') return;
+        const info = plan.info.get(this);
+        ctx.font = FONTS.value;
+        ctx.textBaseline = 'alphabetic';
+        for (let i = 0; i < this.outputs.length; i++) {
+            const pos = this.getOutputPortPosition(i);
+            if (!pos) continue;
+            const t = info && info.outTypes ? info.outTypes[i] : this.outputs[i].type;
+            const text = formatValue(out[i], t, 2);
+            const label = this.getOutputPortLabel ? this.getOutputPortLabel(i) : this.outputs[i].name;
+            if (!label) {
+                // Compact nodes (operators): one value under the node
+                if (i > 0) break;
+                ctx.textAlign = 'center';
+                ctx.fillStyle = COLORS.textDim;
+                ctx.fillText(text.length > 18 ? text.slice(0, 17) + '…' : text, Math.round(this.x + this.width / 2), Math.round(this.y + this.height + 11));
+                ctx.textAlign = 'left';
+                continue;
+            }
+            if (this.textInputs && this.inputs[i] && this.textInputs[this.inputs[i].name] && !this.isPortConnected('in', i)) continue; // inline field on this row
+            const labelW = measure(ctx, FONTS.title, label);
+            const inLabel = this.inputs[i] ? (this.getInputPortLabel ? this.getInputPortLabel(i) : this.inputs[i].name) : '';
+            const inW = inLabel ? measure(ctx, FONTS.title, inLabel) + 16 : 0;
+            const maxW = this.width - 26 - labelW - inW;
+            if (maxW < 22) continue;
+            ctx.font = FONTS.value;
+            const shown = measure(ctx, FONTS.value, text) > maxW ? text.slice(0, Math.max(1, Math.floor(maxW / 6) - 1)) + '…' : text;
+            ctx.textAlign = 'right';
+            ctx.fillStyle = COLORS.textFaint;
+            ctx.fillText(shown, Math.round(pos.x - 14 - labelW), Math.round(pos.y + 3));
             ctx.textAlign = 'left';
-            ctx.textBaseline = 'alphabetic';
         }
     }
 
@@ -200,8 +378,10 @@ export class Node {
         }
 
         this.definition = def;
-        this.inputs = def.inputs ? [...def.inputs] : [];
-        this.outputs = def.outputs ? [...def.outputs] : [];
+        // Clone port objects: the compiler resolves 'any' output types per node
+        // instance, which must never leak back into the shared definition.
+        this.inputs = def.inputs ? def.inputs.map(p => ({ ...p })) : [];
+        this.outputs = def.outputs ? def.outputs.map(p => ({ ...p })) : [];
         this.isOutputNode = def.isOutputNode || false;
         this.isPreviewNode = def.isPreviewNode || false;
         this.hasInputFields = def.hasInputFields || false;
@@ -268,38 +448,28 @@ export class Node {
     }
 
     updateDimensions() {
-        const baseHeight = 30;
-        const inputHeight = Math.max(this.inputs.length, this.outputs.length) * 25;
-        const colorPickerHeight = this.hasColorPicker ? 50 : 0;
-
-        // Count text input fields from data object
-        let textInputCount = 0;
-        if (this.hasInputFields) {
-            for (const field in this.data) {
-                if (typeof this.data[field] === 'number') {
-                    textInputCount++;
-                }
-            }
-        }
-        const textInputHeight = textInputCount * 25;
-
-        this.height = Math.max(60, baseHeight + inputHeight + colorPickerHeight + textInputHeight);
+        // One row per port pair; inline fields share their input's row
+        const rows = Math.max(this.inputs.length, this.outputs.length, 1);
+        const colorPickerHeight = this.hasColorPicker ? 48 : 0;
+        this.height = this.heightForRows(rows, colorPickerHeight);
     }
 
     updateTextInputPositions() {
-        if (!this.hasInputFields) return;
+        if (!this.hasInputFields || !this.textInputs) return;
 
-        let yOffset = this.y + 35;
-        if (this.hasColorPicker) yOffset += 50;
-
-        for (const input of this.inputs) {
-            const textInput = this.textInputs[input.name];
-            if (textInput) {
-                // Position text input to the right of the input port
-                const portPos = this.getInputPortPosition(this.inputs.indexOf(input));
-                textInput.x = portPos.x + 15;
-                textInput.y = portPos.y - 10;
-            }
+        // Inline field sits on its input's row, right-aligned in the body
+        const fieldW = 52;
+        const fieldH = NODE_LAYOUT.fieldHeight;
+        for (let i = 0; i < this.inputs.length; i++) {
+            const textInput = this.textInputs[this.inputs[i].name];
+            if (!textInput) continue;
+            const portPos = this.getInputPortPosition(i);
+            if (!portPos) continue;
+            const rightPad = i < this.outputs.length ? 40 : 10;
+            textInput.width = fieldW;
+            textInput.height = fieldH;
+            textInput.x = this.x + this.width - rightPad - fieldW;
+            textInput.y = portPos.y - fieldH / 2;
         }
     }
 
@@ -318,18 +488,16 @@ export class Node {
     }
 
     getInputPortPosition(index) {
-        const portSpacing = (this.height - 20) / (this.inputs.length + 1);
         return {
             x: this.x,
-            y: this.y + 20 + portSpacing * (index + 1)
+            y: this.getRowCenterY(index)
         };
     }
 
     getOutputPortPosition(index) {
-        const portSpacing = (this.height - 20) / (this.outputs.length + 1);
         return {
             x: this.x + this.width,
-            y: this.y + 20 + portSpacing * (index + 1)
+            y: this.getRowCenterY(index)
         };
     }
 
@@ -339,6 +507,11 @@ export class Node {
      */
 
     handleMouseDown(x, y, event) {
+        // Make sure inline field rects match the current node position
+        if (this.hasInputFields && this.updateTextInputPositions) {
+            this.updateTextInputPositions();
+        }
+
         // Check uniform toggle button first
         if (this.hasUniformToggle) {
             if (this._checkAndHandleUniformToggle(x, y)) {
@@ -392,6 +565,13 @@ export class Node {
                     cursor: this.getCursorForEdge(resizeEdge)
                 };
             }
+            if (this.hasInputFields && this.updateTextInputPositions) {
+                this.updateTextInputPositions();
+            }
+            const cursor = this.getControlCursor(x, y);
+            if (cursor) {
+                return { type: 'UPDATE_CURSOR', cursor };
+            }
         }
 
         return null;
@@ -403,12 +583,11 @@ export class Node {
     }
 
     _checkAndHandleUniformToggle(x, y) {
-        const toggleSize = 16;
-        const toggleX = this.x + this.width - toggleSize - 6;
-        const toggleY = this.y + 6;
+        const t = this.getUniformToggleRect();
+        const pad = 3; // slightly generous hit area around the small header tag
 
-        if (x >= toggleX && x <= toggleX + toggleSize &&
-            y >= toggleY && y <= toggleY + toggleSize) {
+        if (x >= t.x - pad && x <= t.x + t.w + pad &&
+            y >= t.y - pad && y <= t.y + t.h + pad) {
             // Handle toggle internally
             const wasUniform = this.data.useUniform;
             this.data.useUniform = !this.data.useUniform;
@@ -416,7 +595,6 @@ export class Node {
             // If switching TO uniform mode, disconnect all inputs and register uniforms
             if (!wasUniform && this.data.useUniform && this.graph) {
                 this.graph.connections = this.graph.connections.filter(conn => conn.toNode !== this);
-                console.log('Disconnected inputs when switching to uniform mode');
 
                 // Register uniforms if this is a constant node
                 if (this.updateUniformRegistry) {
@@ -447,13 +625,10 @@ export class Node {
     }
 
     _checkAndHandleColorPicker(x, y, event) {
-        const colorX = this.x + 10;
-        const colorY = this.y + 35;
-        const colorWidth = this.width - 20;
-        const colorHeight = 40;
+        const s = this.getColorSwatchRect();
 
-        if (x >= colorX && x <= colorX + colorWidth &&
-            y >= colorY && y <= colorY + colorHeight) {
+        if (x >= s.x && x <= s.x + s.w &&
+            y >= s.y && y <= s.y + s.h) {
             // Call graph's callback which has access to color picker UI
             if (this.graph && this.graph.onNodeRightClick) {
                 this.graph.onNodeRightClick(this, event);

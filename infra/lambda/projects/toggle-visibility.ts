@@ -1,55 +1,34 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
 import * as response from '../shared/response';
-import * as jwt from '../shared/jwt';
-import * as db from '../shared/db';
+import { getStore, ProjectPatch, visibilityOf } from '../shared/store';
+import { handle, requireAuth, parseBody, dropThumbnail } from '../shared/http';
+import { isProjectId, parseVisibility } from '../shared/validate';
 
-export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  try {
-    // Verify auth
-    const token = jwt.extractToken(event.headers.Authorization || event.headers.authorization);
-    if (!token) {
-      return response.error('Missing authorization token', 401);
-    }
+/**
+ * PUT /api/projects/{id}/visibility { visibility: 'private' | 'unlisted' | 'public' }
+ * (or the 1.x { isPublic }: true = unlisted, i.e. anyone with the link, not listed).
+ * Only 'public' lists the project in Community and on the user page.
+ */
+export const handler = handle('Toggle visibility', async (event: APIGatewayProxyEvent) => {
+  const auth = await requireAuth(event);
+  const projectId = event.pathParameters?.id;
+  if (!isProjectId(projectId)) return response.error('Project not found', 404);
 
-    const payload = jwt.verify(token);
-    if (!payload) {
-      return response.error('Invalid token', 401);
-    }
+  const db = getStore();
+  const project = await db.getProject(projectId);
+  if (!project) return response.error('Project not found', 404);
+  if (project.userId !== auth.userId) return response.error('Unauthorized', 403);
 
-    // Get project ID from path
-    const projectId = event.pathParameters?.id;
-    if (!projectId) {
-      return response.error('Project ID is required', 400);
-    }
+  const visibility = parseVisibility(parseBody(event));
+  if (!visibility) return response.error("visibility ('private' | 'unlisted' | 'public') is required", 400);
+  const before = visibilityOf(project);
 
-    // Check ownership
-    const project = await db.getProject(projectId);
-    if (!project) {
-      return response.error('Project not found', 404);
-    }
+  const patch: ProjectPatch = { visibility, ownerId: project.userId };
+  if (visibility === 'public' && !project.publishedAt) patch.publishedAt = new Date().toISOString();
+  // Publishing bumps updatedAt so the project shows up first in "Newest"
+  const touch = visibility === 'public' && before !== 'public';
+  const updatedAt = await db.updateProject(projectId, patch, { touch });
+  if (visibility === 'private' && before !== 'private') await dropThumbnail(project);
 
-    if (project.userId !== payload.userId) {
-      return response.error('Unauthorized', 403);
-    }
-
-    // Parse request body
-    const body = JSON.parse(event.body || '{}');
-    const { isPublic } = body;
-
-    if (isPublic === undefined) {
-      return response.error('isPublic field is required', 400);
-    }
-
-    // Update visibility
-    await db.updateProject(projectId, { isPublic: Boolean(isPublic) });
-
-    return response.success({
-      id: projectId,
-      isPublic: Boolean(isPublic),
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (err: any) {
-    console.error('Toggle visibility error:', err);
-    return response.error('Internal server error', 500);
-  }
-}
+  return response.success({ id: projectId, visibility, isPublic: visibility !== 'private', updatedAt: touch ? updatedAt : project.updatedAt });
+});

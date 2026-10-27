@@ -43,3 +43,23 @@ Thumbs.db
 # Old/backup files
 *_old.js
 *.backup
+
+# PatchToy MCP server runtime files
+projects/.backups/
+projects/.mcp-state.json
+projects/*.tmp
+
+# Local mock API build (scripts/mock-api.mjs)
+infra/lambda/.mock-dist/
+
+# Recordings / offline exports written by the MCP server (start_recording)
+exports/
+e2e-community-out/
+
+# Test runs (npm test): visual regression diff images / report
+tests/visual/out/
+
+# Full-size demo renders (sources for projects/thumbs/*.jpg, regenerate with render_preview + npm run thumbs)
+projects/*.png
+# Local beat tracker comparison tool
+proto/

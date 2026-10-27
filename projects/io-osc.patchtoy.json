@@ -1,0 +1,825 @@
+{
+  "name": "OSC Driven",
+  "description": "An OSC-driven visual: four OSC In nodes (port 9000, through the I/O bridge) drive a kaleidoscopic glowing ring - /patchtoy/lfo its size and spin, /patchtoy/xy its center, /patchtoy/color its tint, /patchtoy/beat a flash that an OSC Out echoes back to 127.0.0.1:9001. Runs on a built-in LFO until messages arrive. Start npm run io-bridge, pair and enable I/O in Output > I/O, then npm run osc-demo or send from TouchDesigner / Max / Ableton.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T13:44:30.365Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 0,
+        "type": "Comment",
+        "x": 40,
+        "y": 20,
+        "data": {
+          "text": "# OSC-driven visual\nDrive this patch from TouchDesigner, Max, Ableton or any OSC app: send UDP to this machine on port 9000. Without OSC it runs on its own LFO; each part switches to OSC as soon as its messages arrive.\n- 1. Terminal: npm run io-bridge (prints a token and a pairing URL)\n- 2. Output › I/O settings: paste the token, tick Enable I/O for this session\n- 3. Second terminal: npm run osc-demo (sends an LFO), or your app → 127.0.0.1:9000\n## Addresses\n- /patchtoy/lfo f · ring size and rotation\n- /patchtoy/xy f f · center (0..1)\n- /patchtoy/color f f f · tint (0..1 RGB)\n- /patchtoy/beat (any) · one flash per message\nOSC Out sends the flash back to 127.0.0.1:9001: allow it in Output › I/O to receive it in your app.",
+          "width": 600,
+          "height": 330,
+          "color": "blue"
+        }
+      },
+      {
+        "id": 1,
+        "type": "Comment",
+        "x": 700,
+        "y": 20,
+        "data": {
+          "text": "# OSC In → control\nEach OSC In holds its last message. Min(count, 1) is 0 until the first message, so Mix switches from the fallback (built-in LFO, center, orange) to OSC. Lag smooths the jumps; Envelope Follower turns /patchtoy/beat events into a decaying flash.",
+          "width": 520,
+          "height": 150,
+          "color": "green"
+        }
+      },
+      {
+        "id": 2,
+        "type": "OSCIn",
+        "x": 40,
+        "y": 390,
+        "data": {
+          "address": "/patchtoy/lfo",
+          "port": "9000"
+        }
+      },
+      {
+        "id": 3,
+        "type": "OSCIn",
+        "x": 40,
+        "y": 730,
+        "data": {
+          "address": "/patchtoy/xy",
+          "port": "9000"
+        }
+      },
+      {
+        "id": 4,
+        "type": "OSCIn",
+        "x": 40,
+        "y": 1070,
+        "data": {
+          "address": "/patchtoy/color",
+          "port": "9000"
+        }
+      },
+      {
+        "id": 5,
+        "type": "OSCIn",
+        "x": 40,
+        "y": 1410,
+        "data": {
+          "address": "/patchtoy/beat",
+          "port": "9000"
+        }
+      },
+      {
+        "id": 6,
+        "type": "LFO",
+        "x": 300,
+        "y": 390,
+        "data": {
+          "rate": 0.2,
+          "phase": 0,
+          "width": 0.5,
+          "shape": "sine",
+          "unit": "hz"
+        }
+      },
+      {
+        "id": 7,
+        "type": "Min",
+        "x": 300,
+        "y": 640,
+        "data": {
+          "a": 0,
+          "b": 1
+        }
+      },
+      {
+        "id": 8,
+        "type": "Mix",
+        "x": 520,
+        "y": 400,
+        "data": {
+          "a": 0,
+          "b": 1,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 9,
+        "type": "Lag",
+        "x": 740,
+        "y": 400,
+        "data": {
+          "in": 0,
+          "up": 0.12,
+          "down": 0.12
+        }
+      },
+      {
+        "id": 10,
+        "type": "Min",
+        "x": 300,
+        "y": 860,
+        "data": {
+          "a": 0,
+          "b": 1
+        }
+      },
+      {
+        "id": 11,
+        "type": "Mix",
+        "x": 520,
+        "y": 740,
+        "data": {
+          "a": [
+            0.5,
+            0.5
+          ],
+          "b": 1,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 12,
+        "type": "Lag",
+        "x": 740,
+        "y": 740,
+        "data": {
+          "in": 0,
+          "up": 0.3,
+          "down": 0.3
+        }
+      },
+      {
+        "id": 13,
+        "type": "Min",
+        "x": 300,
+        "y": 1200,
+        "data": {
+          "a": 0,
+          "b": 1
+        }
+      },
+      {
+        "id": 14,
+        "type": "Mix",
+        "x": 520,
+        "y": 1080,
+        "data": {
+          "a": [
+            1,
+            0.45,
+            0.2
+          ],
+          "b": 1,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 15,
+        "type": "Lag",
+        "x": 740,
+        "y": 1080,
+        "data": {
+          "in": 0,
+          "up": 0.5,
+          "down": 0.5
+        }
+      },
+      {
+        "id": 16,
+        "type": "EnvelopeFollower",
+        "x": 300,
+        "y": 1420,
+        "data": {
+          "in": 0,
+          "attack": 0.005,
+          "release": 0.45
+        }
+      },
+      {
+        "id": 17,
+        "type": "OSCOut",
+        "x": 520,
+        "y": 1420,
+        "data": {
+          "value": 0,
+          "rate": 30,
+          "address": "/patchtoy/flash",
+          "host": "127.0.0.1",
+          "port": "9001",
+          "send": "change",
+          "types": "float",
+          "text": "",
+          "list": ""
+        }
+      },
+      {
+        "id": 18,
+        "type": "Remap",
+        "x": 980,
+        "y": 260,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.12,
+          "outMax": 0.36
+        }
+      },
+      {
+        "id": 19,
+        "type": "Multiply",
+        "x": 980,
+        "y": 420,
+        "data": {
+          "b": 3.14159
+        }
+      },
+      {
+        "id": 20,
+        "type": "Remap",
+        "x": 980,
+        "y": 1420,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.012,
+          "outMax": 0.05
+        }
+      },
+      {
+        "id": 21,
+        "type": "Remap",
+        "x": 980,
+        "y": 1560,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 1,
+          "outMax": 4
+        }
+      },
+      {
+        "id": 22,
+        "type": "Mix",
+        "x": 980,
+        "y": 740,
+        "data": {
+          "a": [
+            0.5,
+            0.5
+          ],
+          "b": 1,
+          "t": 0.4
+        }
+      },
+      {
+        "id": 23,
+        "type": "Kaleidoscope",
+        "x": 1200,
+        "y": 420,
+        "data": {
+          "segments": 7,
+          "angle": 0,
+          "amount": 1,
+          "uv": "pt_uv()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 24,
+        "type": "Multiply",
+        "x": 1200,
+        "y": 240,
+        "data": {
+          "b": 0.55
+        }
+      },
+      {
+        "id": 25,
+        "type": "Star",
+        "x": 1440,
+        "y": 140,
+        "data": {
+          "radius": 0.3,
+          "points": 7,
+          "sharpness": 2.6,
+          "uv": "pt_uv()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 26,
+        "type": "Glow",
+        "x": 1680,
+        "y": 140,
+        "data": {
+          "d": 0.1,
+          "radius": 0.003,
+          "intensity": 1.2,
+          "falloff": 1.6,
+          "amount": 1
+        }
+      },
+      {
+        "id": 27,
+        "type": "Multiply",
+        "x": 1900,
+        "y": 140,
+        "data": {
+          "b": [
+            0.35,
+            0.65,
+            1
+          ]
+        }
+      },
+      {
+        "id": 28,
+        "type": "Add",
+        "x": 2360,
+        "y": 420,
+        "data": {}
+      },
+      {
+        "id": 29,
+        "type": "Ring",
+        "x": 1440,
+        "y": 420,
+        "data": {
+          "radius": 0.3,
+          "width": 0.05,
+          "uv": "pt_uv()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 30,
+        "type": "Glow",
+        "x": 1680,
+        "y": 420,
+        "data": {
+          "d": 0.1,
+          "radius": 0.005,
+          "intensity": 1,
+          "falloff": 1.5,
+          "amount": 1
+        }
+      },
+      {
+        "id": 31,
+        "type": "Time",
+        "x": 1200,
+        "y": 760,
+        "data": {}
+      },
+      {
+        "id": 32,
+        "type": "Multiply",
+        "x": 1440,
+        "y": 760,
+        "data": {
+          "b": 0.06
+        }
+      },
+      {
+        "id": 33,
+        "type": "Voronoi",
+        "x": 1440,
+        "y": 900,
+        "data": {
+          "scale": 5,
+          "jitter": 1,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 34,
+        "type": "Add",
+        "x": 1680,
+        "y": 820,
+        "data": {}
+      },
+      {
+        "id": 35,
+        "type": "CosinePalette",
+        "x": 1900,
+        "y": 820,
+        "data": {}
+      },
+      {
+        "id": 36,
+        "type": "Multiply",
+        "x": 2140,
+        "y": 820,
+        "data": {}
+      },
+      {
+        "id": 37,
+        "type": "Multiply",
+        "x": 2360,
+        "y": 820,
+        "data": {
+          "b": 1.5
+        }
+      },
+      {
+        "id": 38,
+        "type": "Multiply",
+        "x": 1900,
+        "y": 420,
+        "data": {}
+      },
+      {
+        "id": 39,
+        "type": "Add",
+        "x": 2580,
+        "y": 600,
+        "data": {}
+      },
+      {
+        "id": 40,
+        "type": "Vignette",
+        "x": 2800,
+        "y": 600,
+        "data": {
+          "radius": 0.75,
+          "softness": 0.45,
+          "amount": 1,
+          "color": "vec3(1.0)",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 41,
+        "type": "Preview",
+        "x": 3040,
+        "y": 560,
+        "data": {},
+        "width": 300,
+        "height": 219.5,
+        "isBackground": true
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 6,
+        "toId": 7,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 1,
+        "toId": 11,
+        "toInput": 1,
+        "swizzle": ".xy"
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 6,
+        "toId": 10,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 11,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 11,
+        "fromOutput": 0,
+        "toId": 12,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 1,
+        "toId": 14,
+        "toInput": 1,
+        "swizzle": ".xyz"
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 6,
+        "toId": 13,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 13,
+        "fromOutput": 0,
+        "toId": 14,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 14,
+        "fromOutput": 0,
+        "toId": 15,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 5,
+        "toId": 16,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 16,
+        "fromOutput": 0,
+        "toId": 17,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 18,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 19,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 16,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 16,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 12,
+        "fromOutput": 0,
+        "toId": 22,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 23,
+        "fromOutput": 0,
+        "toId": 29,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 29,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 24,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 23,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 24,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 27,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 38,
+        "fromOutput": 0,
+        "toId": 28,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 27,
+        "fromOutput": 0,
+        "toId": 28,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 29,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 0,
+        "toId": 29,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 30,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 30,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 38,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 30,
+        "fromOutput": 0,
+        "toId": 38,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 31,
+        "fromOutput": 0,
+        "toId": 32,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 23,
+        "fromOutput": 0,
+        "toId": 33,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 33,
+        "fromOutput": 0,
+        "toId": 34,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 0,
+        "toId": 34,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 34,
+        "fromOutput": 0,
+        "toId": 35,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 35,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 33,
+        "fromOutput": 1,
+        "toId": 36,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 36,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 28,
+        "fromOutput": 0,
+        "toId": 39,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 37,
+        "fromOutput": 0,
+        "toId": 39,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 39,
+        "fromOutput": 0,
+        "toId": 40,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 40,
+        "fromOutput": 0,
+        "toId": 41,
+        "toInput": 0,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 42,
+    "panX": 38.12121212121207,
+    "panY": 216.33939393939391,
+    "zoom": 0.296969696969697
+  },
+  "customNodes": {},
+  "editorStates": []
+}

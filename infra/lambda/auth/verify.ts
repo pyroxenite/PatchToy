@@ -1,27 +1,18 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
 import * as response from '../shared/response';
-import * as jwt from '../shared/jwt';
+import { handle, requireAuth } from '../shared/http';
 
-export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  try {
-    // Extract and verify token
-    const token = jwt.extractToken(event.headers.Authorization || event.headers.authorization);
-    if (!token) {
-      return response.error('Missing authorization token', 401);
-    }
-
-    const payload = jwt.verify(token);
-    if (!payload) {
-      return response.error('Invalid token', 401);
-    }
-
-    return response.success({
+/** GET /api/auth/verify - the current session (401 once it was revoked). Values come from the users table. */
+export const handler = handle('Verify', async (event: APIGatewayProxyEvent) => {
+  const auth = await requireAuth(event);
+  return response.success(
+    {
       valid: true,
-      userId: payload.userId,
-      email: payload.email,
-    });
-  } catch (err: any) {
-    console.error('Verify error:', err);
-    return response.error('Internal server error', 500);
-  }
-}
+      userId: auth.userId,
+      email: auth.email,
+      username: auth.username,
+    },
+    200,
+    { 'Cache-Control': 'private, no-store' },
+  );
+});

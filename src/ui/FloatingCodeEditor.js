@@ -1,4 +1,6 @@
 import { CodeEditor } from './CodeEditor.js';
+import { iconEl } from './icons.js';
+import { UIHelpers } from './UIHelpers.js';
 
 /**
  * Floating, draggable code editor window
@@ -7,7 +9,7 @@ import { CodeEditor } from './CodeEditor.js';
 export class FloatingCodeEditor {
     // Initialize static properties
     static instances = [];
-    static nextZIndex = 10000;
+    static nextZIndex = 2000;
 
     constructor(options = {}) {
         this.title = options.title || 'Code Editor';
@@ -16,6 +18,10 @@ export class FloatingCodeEditor {
         this.readOnly = options.readOnly || false;
         this.onSave = options.onSave || null;
         this.onClose = options.onClose || null;
+        // source(): the text the edited thing has right now (node code, custom node GLSL),
+        // null when it no longer exists. Undo / redo can change it behind the editor:
+        // see syncFromSource().
+        this.source = typeof options.source === 'function' ? options.source : null;
 
         // Track node type for deduplication (e.g., "Edit MyCustomNode")
         this.nodeType = options.nodeType || null;
@@ -42,19 +48,10 @@ export class FloatingCodeEditor {
     create() {
         // Create floating window
         this.window = document.createElement('div');
-        this.window.className = 'floating-code-editor';
-        this.window.style.cssText = `
-            position: fixed;
-            width: ${this.size.width}px;
-            height: ${this.size.height}px;
-            background: #2d2d2d;
-            border: 1px solid #444;
-            border-radius: 8px;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-            z-index: ${FloatingCodeEditor.nextZIndex++};
-        `;
+        this.window.className = 'floating-code-editor pt-window';
+        this.window.style.width = `${this.size.width}px`;
+        this.window.style.height = `${this.size.height}px`;
+        this.window.style.zIndex = FloatingCodeEditor.nextZIndex++;
 
         // Position the window
         if (this.position) {
@@ -68,118 +65,98 @@ export class FloatingCodeEditor {
             this.window.style.left = adjusted.left + 'px';
             this.window.style.top = adjusted.top + 'px';
         } else {
-            // Center the window initially with slight offset for each new instance
-            const offset = (FloatingCodeEditor.instances.length * 30) % 200;
-            this.window.style.left = `calc(50% - ${this.size.width / 2}px + ${offset}px)`;
-            this.window.style.top = `calc(50% - ${this.size.height / 2}px + ${offset}px)`;
+            // Center the window with a slight cascade for each new instance
+            const offset = (FloatingCodeEditor.instances.length * 28) % 196;
+            const left = Math.max(12, Math.round((window.innerWidth - this.size.width) / 2) + offset);
+            const top = Math.max(56, Math.round((window.innerHeight - this.size.height) / 2) + offset);
+            this.window.style.left = left + 'px';
+            this.window.style.top = top + 'px';
         }
 
         // Title bar
         const titleBar = document.createElement('div');
-        titleBar.className = 'floating-editor-titlebar';
-        titleBar.style.cssText = `
-            background: #1e1e1e;
-            padding: 10px 15px;
-            border-bottom: 1px solid #444;
-            border-radius: 8px 8px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: move;
-            user-select: none;
-        `;
+        titleBar.className = 'floating-editor-titlebar pt-window-titlebar';
 
+        const titleIcon = iconEl(this.readOnly ? 'file' : 'code');
         const titleText = document.createElement('div');
+        titleText.className = 'pt-window-title';
         titleText.textContent = this.title;
-        titleText.style.cssText = 'color: #fff; font-size: 14px; font-weight: 600;';
+        const dirtyDot = document.createElement('span');
+        dirtyDot.className = 'pt-window-dirty';
+        dirtyDot.title = 'Unsaved changes';
+        const langBadge = document.createElement('span');
+        langBadge.className = 'pt-badge';
+        langBadge.textContent = this.readOnly ? `${this.language} · read-only` : this.language;
+        const spacer = document.createElement('span');
+        spacer.className = 'pt-window-spacer';
 
         this.buttonGroup = document.createElement('div');
-        this.buttonGroup.style.cssText = 'display: flex; gap: 8px;';
+        this.buttonGroup.className = 'pt-window-actions';
 
-        // Create button references for editable editors
+        const mkBtn = (label, variant, onClick) => {
+            const b = document.createElement('button');
+            b.className = `pt-btn pt-btn--sm${variant ? ` pt-btn--${variant}` : ''}`;
+            b.textContent = label;
+            b.addEventListener('click', onClick);
+            return b;
+        };
+
+        const mkClose = (label) => {
+            const b = document.createElement('button');
+            b.className = 'pt-icon-btn';
+            b.setAttribute('data-tip', label);
+            b.setAttribute('aria-label', label);
+            b.appendChild(iconEl('close'));
+            b.addEventListener('click', () => this.requestClose());
+            return b;
+        };
+
         if (this.onSave && !this.readOnly) {
-            // Create Revert button
-            this.revertBtn = document.createElement('button');
-            this.revertBtn.textContent = 'Revert';
-            this.revertBtn.style.cssText = `
-                background: #444;
-                border: none;
-                color: #fff;
-                font-size: 13px;
-                cursor: pointer;
-                padding: 6px 12px;
-                border-radius: 4px;
-                display: none;
-            `;
-            this.revertBtn.addEventListener('mouseenter', () => this.revertBtn.style.background = '#555');
-            this.revertBtn.addEventListener('mouseleave', () => this.revertBtn.style.background = '#444');
-            this.revertBtn.addEventListener('click', () => this.revert());
-
-            // Create Save button
-            this.saveBtn = document.createElement('button');
-            this.saveBtn.textContent = this.saveButtonLabel;
-            this.saveBtn.style.cssText = `
-                background: #007acc;
-                border: none;
-                color: #fff;
-                font-size: 13px;
-                cursor: pointer;
-                padding: 6px 12px;
-                border-radius: 4px;
-                display: none;
-            `;
-            this.saveBtn.addEventListener('mouseenter', () => this.saveBtn.style.background = '#005a9e');
-            this.saveBtn.addEventListener('mouseleave', () => this.saveBtn.style.background = '#007acc');
-            this.saveBtn.addEventListener('click', () => this.save());
-
-            // Create Close button
-            this.closeBtn = document.createElement('button');
-            this.closeBtn.textContent = this.closeButtonLabel;
-            this.closeBtn.style.cssText = `
-                background: #444;
-                border: none;
-                color: #fff;
-                font-size: 13px;
-                cursor: pointer;
-                padding: 6px 12px;
-                border-radius: 4px;
-            `;
-            this.closeBtn.addEventListener('mouseenter', () => this.closeBtn.style.background = '#555');
-            this.closeBtn.addEventListener('mouseleave', () => this.closeBtn.style.background = '#444');
-            this.closeBtn.addEventListener('click', () => this.close());
+            this.revertBtn = mkBtn('Revert', 'ghost', () => this.revert());
+            this.saveBtn = mkBtn(this.saveButtonLabel, 'primary', () => this.save());
+            this.saveBtn.setAttribute('data-tip', this.saveButtonLabel);
+            this.saveBtn.setAttribute('data-kbd', '⌘S');
+            this.closeBtn = mkClose(this.closeButtonLabel);
 
             this.buttonGroup.appendChild(this.revertBtn);
             this.buttonGroup.appendChild(this.saveBtn);
             this.buttonGroup.appendChild(this.closeBtn);
         } else {
-            // For read-only editors, just show close button
-            const closeBtn = document.createElement('button');
-            closeBtn.textContent = 'Close';
-            closeBtn.style.cssText = `
-                background: #444;
-                border: none;
-                color: #fff;
-                font-size: 13px;
-                cursor: pointer;
-                padding: 6px 12px;
-                border-radius: 4px;
-            `;
-            closeBtn.addEventListener('mouseenter', () => closeBtn.style.background = '#555');
-            closeBtn.addEventListener('mouseleave', () => closeBtn.style.background = '#444');
-            closeBtn.addEventListener('click', () => this.close());
-
-            this.buttonGroup.appendChild(closeBtn);
+            if (this.readOnly) {
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'pt-icon-btn';
+                copyBtn.setAttribute('data-tip', 'Copy to clipboard');
+                copyBtn.appendChild(iconEl('copy'));
+                copyBtn.addEventListener('click', () => {
+                    navigator.clipboard?.writeText(this.getValue()).then(
+                        () => UIHelpers.toast('Shader source copied', 'success'),
+                        () => UIHelpers.toast('Could not access the clipboard', 'error')
+                    );
+                });
+                this.buttonGroup.appendChild(copyBtn);
+            }
+            this.buttonGroup.appendChild(mkClose('Close'));
         }
 
-        titleBar.appendChild(titleText);
-        titleBar.appendChild(this.buttonGroup);
+        titleBar.append(titleIcon, titleText, dirtyDot, langBadge, spacer, this.buttonGroup);
 
         // Editor container
         const editorContainer = document.createElement('div');
-        editorContainer.style.cssText = 'flex: 1; overflow: hidden;';
+        editorContainer.className = 'pt-window-body';
 
-        // Assemble window (no bottom button bar)
+        // "Changed outside the editor" bar (undo / redo while there are unsaved edits)
+        this.noticeBar = document.createElement('div');
+        this.noticeBar.className = 'pt-window-notice';
+        this.noticeBar.hidden = true;
+        this.noticeBar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:12px;background:rgba(255,184,77,0.14);color:var(--pt-text,#ddd);border-bottom:1px solid rgba(255,184,77,0.35)';
+        this.noticeBar.style.display = 'none';
+        this.noticeText = document.createElement('span');
+        this.noticeText.style.flex = '1';
+        this.reloadBtn = UIHelpers.button('Reload', { size: 'sm', onClick: () => this.reloadFromSource() });
+        this.noticeBar.append(this.noticeText, this.reloadBtn);
+
         this.window.appendChild(titleBar);
+        this.window.appendChild(this.noticeBar);
         this.window.appendChild(editorContainer);
 
         // Initialize code editor
@@ -191,6 +168,15 @@ export class FloatingCodeEditor {
         });
         this.editor.mount(editorContainer);
 
+        // Cmd/Ctrl+S saves, Escape closes when clean
+        this.window.addEventListener('keydown', (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (this.onSave && !this.readOnly && this.isDirty) this.save();
+            }
+        }, true);
+
         // Make draggable
         this.makeDraggable(titleBar);
 
@@ -200,13 +186,9 @@ export class FloatingCodeEditor {
         // Focus on click
         this.window.addEventListener('mousedown', () => this.bringToFront());
 
-        // Add to document
         document.body.appendChild(this.window);
 
-        // Bring to front initially
         this.bringToFront();
-
-        // Update button visibility
         this.updateButtonVisibility();
     }
 
@@ -217,28 +199,94 @@ export class FloatingCodeEditor {
     }
 
     updateButtonVisibility() {
+        if (this.window) this.window.classList.toggle('is-dirty', !!this.isDirty && !this.isCreationMode);
         if (!this.onSave || this.readOnly) return;
 
-        if (this.isDirty) {
-            // Show [Revert] [Save], hide [Close]
-            this.revertBtn.style.display = '';
-            this.saveBtn.style.display = '';
-            this.closeBtn.style.display = 'none';
-        } else {
-            // Hide [Revert] [Save], show [Close]
-            this.revertBtn.style.display = 'none';
-            this.saveBtn.style.display = 'none';
-            this.closeBtn.style.display = '';
+        // [Revert] [Save] appear while there are unsaved edits; [x] is always available
+        this.revertBtn.hidden = !this.isDirty || this.isCreationMode;
+        this.saveBtn.hidden = !this.isDirty;
+    }
+
+    /** Close, asking first if there are unsaved edits. */
+    async requestClose() {
+        if (this.isDirty && !this.isCreationMode && this.onSave && !this.readOnly) {
+            const discard = await UIHelpers.confirm({
+                title: 'Discard unsaved changes?',
+                message: `Your edits to “${this.nodeType || this.title}” haven’t been applied.`,
+                confirmLabel: 'Discard',
+                danger: true
+            });
+            if (!discard) return;
         }
+        this.close();
     }
 
     revert() {
         this.editor.setValue(this.originalValue);
         this.isDirty = false;
+        this.hideNotice();
         this.updateButtonVisibility();
     }
 
+    /**
+     * The edited text changed outside this editor (undo / redo). Clean editor: show the
+     * new text. Unsaved edits: keep them, and say so ("Reload" takes the new text; Save
+     * applies the edits on top of it on purpose). The edited thing is gone: say so too.
+     */
+    syncFromSource() {
+        if (!this.source || this.readOnly) return;
+        let text;
+        try { text = this.source(); } catch (e) { text = null; }
+        if (text === null || text === undefined) {
+            this.showNotice('The edited node no longer exists (undo / redo).', false);
+            this.sourceGone = true;
+            return;
+        }
+        const wasGone = this.sourceGone;
+        this.sourceGone = false;
+        if (text === this.originalValue && !wasGone) {
+            if (!this.isDirty) this.hideNotice();
+            return;
+        }
+        if (!this.isDirty) {
+            this.setValue(text);
+            this.hideNotice();
+            return;
+        }
+        // Keep the user's edits; the reference (Revert / dirty check) is the new text
+        this.originalValue = text;
+        this.updateDirtyState();
+        if (this.isDirty) this.showNotice('Changed outside the editor (undo / redo). Saving applies your edits over it.', true);
+        else this.hideNotice();
+    }
+
+    reloadFromSource() {
+        let text = null;
+        try { text = this.source ? this.source() : null; } catch (e) { text = null; }
+        if (text === null || text === undefined) return;
+        this.setValue(text);
+        this.hideNotice();
+    }
+
+    showNotice(message, canReload) {
+        if (!this.noticeBar) return;
+        this.noticeText.textContent = message;
+        this.reloadBtn.hidden = !canReload;
+        this.noticeBar.hidden = false;
+        this.noticeBar.style.display = 'flex';
+    }
+
+    hideNotice() {
+        if (!this.noticeBar) return;
+        this.noticeBar.hidden = true;
+        this.noticeBar.style.display = 'none';
+    }
+
     save() {
+        if (this.sourceGone) {
+            UIHelpers.notify('The edited node no longer exists - copy your code before closing this editor.', 'warning');
+            return;
+        }
         if (this.onSave) {
             const result = this.onSave(this.editor.getValue());
 
@@ -259,82 +307,57 @@ export class FloatingCodeEditor {
         }
     }
 
+    /** Document-level move / up listeners only for the duration of one drag (no leak per window). */
+    _trackPointer(onMove) {
+        const move = (e) => onMove(e);
+        const up = () => {
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+            this._untrack = null;
+        };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+        this._untrack = up;
+    }
+
     makeDraggable(handle) {
-        let isDragging = false;
-        let currentX, currentY, initialX, initialY;
-
         handle.addEventListener('mousedown', (e) => {
-            if (e.target === handle || e.target.parentElement === handle) {
-                isDragging = true;
-                initialX = e.clientX - this.window.offsetLeft;
-                initialY = e.clientY - this.window.offsetTop;
-            }
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                e.preventDefault();
-                currentX = e.clientX - initialX;
-                currentY = e.clientY - initialY;
-
+            if (e.target.closest('button')) return;
+            const initialX = e.clientX - this.window.offsetLeft;
+            const initialY = e.clientY - this.window.offsetTop;
+            this._trackPointer((ev) => {
+                ev.preventDefault();
                 // Keep window within viewport
                 const maxX = window.innerWidth - this.window.offsetWidth;
                 const maxY = window.innerHeight - this.window.offsetHeight;
-                currentX = Math.max(0, Math.min(currentX, maxX));
-                currentY = Math.max(0, Math.min(currentY, maxY));
-
-                this.window.style.left = currentX + 'px';
-                this.window.style.top = currentY + 'px';
-            }
-        });
-
-        document.addEventListener('mouseup', () => {
-            isDragging = false;
+                const x = Math.max(0, Math.min(ev.clientX - initialX, maxX));
+                const y = Math.max(0, Math.min(ev.clientY - initialY, Math.max(0, maxY)));
+                this.window.style.left = x + 'px';
+                this.window.style.top = y + 'px';
+            });
         });
     }
 
     makeResizable() {
         const resizeHandle = document.createElement('div');
-        resizeHandle.style.cssText = `
-            position: absolute;
-            bottom: 0;
-            right: 0;
-            width: 20px;
-            height: 20px;
-            cursor: nwse-resize;
-            z-index: 1;
-        `;
-
-        let isResizing = false;
-        let startX, startY, startWidth, startHeight;
+        resizeHandle.className = 'pt-window-resize';
+        resizeHandle.appendChild(iconEl('grip'));
 
         resizeHandle.addEventListener('mousedown', (e) => {
-            isResizing = true;
-            startX = e.clientX;
-            startY = e.clientY;
-            startWidth = parseInt(this.window.style.width, 10);
-            startHeight = parseInt(this.window.style.height, 10);
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const startWidth = parseInt(this.window.style.width, 10);
+            const startHeight = parseInt(this.window.style.height, 10);
             e.preventDefault();
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (isResizing) {
-                const width = startWidth + (e.clientX - startX);
-                const height = startHeight + (e.clientY - startY);
-
+            this._trackPointer((ev) => {
+                const width = startWidth + (ev.clientX - startX);
+                const height = startHeight + (ev.clientY - startY);
                 // Min/max constraints
                 this.window.style.width = Math.max(400, Math.min(width, window.innerWidth - 40)) + 'px';
                 this.window.style.height = Math.max(300, Math.min(height, window.innerHeight - 40)) + 'px';
-
                 // Trigger editor layout update
-                if (this.editor && this.editor.layout) {
-                    this.editor.layout();
-                }
-            }
-        });
-
-        document.addEventListener('mouseup', () => {
-            isResizing = false;
+                if (this.editor && this.editor.layout) this.editor.layout();
+            });
         });
 
         this.window.appendChild(resizeHandle);
@@ -417,6 +440,9 @@ export class FloatingCodeEditor {
             FloatingCodeEditor.instances.splice(index, 1);
         }
 
+        // A drag in progress: drop its document listeners
+        if (this._untrack) this._untrack();
+
         // Dispose editor and remove window
         this.editor.dispose();
         this.window.remove();
@@ -444,6 +470,13 @@ export class FloatingCodeEditor {
             .map(editor => editor.getState());
     }
 
+    /** Bring every open editor in line with what it edits (after undo / redo). */
+    static syncAll() {
+        for (const editor of [...(FloatingCodeEditor.instances || [])]) {
+            try { editor.syncFromSource(); } catch (e) { /* ignore */ }
+        }
+    }
+
     static closeAll() {
         if (!FloatingCodeEditor.instances || FloatingCodeEditor.instances.length === 0) {
             return;
@@ -451,4 +484,12 @@ export class FloatingCodeEditor {
         const instances = [...FloatingCodeEditor.instances];
         instances.forEach(editor => editor.close());
     }
+}
+
+// Undo / redo (src/core/History.js) can change code an editor shows
+if (typeof window !== 'undefined') {
+    window.addEventListener('patchtoy:history', (e) => {
+        const a = e.detail && e.detail.action;
+        if (a === 'undo' || a === 'redo') FloatingCodeEditor.syncAll();
+    });
 }

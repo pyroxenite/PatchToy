@@ -1,0 +1,547 @@
+/* ==========================================================================
+   Project browser (src/ui/ProjectBrowser.js) + community chrome
+   Builds on the demo gallery card styles (.dg-*) in style.css.
+   ========================================================================== */
+
+.pt-modal--browser {
+    height: min(820px, calc(100vh - 48px));
+}
+.pt-modal--browser .pt-modal-body {
+    flex: 1;
+}
+
+/* Tabs + tools */
+.pb-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px 0 24px;
+    border-bottom: 1px solid var(--border);
+}
+.pb-tabs {
+    display: flex;
+    gap: 2px;
+    align-self: flex-end;
+}
+.pb-tab {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 36px;
+    padding: 0 12px;
+    color: var(--text-dim);
+    font-size: 12.5px;
+    font-weight: 600;
+    border-radius: var(--r-md) var(--r-md) 0 0;
+    transition: color 120ms, background-color 120ms;
+}
+.pb-tab:hover {
+    color: var(--text);
+    background: var(--raised);
+}
+.pb-tab:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--accent-soft);
+    color: var(--text);
+}
+.pb-tab.is-active {
+    color: var(--text);
+}
+.pb-tab.is-active::after {
+    content: "";
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: -1px;
+    height: 2px;
+    background: var(--accent);
+}
+.pb-tab.is-active .pt-i {
+    color: var(--accent);
+}
+.pb-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    padding-bottom: 8px;
+    min-width: 0;
+}
+.pb-search {
+    width: 240px;
+    max-width: 32vw;
+}
+.pb-search .pt-input {
+    height: 28px;
+}
+.pb-seg {
+    display: inline-flex;
+    padding: 2px;
+    gap: 2px;
+    border-radius: var(--r-md);
+    background: var(--well);
+    border: 1px solid var(--border);
+    flex: none;
+}
+.pb-seg-btn {
+    height: 22px;
+    padding: 0 9px;
+    border-radius: var(--r-sm);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+.pb-seg-btn:hover {
+    color: var(--text);
+}
+.pb-seg-btn.is-active {
+    color: var(--text);
+    background: var(--raised);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.pb-seg-btn:focus-visible {
+    outline: 2px solid var(--accent-soft);
+}
+
+/* Cloud cards */
+.pb-card {
+    cursor: pointer;
+    position: relative;
+}
+.pb-card-menu {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: rgba(12, 13, 17, 0.72);
+    color: var(--text);
+    opacity: 0;
+    transition: opacity 120ms;
+}
+.pb-card:hover .pb-card-menu,
+.pb-card:focus-visible .pb-card-menu,
+.pb-card:focus-within .pb-card-menu,
+.pb-card-menu.is-active {
+    opacity: 1;
+}
+.pb-vis {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    gap: 4px;
+    background: rgba(12, 13, 17, 0.78);
+}
+.pb-vis .pt-i {
+    width: 10px;
+    height: 10px;
+}
+.pb-vis.is-public {
+    color: var(--success);
+    border-color: rgba(74, 222, 128, 0.35);
+}
+.pb-vis.is-private {
+    color: var(--text-dim);
+}
+.pb-card.is-current .pb-vis {
+    top: 30px;
+}
+.dg-desc.pb-fork {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-faint);
+}
+.dg-desc.pb-fork .pt-i {
+    width: 12px;
+    height: 12px;
+    flex: none;
+}
+.pb-author {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    color: var(--text-dim);
+    text-decoration: none;
+    text-transform: none;
+    letter-spacing: 0;
+    font-family: var(--font-ui);
+    font-size: 11.5px;
+    -webkit-font-smoothing: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pb-author:hover,
+.pb-author:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
+    outline: none;
+}
+.dg-desc .pb-author {
+    font-size: 12px;
+}
+.pb-author-av {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    flex: none;
+    border-radius: 3px;
+    background: var(--avatar-bg, var(--accent-2));
+    color: var(--accent-ink);
+    font-family: var(--font-pixel);
+    font-size: 8px;
+    -webkit-font-smoothing: none;
+}
+.pb-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+.pb-stat .pt-i {
+    width: 11px;
+    height: 11px;
+}
+.pb-date {
+    margin-left: auto;
+    white-space: nowrap;
+}
+.dg-tag.pb-js {
+    margin-left: 0;
+    color: var(--warning);
+    background: var(--warning-soft);
+    border-color: rgba(251, 191, 36, 0.3);
+}
+.pb-date + .pb-js {
+    margin-left: 4px;
+}
+.pb-skeleton {
+    pointer-events: none;
+}
+
+/* Menus opened from inside the modal sit above it */
+.pt-menu.pb-menu {
+    z-index: 10060;
+}
+
+/* Empty / error / offline states */
+.pb-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 56px 24px 64px;
+    text-align: center;
+}
+.pb-state-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    margin-bottom: 4px;
+    border-radius: 12px;
+    background: var(--raised);
+    color: var(--text-dim);
+}
+.pb-state.is-error .pb-state-icon {
+    background: var(--error-soft);
+    color: var(--error);
+}
+.pb-state-title {
+    font-size: 14px;
+    font-weight: 650;
+    color: var(--text);
+}
+.pb-state-msg {
+    max-width: 440px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text-dim);
+}
+.pb-state-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+.pb-more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 18px 0 4px;
+    font-size: 12px;
+    color: var(--text-faint);
+}
+.pb-more-error {
+    color: var(--error);
+}
+.pb-sentinel {
+    height: 1px;
+}
+
+/* User page header */
+.pb-user {
+    margin-bottom: 18px;
+}
+.pb-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: -4px 0 12px -4px;
+    padding: 2px 6px 2px 2px;
+    border-radius: var(--r-sm);
+    font-size: 12px;
+    color: var(--text-dim);
+}
+.pb-back:hover,
+.pb-back:focus-visible {
+    color: var(--text);
+    background: var(--raised);
+    outline: none;
+}
+.pb-back .pt-i {
+    transform: scaleX(-1);
+}
+.pb-user-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    border-radius: var(--r-lg);
+    border: 1px solid var(--border);
+    background:
+        radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--avatar-bg, var(--accent)) 10%, transparent), transparent 60%),
+        var(--node-body);
+}
+.pb-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    flex: none;
+    border-radius: 12px;
+    background: var(--avatar-bg, var(--accent-2));
+    color: var(--accent-ink);
+    font-family: var(--font-pixel);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    -webkit-font-smoothing: none;
+    box-shadow: 0 0 0 3px var(--panel), 0 0 0 4px color-mix(in srgb, var(--avatar-bg, var(--accent-2)) 60%, transparent);
+}
+.pb-user-info {
+    min-width: 0;
+    flex: 1;
+}
+.pb-user-name {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pb-user-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-faint);
+}
+.pb-user-handle {
+    color: var(--text-dim);
+}
+.pb-user-actions {
+    display: flex;
+    gap: 8px;
+    flex: none;
+}
+
+/* "Viewing someone else's project" banner (top of the canvas) */
+.pt-viewing {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100% - 32px);
+    padding: 5px 5px 5px 12px;
+    border-radius: var(--r-lg);
+    background: rgba(20, 22, 28, 0.9);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-pop);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    font-size: 12px;
+    color: var(--text-dim);
+    animation: pt-fade-in 160ms var(--ease);
+}
+.pt-viewing-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pt-viewing-text strong {
+    color: var(--text);
+    font-weight: 650;
+}
+.pt-viewing-author {
+    color: var(--accent-2);
+    text-decoration: none;
+}
+.pt-viewing-author:hover {
+    text-decoration: underline;
+}
+.pt-viewing-fork,
+.pt-viewing-hint {
+    color: var(--text-faint);
+}
+
+/* Share dialog */
+.pt-share-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    margin-bottom: 14px;
+    border-radius: var(--r-lg);
+    border: 1px solid var(--border);
+    background: var(--node-body);
+}
+.pt-share-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: var(--r-md);
+    background: var(--raised);
+    color: var(--text-dim);
+}
+.pt-share-icon.is-public {
+    background: var(--success-soft);
+    color: var(--success);
+}
+.pt-share-text {
+    flex: 1;
+    min-width: 0;
+}
+.pt-share-title {
+    font-weight: 650;
+    color: var(--text);
+}
+.pt-share-sub {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+@media (max-width: 860px) {
+    .pb-bar {
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+    .pb-tools {
+        margin-left: 0;
+        width: 100%;
+    }
+    .pb-search {
+        flex: 1;
+        max-width: none;
+    }
+    .pt-viewing-hint {
+        display: none;
+    }
+}
+@media (max-width: 600px) {
+    .pb-tab span {
+        display: none;
+    }
+    .pb-user-row {
+        flex-wrap: wrap;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Popover presentation (top bar Open button / ⌘O): the same browser as a panel
+   anchored under the button. The host is a .pt-modal-backdrop (keeps the overlay /
+   Esc / canvas-shortcut behaviour) without the dimmed backdrop, letting clicks
+   through; ProjectBrowser.setupPopover() sizes and places the panel.
+   -------------------------------------------------------------------------- */
+.pt-modal-backdrop.pb-popover-host {
+    display: block;
+    padding: 0;
+    background: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    pointer-events: none;
+    animation: none;
+}
+.pb-popover-host .pt-modal.pb-popover {
+    position: fixed;
+    pointer-events: auto;
+    max-width: none;
+    max-height: none;
+    border-radius: 10px;
+    box-shadow: var(--shadow-pop), 0 24px 64px rgba(0, 0, 0, 0.45);
+    transform-origin: 24px 0;
+    animation: pb-pop-in 140ms var(--ease);
+}
+@keyframes pb-pop-in {
+    from { opacity: 0; transform: translateY(-4px) scale(0.985); }
+    to { opacity: 1; transform: none; }
+}
+/* Compact: no heading (the tabs say where you are), tighter bar, body and footer */
+.pb-popover .pt-modal-header {
+    display: none;
+}
+.pb-popover .pb-bar {
+    padding: 10px 14px 0 16px;
+    gap: 12px;
+}
+.pb-popover .pb-search {
+    width: 200px;
+}
+.pb-popover .pt-modal-body.dg-body {
+    padding: 14px 16px 16px;
+}
+.pb-popover .dg-grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+}
+.pb-popover.pt-modal--gallery .pt-modal-footer {
+    padding: 8px 12px 8px 16px;
+}
+.pb-popover .pb-state {
+    padding-top: 28px;
+}
+.pb-file-btn {
+    white-space: nowrap;
+}
+/* "Publish to Community" on a 1.x API (greyed out, its hint says why) */
+.pt-menu-item.pb-needs-v2:disabled {
+    cursor: help;
+    pointer-events: auto;
+}
+.pt-share-status .pb-needs-v2-wrap {
+    display: inline-flex;
+    cursor: help;
+}
+@media (prefers-reduced-motion: reduce) {
+    .pb-popover-host .pt-modal.pb-popover { animation: none; }
+}
+/* The popover isn't modal: toasts (e.g. "Link only" after a card action) stay above it */
+body:has(.pb-popover-host) .pt-toasts {
+    z-index: 10055;
+}

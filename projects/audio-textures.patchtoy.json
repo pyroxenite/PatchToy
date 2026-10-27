@@ -1,0 +1,1523 @@
+{
+  "name": "Audio Textures",
+  "description": "Audio textures demo: a synthwave visualiser built from the three audio textures. The spectrum (u_spectrum) as a slowly spinning ring of polar bars with falling peak caps around a striped retro sun, the waveform (u_waveform) as a trigger-aligned oscilloscope line on the horizon, and the spectrogram (an Audio Texture node, 256 bins x 4 s ring buffer) as a perspective floor that scrolls toward you, lows down the middle, with a grid that moves with the history. HDR composite, two-level bloom through Feedback render targets, ACES tonemap, vignette and grain. Mic / file / tab audio drive it live; the metronome plays a deterministic synthetic mix (headless renders); audio off = flat. Parameters panel: horizon, ring centre / radius / bar length / bars / spin / brightness, wave height / thickness / brightness, floor spread / glow, colours, bloom, exposure.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T13:18:06.323Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 0,
+        "type": "Comment",
+        "x": 80,
+        "y": -398,
+        "data": {
+          "text": "# Audio Textures\nA synthwave visualiser built from the three audio textures: the spectrum as a ring of polar bars around a striped sun, the waveform as an oscilloscope line on the horizon, and the spectrogram (the last 4 s of spectra) as a floor that scrolls toward you in perspective, lows down the middle. HDR composite, two-level bloom, ACES tonemap.\nPlay music: open the audio menu \u2192 Mic, a file or tab audio. With the metronome it plays a deterministic synthetic mix (kick, bass line, Am-F-C-G chords, snare, hats), so it also renders headless; with audio off the bars, line and floor go flat.\n## How it is wired\n- Circular Spectrum and Waveform Line read the global u_spectrum / u_waveform (no wiring needed).\n- Floor UV maps the floor to spectrogram coordinates (x = time, y = frequency) and feeds an Audio Texture (kind spectrogram) uv input; its value is the floor brightness.\n- Bright pass \u2192 two Feedback render targets (320x200, 96x60) \u2192 blur \u2192 added back.\n## Tweak it\nPress P: Scene, Ring, Waveform, Floor, Colour and Post settings.",
+          "width": 440,
+          "height": 430,
+          "color": "orange"
+        }
+      },
+      {
+        "id": 1,
+        "type": "Comment",
+        "x": 80,
+        "y": -78,
+        "data": {
+          "text": "## Spectrum ring\nCircular Spectrum around the ring centre, slowly spinning (mirrored: lows at the top). Its mask / cap / level / ring outputs are coloured in Audio Compose.",
+          "width": 300,
+          "height": 110,
+          "color": "pink"
+        }
+      },
+      {
+        "id": 2,
+        "type": "Comment",
+        "x": 80,
+        "y": -64,
+        "data": {
+          "text": "## Waveform horizon\nWaveform Line centred on the horizon (uv.y = horizon * 0.5 + 0.5): a trigger-aligned oscilloscope.",
+          "width": 300,
+          "height": 96,
+          "color": "green"
+        }
+      },
+      {
+        "id": 3,
+        "type": "Comment",
+        "x": 80,
+        "y": -88,
+        "data": {
+          "text": "## Spectrogram floor\nFloor UV \u2192 Audio Texture (spectrogram, 256 bins, 4 s) uv. The newest row is at the bottom edge, the oldest at the horizon; the grid scrolls with the history.",
+          "width": 320,
+          "height": 120,
+          "color": "violet"
+        }
+      },
+      {
+        "id": 4,
+        "type": "Comment",
+        "x": 80,
+        "y": -64,
+        "data": {
+          "text": "## Bloom\nBright pass (luma smoothstep) into two Feedback render targets, blurred and added to the HDR frame before the ACES tonemap.",
+          "width": 320,
+          "height": 96,
+          "color": "gray"
+        }
+      },
+      {
+        "id": 5,
+        "type": "CenteredUV",
+        "x": 80,
+        "y": 282,
+        "data": {}
+      },
+      {
+        "id": 6,
+        "type": "Time",
+        "x": 80,
+        "y": 432,
+        "data": {}
+      },
+      {
+        "id": 7,
+        "type": "Audio",
+        "x": 80,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 8,
+        "type": "Param",
+        "x": 340,
+        "y": 80,
+        "data": {
+          "label": "Horizon",
+          "kind": "float",
+          "value": -0.05,
+          "default": -0.05,
+          "min": -0.6,
+          "max": 0.5,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Scene",
+          "order": 0,
+          "description": "Height of the horizon (centred coordinates, -1 bottom .. 1 top)."
+        }
+      },
+      {
+        "id": 9,
+        "type": "Param",
+        "x": 80,
+        "y": 200,
+        "data": {
+          "label": "Ring centre",
+          "kind": "vec2",
+          "value": [
+            0,
+            0.38
+          ],
+          "default": [
+            0,
+            0.38
+          ],
+          "min": -1,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Ring",
+          "order": 1,
+          "description": "Centre of the spectrum ring and the sun (centred coordinates)."
+        }
+      },
+      {
+        "id": 10,
+        "type": "Param",
+        "x": 338,
+        "y": 80,
+        "data": {
+          "label": "Ring radius",
+          "kind": "float",
+          "value": 0.27,
+          "default": 0.27,
+          "min": 0.05,
+          "max": 0.6,
+          "step": 0.005,
+          "scale": "linear",
+          "section": "Ring",
+          "order": 2,
+          "description": "Inner radius of the ring (and the sun)."
+        }
+      },
+      {
+        "id": 11,
+        "type": "Param",
+        "x": 338,
+        "y": 278,
+        "data": {
+          "label": "Bar length",
+          "kind": "float",
+          "value": 0.3,
+          "default": 0.3,
+          "min": 0,
+          "max": 0.8,
+          "step": 0.005,
+          "scale": "linear",
+          "section": "Ring",
+          "order": 3,
+          "description": "Length of a bar at full level."
+        }
+      },
+      {
+        "id": 12,
+        "type": "Param",
+        "x": 338,
+        "y": 476,
+        "data": {
+          "label": "Bars",
+          "kind": "float",
+          "value": 96,
+          "default": 96,
+          "min": 16,
+          "max": 200,
+          "step": 1,
+          "scale": "linear",
+          "section": "Ring",
+          "order": 4,
+          "description": "Number of bars around the ring."
+        }
+      },
+      {
+        "id": 13,
+        "type": "Param",
+        "x": 80,
+        "y": 356,
+        "data": {
+          "label": "Spin",
+          "kind": "float",
+          "value": 0.01,
+          "default": 0.01,
+          "min": -0.2,
+          "max": 0.2,
+          "step": 0.001,
+          "scale": "linear",
+          "section": "Ring",
+          "order": 5,
+          "description": "Ring rotation in turns per second."
+        }
+      },
+      {
+        "id": 14,
+        "type": "Param",
+        "x": 596,
+        "y": 143,
+        "data": {
+          "label": "Ring brightness",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Ring",
+          "order": 6,
+          "description": "Brightness of the bars, caps and ring line."
+        }
+      },
+      {
+        "id": 15,
+        "type": "Param",
+        "x": 218,
+        "y": 83,
+        "data": {
+          "label": "Wave height",
+          "kind": "float",
+          "value": 0.07,
+          "default": 0.07,
+          "min": 0,
+          "max": 0.3,
+          "step": 0.001,
+          "scale": "linear",
+          "section": "Waveform",
+          "order": 7,
+          "description": "Amplitude of the waveform line (screen heights)."
+        }
+      },
+      {
+        "id": 16,
+        "type": "Param",
+        "x": 218,
+        "y": 281,
+        "data": {
+          "label": "Wave thickness",
+          "kind": "float",
+          "value": 0.0022,
+          "default": 0.0022,
+          "min": 0.0005,
+          "max": 0.01,
+          "step": 0.0001,
+          "scale": "linear",
+          "section": "Waveform",
+          "order": 8,
+          "description": "Half width of the line (screen heights)."
+        }
+      },
+      {
+        "id": 17,
+        "type": "Param",
+        "x": 476,
+        "y": 80,
+        "data": {
+          "label": "Wave brightness",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Waveform",
+          "order": 9,
+          "description": "Brightness of the line and its glow."
+        }
+      },
+      {
+        "id": 18,
+        "type": "Param",
+        "x": 80,
+        "y": 224,
+        "data": {
+          "label": "Floor spread",
+          "kind": "float",
+          "value": 1.9,
+          "default": 1.9,
+          "min": 0.5,
+          "max": 8,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Floor",
+          "order": 10,
+          "description": "How wide the frequency axis is spread across the floor."
+        }
+      },
+      {
+        "id": 19,
+        "type": "Param",
+        "x": 578,
+        "y": 80,
+        "data": {
+          "label": "Floor glow",
+          "kind": "float",
+          "value": 2,
+          "default": 2,
+          "min": 0,
+          "max": 4,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Floor",
+          "order": 11,
+          "description": "Brightness of the spectrogram floor."
+        }
+      },
+      {
+        "id": 20,
+        "type": "Param",
+        "x": 340,
+        "y": 475,
+        "data": {
+          "label": "Colour A",
+          "kind": "color",
+          "value": [
+            0.08,
+            0.85,
+            1
+          ],
+          "default": [
+            0.08,
+            0.85,
+            1
+          ],
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Colour",
+          "order": 12,
+          "description": "Cool colour: quiet levels, ring line, waveform.",
+          "alpha": false
+        }
+      },
+      {
+        "id": 21,
+        "type": "Param",
+        "x": 340,
+        "y": 607,
+        "data": {
+          "label": "Colour B",
+          "kind": "color",
+          "value": [
+            1,
+            0.16,
+            0.72
+          ],
+          "default": [
+            1,
+            0.16,
+            0.72
+          ],
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Colour",
+          "order": 13,
+          "description": "Hot colour: loud levels and the sun.",
+          "alpha": false
+        }
+      },
+      {
+        "id": 22,
+        "type": "Param",
+        "x": 80,
+        "y": 225,
+        "data": {
+          "label": "Bloom",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 4,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 14,
+          "description": "Bloom strength (both levels)."
+        }
+      },
+      {
+        "id": 23,
+        "type": "Param",
+        "x": 854,
+        "y": 183,
+        "data": {
+          "label": "Exposure",
+          "kind": "float",
+          "value": 1.15,
+          "default": 1.15,
+          "min": 0.2,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 15,
+          "description": "ACES tonemap exposure."
+        }
+      },
+      {
+        "id": 24,
+        "type": "Subtract",
+        "x": 338,
+        "y": 194,
+        "data": {}
+      },
+      {
+        "id": 25,
+        "type": "Multiply",
+        "x": 338,
+        "y": 392,
+        "data": {}
+      },
+      {
+        "id": 26,
+        "type": "CircularSpectrum",
+        "x": 596,
+        "y": 257,
+        "data": {
+          "radius": 0.4,
+          "height": 0.35,
+          "bars": 96,
+          "gap": 0.35,
+          "rotation": 0,
+          "mirror": 1,
+          "amount": 1,
+          "p": "pt_centeredUV()",
+          "tex": "u_spectrum"
+        }
+      },
+      {
+        "id": 27,
+        "type": "Multiply",
+        "x": 80,
+        "y": 197,
+        "data": {
+          "b": 0.5
+        }
+      },
+      {
+        "id": 28,
+        "type": "Add",
+        "x": 218,
+        "y": 197,
+        "data": {
+          "b": 0.5
+        }
+      },
+      {
+        "id": 29,
+        "type": "WaveformLine",
+        "x": 476,
+        "y": 194,
+        "data": {
+          "center": 0.5,
+          "gain": 0.3,
+          "thickness": 0.004,
+          "amount": 1,
+          "uv": "pt_uvStretch()",
+          "tex": "u_waveform"
+        }
+      },
+      {
+        "id": 30,
+        "type": "Float",
+        "x": 80,
+        "y": 338,
+        "data": {
+          "value": 1,
+          "useUniform": false
+        }
+      },
+      {
+        "id": 31,
+        "type": "Float",
+        "x": 578,
+        "y": 482,
+        "data": {
+          "value": 4,
+          "useUniform": false
+        }
+      },
+      {
+        "id": 32,
+        "type": "FloorUV",
+        "x": 338,
+        "y": 248,
+        "data": {}
+      },
+      {
+        "id": 33,
+        "type": "AudioTexture",
+        "x": 578,
+        "y": 194,
+        "data": {
+          "kind": "spectrogram",
+          "bins": 256,
+          "scale": "log",
+          "smoothing": 0.3,
+          "history": 4
+        }
+      },
+      {
+        "id": 34,
+        "type": "FloorShade",
+        "x": 844,
+        "y": 226,
+        "data": {}
+      },
+      {
+        "id": 35,
+        "type": "Multiply",
+        "x": 80,
+        "y": 262,
+        "data": {
+          "b": 0.93
+        }
+      },
+      {
+        "id": 36,
+        "type": "AudioSky",
+        "x": 320,
+        "y": 89,
+        "data": {}
+      },
+      {
+        "id": 37,
+        "type": "AudioCompose",
+        "x": 1228,
+        "y": 236,
+        "data": {}
+      },
+      {
+        "id": 38,
+        "type": "Grayscale",
+        "x": 1112,
+        "y": 166,
+        "data": {
+          "amount": 1,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 39,
+        "type": "Smoothstep",
+        "x": 1352,
+        "y": 122,
+        "data": {
+          "edge0": 0.75,
+          "edge1": 2,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 40,
+        "type": "Multiply",
+        "x": 1592,
+        "y": 160,
+        "data": {}
+      },
+      {
+        "id": 41,
+        "type": "Vec3ToVec4",
+        "x": 1832,
+        "y": 166,
+        "data": {}
+      },
+      {
+        "id": 42,
+        "type": "Feedback",
+        "x": 80,
+        "y": 131,
+        "data": {
+          "width": 320,
+          "height": 200,
+          "format": "rgba16f",
+          "filter": "linear",
+          "keepRunning": false
+        }
+      },
+      {
+        "id": 43,
+        "type": "Feedback",
+        "x": 80,
+        "y": 339,
+        "data": {
+          "width": 96,
+          "height": 60,
+          "format": "rgba16f",
+          "filter": "linear",
+          "keepRunning": false
+        }
+      },
+      {
+        "id": 44,
+        "type": "TextureBlur",
+        "x": 338,
+        "y": 80,
+        "data": {
+          "radius": 1.5,
+          "amount": 1,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 45,
+        "type": "TextureBlur",
+        "x": 338,
+        "y": 324,
+        "data": {
+          "radius": 1.5,
+          "amount": 1,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 46,
+        "type": "Multiply",
+        "x": 578,
+        "y": 198,
+        "data": {}
+      },
+      {
+        "id": 47,
+        "type": "Multiply",
+        "x": 338,
+        "y": 240,
+        "data": {
+          "b": 1.6
+        }
+      },
+      {
+        "id": 48,
+        "type": "Multiply",
+        "x": 578,
+        "y": 282,
+        "data": {}
+      },
+      {
+        "id": 49,
+        "type": "Add",
+        "x": 716,
+        "y": 240,
+        "data": {}
+      },
+      {
+        "id": 50,
+        "type": "Add",
+        "x": 854,
+        "y": 297,
+        "data": {}
+      },
+      {
+        "id": 51,
+        "type": "TonemapACES",
+        "x": 1112,
+        "y": 282,
+        "data": {
+          "exposure": 1,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 52,
+        "type": "Vignette",
+        "x": 1352,
+        "y": 260,
+        "data": {
+          "radius": 0.95,
+          "softness": 0.7,
+          "amount": 1,
+          "color": "vec3(1.0)",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 53,
+        "type": "Grain",
+        "x": 1592,
+        "y": 244,
+        "data": {
+          "intensity": 0.025,
+          "amount": 1,
+          "color": "vec3(1.0)",
+          "t": "u_time"
+        }
+      },
+      {
+        "id": 54,
+        "type": "Vec3ToVec4",
+        "x": 1832,
+        "y": 282,
+        "data": {}
+      },
+      {
+        "id": 55,
+        "type": "Preview",
+        "x": 1898,
+        "y": 276,
+        "data": {},
+        "width": 300,
+        "height": 219.5,
+        "isBackground": false
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 24,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 24,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 13,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 24,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 11,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 12,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 27,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 27,
+        "fromOutput": 0,
+        "toId": 28,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 28,
+        "fromOutput": 0,
+        "toId": 29,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 29,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 16,
+        "fromOutput": 0,
+        "toId": 29,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 32,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 32,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 30,
+        "fromOutput": 0,
+        "toId": 32,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 32,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 0,
+        "toId": 33,
+        "toInput": 0,
+        "swizzle": ".xy"
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 0,
+        "toId": 34,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 33,
+        "fromOutput": 1,
+        "toId": 34,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 0,
+        "toId": 34,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 34,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 34,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 31,
+        "fromOutput": 0,
+        "toId": 34,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 35,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 35,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 1,
+        "toId": 36,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 4,
+        "toId": 36,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 36,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 34,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 37,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 2,
+        "toId": 37,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 3,
+        "toId": 37,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 1,
+        "toId": 37,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 8,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 9,
+        "swizzle": null
+      },
+      {
+        "fromId": 14,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 10,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 11,
+        "swizzle": null
+      },
+      {
+        "fromId": 37,
+        "fromOutput": 0,
+        "toId": 38,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 38,
+        "fromOutput": 1,
+        "toId": 39,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 37,
+        "fromOutput": 0,
+        "toId": 40,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 39,
+        "fromOutput": 0,
+        "toId": 40,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 40,
+        "fromOutput": 0,
+        "toId": 41,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 41,
+        "fromOutput": 0,
+        "toId": 42,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 41,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 42,
+        "fromOutput": 0,
+        "toId": 44,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 43,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 44,
+        "fromOutput": 0,
+        "toId": 46,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 46,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 47,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 45,
+        "fromOutput": 0,
+        "toId": 48,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 47,
+        "fromOutput": 0,
+        "toId": 48,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 46,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 48,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 37,
+        "fromOutput": 0,
+        "toId": 50,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 49,
+        "fromOutput": 0,
+        "toId": 50,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 50,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 23,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 51,
+        "fromOutput": 0,
+        "toId": 52,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 52,
+        "fromOutput": 0,
+        "toId": 53,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 53,
+        "fromOutput": 0,
+        "toId": 54,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 54,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 0,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 56,
+    "panX": 15.206798866855522,
+    "panY": 347.2974504249292,
+    "zoom": 0.509915014164306,
+    "groups": [
+      {
+        "id": "g1",
+        "name": "Spectrum Ring",
+        "parentId": null,
+        "nodeIds": [
+          1,
+          24,
+          25,
+          26,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "x": 340,
+        "y": 213,
+        "color": "color"
+      },
+      {
+        "id": "g2",
+        "name": "Waveform Horizon",
+        "parentId": null,
+        "nodeIds": [
+          2,
+          27,
+          28,
+          29,
+          15,
+          16,
+          17
+        ],
+        "x": 782,
+        "y": 101,
+        "color": "source"
+      },
+      {
+        "id": "g3",
+        "name": "Spectrogram Floor",
+        "parentId": null,
+        "nodeIds": [
+          3,
+          30,
+          31,
+          32,
+          33,
+          34,
+          18,
+          19
+        ],
+        "x": 782,
+        "y": 529,
+        "color": "sdf3d"
+      },
+      {
+        "id": "g4",
+        "name": "Sky and Sun",
+        "parentId": null,
+        "nodeIds": [
+          35,
+          36,
+          7
+        ],
+        "x": 782,
+        "y": 282,
+        "color": "uv"
+      },
+      {
+        "id": "g5",
+        "name": "Bloom and Post",
+        "parentId": null,
+        "nodeIds": [
+          4,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          22,
+          23
+        ],
+        "x": 1488,
+        "y": 334,
+        "color": "effect"
+      }
+    ]
+  },
+  "customNodes": {
+    "FloorUV": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "p",
+          "type": "vec2",
+          "paramName": "p"
+        },
+        {
+          "name": "horizon",
+          "type": "float",
+          "paramName": "horizon"
+        },
+        {
+          "name": "height",
+          "type": "float",
+          "paramName": "height"
+        },
+        {
+          "name": "spread",
+          "type": "float",
+          "paramName": "spread"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec4"
+        }
+      ],
+      "customGLSL": "// @node floorUV\n// @title Floor UV\n// @category custom\n// @description Perspective floor below the horizon, mapped to spectrogram coordinates: x = time (1 = now at the bottom edge, 0 = the oldest row at the horizon), y = frequency (lows down the middle, highs to the sides, mirrored). z = floor mask, w = depth 0 (near) .. 1 (far). Wire .xy into an Audio Texture (spectrogram) uv input.\nvec4 floorUV(vec2 p, float horizon, float height, float spread) {\n    float d = horizon - p.y;\n    if (d <= 0.0) return vec4(0.0, 0.0, 0.0, 1.0);\n    float zNear = height / (horizon + 1.0);\n    float zFar = 14.0 * height;\n    float z = height / d;\n    float depth = clamp((z - zNear) / (zFar - zNear), 0.0, 1.0);\n    float x = p.x * z;\n    float freq = clamp(abs(x) / max(spread, 0.01), 0.0, 1.0);\n    float mask = smoothstep(0.0, 0.015, d);\n    return vec4(1.0 - depth, freq, mask, depth);\n}\n"
+    },
+    "FloorShade": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "f",
+          "type": "vec4",
+          "paramName": "f"
+        },
+        {
+          "name": "level",
+          "type": "float",
+          "paramName": "level"
+        },
+        {
+          "name": "colorA",
+          "type": "vec3",
+          "paramName": "colorA"
+        },
+        {
+          "name": "colorB",
+          "type": "vec3",
+          "paramName": "colorB"
+        },
+        {
+          "name": "glow",
+          "type": "float",
+          "paramName": "glow"
+        },
+        {
+          "name": "history",
+          "type": "float",
+          "paramName": "history"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "// @node floorShade\n// @title Floor Shade\n// @category custom\n// @description Shades the spectrogram floor: level (Audio Texture value) through a two-colour heat ramp with white-hot peaks, a grid that scrolls toward the viewer with the history (lines every half second and every 1/16 of the frequency axis), fog to the horizon. f = Floor UV output.\nvec3 floorShade(vec4 f, float level, vec3 colorA, vec3 colorB, float glow, float history) {\n    if (f.z <= 0.0) return vec3(0.0);\n    float v = smoothstep(0.24, 0.95, clamp(level, 0.0, 1.0));\n    vec3 heat = mix(colorA, colorB, smoothstep(0.1, 0.65, v)) * v * v * glow * 1.3;\n    heat += vec3(1.0, 0.95, 0.9) * smoothstep(0.75, 1.0, v) * 0.7 * glow;\n    float age = (1.0 - f.x) * history;\n    float tt = (u_time - age) * 2.0;\n    float ff = f.y * 16.0;\n    float lt = abs(fract(tt) - 0.5);\n    float lf = abs(fract(ff) - 0.5);\n    float gt = smoothstep(0.5 - 1.5 * fwidth(tt), 0.5, lt);\n    float gf = smoothstep(0.5 - 1.5 * fwidth(ff), 0.5, lf);\n    float grid = max(gt, gf) * (0.45 + 0.8 * v);\n    float fade = pow(1.0 - f.w, 1.4);\n    vec3 haze = mix(colorA, colorB, 0.5) * 0.035 * smoothstep(0.5, 1.0, f.w);\n    return ((heat + grid * mix(colorA, colorB, 0.3) * 0.3) * fade + haze) * f.z;\n}\n"
+    },
+    "AudioSky": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "p",
+          "type": "vec2",
+          "paramName": "p"
+        },
+        {
+          "name": "horizon",
+          "type": "float",
+          "paramName": "horizon"
+        },
+        {
+          "name": "sunC",
+          "type": "vec2",
+          "paramName": "sunC"
+        },
+        {
+          "name": "sunR",
+          "type": "float",
+          "paramName": "sunR"
+        },
+        {
+          "name": "colorA",
+          "type": "vec3",
+          "paramName": "colorA"
+        },
+        {
+          "name": "colorB",
+          "type": "vec3",
+          "paramName": "colorB"
+        },
+        {
+          "name": "bass",
+          "type": "float",
+          "paramName": "bass"
+        },
+        {
+          "name": "kick",
+          "type": "float",
+          "paramName": "kick"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "// @node audioSky\n// @title Audio Sky\n// @category custom\n// @description Night sky above the horizon: deep gradient, a coloured glow band on the horizon that swells with the bass, twinkling stars, and a striped retro sun behind the ring centre (radius sunR) that flashes on the kick.\nvec3 audioSky(vec2 p, float horizon, vec2 sunC, float sunR, vec3 colorA, vec3 colorB, float bass, float kick) {\n    float h = p.y - horizon;\n    vec3 col = mix(vec3(0.05, 0.015, 0.08), vec3(0.004, 0.006, 0.02), smoothstep(0.0, 1.0, h)) * step(0.0, h);\n    col += mix(colorB, colorA, 0.3) * 0.14 * exp(-(h > 0.0 ? h * 7.0 : -h * 40.0)) * (0.5 + 0.8 * bass);\n    vec2 g = floor(p * 70.0);\n    float r = fract(sin(dot(g, vec2(12.9898, 78.233))) * 43758.5453);\n    vec2 c = fract(p * 70.0) - 0.5 - (vec2(fract(r * 13.7), fract(r * 7.3)) - 0.5) * 0.6;\n    float star = step(0.97, r) * smoothstep(0.12, 0.0, length(c)) * smoothstep(0.02, 0.3, h) * 1.6;\n    col += star * (0.5 + 0.5 * sin(u_time * 2.3 + r * 60.0)) * vec3(0.8, 0.85, 1.0);\n    float d = length(p - sunC);\n    float sun = smoothstep(sunR, sunR - 0.006, d);\n    float yy = (p.y - sunC.y) / sunR;\n    float stripes = step(0.0, sin((yy + u_time * 0.05) * 40.0 + 1.0)) + step(0.15, yy);\n    sun *= clamp(stripes, 0.0, 1.0);\n    vec3 sunCol = mix(colorB * 1.2, vec3(1.0, 0.75, 0.35), smoothstep(-0.9, 0.8, yy));\n    col += sun * sunCol * (0.55 + 0.6 * kick) * step(0.0, h);\n    col += sunCol * 0.18 * exp(-max(d - sunR, 0.0) * 9.0) * step(0.0, h) * (0.6 + 0.6 * kick);\n    return col;\n}\n"
+    },
+    "AudioCompose": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "sky",
+          "type": "vec3",
+          "paramName": "sky"
+        },
+        {
+          "name": "floorCol",
+          "type": "vec3",
+          "paramName": "floorCol"
+        },
+        {
+          "name": "ringMask",
+          "type": "float",
+          "paramName": "ringMask"
+        },
+        {
+          "name": "ringCap",
+          "type": "float",
+          "paramName": "ringCap"
+        },
+        {
+          "name": "ringLevel",
+          "type": "float",
+          "paramName": "ringLevel"
+        },
+        {
+          "name": "ringLine",
+          "type": "float",
+          "paramName": "ringLine"
+        },
+        {
+          "name": "waveLine",
+          "type": "float",
+          "paramName": "waveLine"
+        },
+        {
+          "name": "waveGlow",
+          "type": "float",
+          "paramName": "waveGlow"
+        },
+        {
+          "name": "colorA",
+          "type": "vec3",
+          "paramName": "colorA"
+        },
+        {
+          "name": "colorB",
+          "type": "vec3",
+          "paramName": "colorB"
+        },
+        {
+          "name": "ringGain",
+          "type": "float",
+          "paramName": "ringGain"
+        },
+        {
+          "name": "waveGain",
+          "type": "float",
+          "paramName": "waveGain"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "// @node audioCompose\n// @title Audio Compose\n// @category custom\n// @description Layers the visualiser in HDR: sky, the spectrogram floor, the waveform line on the horizon (core + glow) and the circular spectrum (bars coloured by level, white peak caps, inner ring line). Wire the Circular Spectrum outputs (mask, cap, level, ring) and the Waveform Line outputs (line, glow).\nvec3 audioCompose(vec3 sky, vec3 floorCol, float ringMask, float ringCap, float ringLevel, float ringLine, float waveLine, float waveGlow, vec3 colorA, vec3 colorB, float ringGain, float waveGain) {\n    vec3 col = sky + floorCol;\n    vec3 barCol = mix(colorA, colorB, smoothstep(0.15, 0.9, ringLevel));\n    col = mix(col, barCol * (0.7 + 1.8 * ringLevel) * ringGain, ringMask);\n    col += vec3(1.0, 0.95, 0.9) * ringCap * 1.5 * ringGain;\n    col += colorA * ringLine * 0.9 * ringGain;\n    vec3 wc = mix(colorA, vec3(1.0), 0.4);\n    col += (wc * waveLine * 1.7 + colorA * waveGlow * 0.3) * waveGain;\n    return col;\n}\n"
+    }
+  },
+  "editorStates": []
+}

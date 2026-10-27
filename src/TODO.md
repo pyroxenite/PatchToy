@@ -1,6 +1,6 @@
 # TODO
- - Feedback node may be broken
- - Swizzles sometimes don't have an effect on the produced GLSL code (check if it's still the case)
+ - ~~Feedback node may be broken~~ fixed: TextureSample defaulted to an undeclared `v_uv`, feedback shaders were never compiled after a project load, and the cable accessor into Feedback was ignored
+ - ~~Swizzles sometimes don't have an effect on the produced GLSL code~~ fixed: the accessor on the cable into a Preview / Feedback node was dropped
  - Fullscreen works but it matches the size of the window and not the size of the screen
  - Save button disappears
  - More uniforms:
@@ -8,13 +8,13 @@
      - Control CC done
      - Midi notes
        - Event detector with attack release
-       - Midi pitch (highest/lowest/last, )
+       - Midi pitch (highest/lowest/last, ) (MidiNote node: gate / velocity / last note / pitch)
    - BPM tracking?
    - Frequency bands
-   - XY controller
-   - Keyboard
+   - ~~XY controller~~ (XYPad node)
+   - ~~Keyboard~~ (Keyboard node)
  - More modules:
-   - Basic transforms
+   - ~~Basic transforms~~ (UV & Transform, 3D domain nodes)
    - Video sources:
      - Multiple camera support (device picker on Camera node)
      - System audio capture node
@@ -41,7 +41,7 @@
     - Pixel art would be fire but requires some sort of mini custom canvas UI lib
     - Titles currently are inconsistent
     - Special node style for uniforms
-  - Node groups (should support groups of groups too)
+  - ~~Node groups (should support groups of groups too)~~ simple groups done (src/graph/NodeGroups.js: nested groups, box ports from boundary cables, breadcrumbs); reusable group definitions still to do
     - Two types of groups:
       - Simple groups, just visual simplifications
       - Custom node groups: they define a new type of node and sync changes across all nodes that share the node group definition
@@ -58,14 +58,18 @@ Comprehensive list of technical debt, performance issues, reliability problems, 
 
 ## Critical Performance
 
-### [ ] Consolidate all requestAnimationFrame loops into a single render loop
+### [x] Consolidate all requestAnimationFrame loops into a single render loop
+Done: `src/rendering/RenderLoop.js`, driven by the main loop after the Feedback passes; off-screen / closed-group previews are skipped.
+
 Each `ShaderPreview` instance runs its own independent RAF loop (`ShaderPreview.js:358`), and the main animation loop in `main.js:64-71` runs separately. With 3 preview nodes + 1 background + 1 main loop, that's 5 independent RAF callbacks per frame, all doing full render passes with uniform updates.
 
 **Fix:** Create a single `RenderLoop` class that manages one RAF callback. All renderers register with this loop and get called in sequence each frame. Remove the individual `animate()` RAF scheduling from `ShaderPreview`.
 
 **Files:** `ShaderPreview.js`, `main.js`, `FeedbackRenderer.js`, `BackgroundRenderer.js`
 
-### [ ] Eliminate per-frame readPixels() calls in PreviewNode
+### [x] Eliminate per-frame readPixels() calls in PreviewNode
+Done: GPU copy (`glResources.presentTexture` + `drawImage`), only for new frames.
+
 `PreviewNode.js:62-101` -- `getDisplayCanvas()` calls `gl.readPixels()` (GPU-to-CPU transfer) every frame for every preview node. This stalls the GPU pipeline and is one of the most expensive WebGL operations. With 3 previews, this blocks the pipeline 3 times per frame.
 
 **Fix options:**
@@ -76,14 +80,18 @@ Each `ShaderPreview` instance runs its own independent RAF loop (`ShaderPreview.
 
 **Files:** `PreviewNode.js` (lines 62-101), `ShaderPreview.js`
 
-### [ ] Fix O(p*u*n) uniform registration with inverse lookup map
+### [x] Fix O(p*u*n) uniform registration with inverse lookup map
+Done: `findNodeByRemappedName` uses a cached inverse map.
+
 `CompilationManager.js:136-210` has a triple nested loop: preview nodes * uniforms * `findNodeByRemappedName()`. The inner function (lines 224-226) iterates the entire `nodeIdRemap` map, then does another `Array.find()` on all nodes. With 3 previews * 10 uniforms * 50 nodes = 1,500 operations per compile.
 
 **Fix:** After `ShaderCompiler` creates its `nodeIdRemap`, immediately build an inverse map (`mappedId -> originalId`) and a node lookup map (`id -> node`). Then `findNodeByRemappedName` becomes O(1).
 
 **Files:** `CompilationManager.js`
 
-### [ ] Cache active video node reference instead of per-frame Array.find()
+### [x] Cache active video node reference instead of per-frame Array.find()
+Done: one shared camera texture per context, uploaded once per frame and only for shaders using `u_camera` (`glResources.cameraTexture`).
+
 `ShaderPreview.js:224-253` -- `updateCameraTexture()` calls `Array.find()` across all nodes every single frame to locate the active video node. This is O(n) in a hot path that runs 60 times per second.
 
 **Fix:** Cache the active video node reference when it changes (when a camera/video/screen capture node is enabled or disabled). The per-frame method should just read the cached reference.
@@ -103,7 +111,9 @@ Two hot-path allocation issues:
 
 ## Memory Leaks & Resource Safety
 
-### [ ] Fix texture and framebuffer memory leaks in ShaderPreview.destroy()
+### [x] Fix texture and framebuffer memory leaks in ShaderPreview.destroy()
+Done: `destroy()` frees the render target and releases the shared program; quad / noise / camera texture are shared per context; `NodeGraph.disposeNodes` runs on project switch.
+
 `ShaderPreview.js:519-527` -- `destroy()` deletes the WebGL program but never deletes textures (`cameraTexture`, framebuffer textures). When preview nodes are deleted or shaders recompile, these GPU resources leak.
 
 **Fix:** In `destroy()`, add cleanup for:

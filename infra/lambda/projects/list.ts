@@ -1,35 +1,15 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
 import * as response from '../shared/response';
-import * as jwt from '../shared/jwt';
-import * as db from '../shared/db';
+import { getStore } from '../shared/store';
+import { handle, requireAuth, publicSummary, queryParam } from '../shared/http';
 
-export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  try {
-    // Verify auth
-    const token = jwt.extractToken(event.headers.Authorization || event.headers.authorization);
-    if (!token) {
-      return response.error('Missing authorization token', 401);
-    }
-
-    const payload = jwt.verify(token);
-    if (!payload) {
-      return response.error('Invalid token', 401);
-    }
-
-    // Get projects for user
-    const projects = await db.listProjects(payload.userId);
-
-    // Return lightweight list (don't send full data for all projects)
-    const projectList = projects.map(p => ({
-      id: p.projectId,
-      name: p.name,
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-    }));
-
-    return response.success({ projects: projectList });
-  } catch (err: any) {
-    console.error('List projects error:', err);
-    return response.error('Internal server error', 500);
-  }
-}
+/** GET /api/projects?cursor= - the signed-in user's projects (any visibility), newest first. */
+export const handler = handle('List projects', async (event: APIGatewayProxyEvent) => {
+  const auth = await requireAuth(event);
+  const page = await getStore().listUserProjects(auth.userId, { cursor: queryParam(event, 'cursor') || null });
+  return response.success(
+    { projects: page.items.map(publicSummary), cursor: page.cursor },
+    200,
+    { 'Cache-Control': 'private, no-store' },
+  );
+});

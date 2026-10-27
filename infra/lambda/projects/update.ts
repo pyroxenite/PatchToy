@@ -1,60 +1,49 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
 import * as response from '../shared/response';
-import * as jwt from '../shared/jwt';
-import * as db from '../shared/db';
+import { getStore, ProjectPatch, visibilityOf } from '../shared/store';
+import { handle, requireAuth, parseBody, dropThumbnail } from '../shared/http';
+import { validateProjectName, validateDescription, validateProjectData, isProjectId, parseVisibility } from '../shared/validate';
 
-export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  try {
-    // Verify auth
-    const token = jwt.extractToken(event.headers.Authorization || event.headers.authorization);
-    if (!token) {
-      return response.error('Missing authorization token', 401);
-    }
+/** PUT /api/projects/{id} { name?, data?, description?, visibility? } (owner only) */
+export const handler = handle('Update project', async (event: APIGatewayProxyEvent) => {
+  const auth = await requireAuth(event);
+  const projectId = event.pathParameters?.id;
+  if (!isProjectId(projectId)) return response.error('Project not found', 404);
 
-    const payload = jwt.verify(token);
-    if (!payload) {
-      return response.error('Invalid token', 401);
-    }
+  const db = getStore();
+  const project = await db.getProject(projectId);
+  if (!project) return response.error('Project not found', 404);
+  if (project.userId !== auth.userId) return response.error('Unauthorized', 403);
 
-    // Get project ID from path
-    const projectId = event.pathParameters?.id;
-    if (!projectId) {
-      return response.error('Project ID is required', 400);
-    }
-
-    // Check ownership
-    const project = await db.getProject(projectId);
-    if (!project) {
-      return response.error('Project not found', 404);
-    }
-
-    if (project.userId !== payload.userId) {
-      return response.error('Unauthorized', 403);
-    }
-
-    // Parse request body
-    const body = JSON.parse(event.body || '{}');
-    const { name, data, isPublic } = body;
-
-    if (!name && !data && isPublic === undefined) {
-      return response.error('At least one of name, data, or isPublic is required', 400);
-    }
-
-    // Update project
-    const updates: { name?: string; data?: any; isPublic?: boolean } = {};
-    if (name !== undefined) updates.name = name;
-    if (data !== undefined) updates.data = data;
-    if (isPublic !== undefined) updates.isPublic = Boolean(isPublic);
-
-    await db.updateProject(projectId, updates);
-
-    return response.success({
-      id: projectId,
-      name: name || project.name,
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (err: any) {
-    console.error('Update project error:', err);
-    return response.error('Internal server error', 500);
+  const body = parseBody(event);
+  const patch: ProjectPatch = {};
+  if (body.name !== undefined) patch.name = validateProjectName(body.name);
+  if (body.description !== undefined) patch.description = validateDescription(body.description);
+  if (body.data !== undefined) {
+    const stats = validateProjectData(body.data);
+    patch.data = body.data;
+    patch.nodeCount = stats.nodeCount;
+    patch.hasJS = stats.hasJS;
   }
-}
+  const before = visibilityOf(project);
+  const visibility = parseVisibility(body);
+  if (visibility !== undefined) {
+    patch.visibility = visibility;
+    patch.ownerId = project.userId;
+    if (visibility === 'public' && !project.publishedAt) patch.publishedAt = new Date().toISOString();
+  }
+  if (!Object.keys(patch).length) {
+    return response.error('At least one of name, data, description or visibility is required', 400);
+  }
+
+  const updatedAt = await db.updateProject(projectId, patch);
+  if (visibility === 'private' && before !== 'private') await dropThumbnail(project);
+  const after = visibility ?? before;
+  return response.success({
+    id: projectId,
+    name: patch.name ?? project.name,
+    visibility: after,
+    isPublic: after !== 'private',
+    updatedAt,
+  });
+});

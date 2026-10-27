@@ -1,135 +1,110 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { getUserByEmail } from '../shared/db';
-import { signToken } from '../shared/jwt';
-import { success, error } from '../shared/response';
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+import { createHash, randomBytes } from 'crypto';
+import { getStore } from '../shared/store';
+import * as response from '../shared/response';
+import { handle, parseBody, clientIp, enforceLimit } from '../shared/http';
+import { getMailer } from '../shared/mailer';
+import { LIMITS, RESET_TOKEN_TTL_MS } from '../shared/limits';
+import { paddedNoMail } from '../shared/signup';
 
-const sesClient = new SESClient({});
-const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@patchtoy.com';
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:8080';
+const FRONTEND_URL = () => (process.env.FRONTEND_URL || 'http://localhost:5200').replace(/\/+$/, '');
+const MESSAGE = 'If that email exists, a password reset link has been sent';
 
-export const handler = async (
-  event: APIGatewayProxyEvent
-): Promise<APIGatewayProxyResult> => {
+/** SHA-256 of a reset token: only the hash is stored. */
+export function hashResetToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+}
+
+/**
+ * POST /api/auth/request-password-reset { email }
+ *
+ * Always the same answer (no account enumeration). For a known address: a random
+ * single-use token (32 bytes), stored as its SHA-256 with a 30-minute expiry, sent as
+ * https://<site>/#reset=<token>. The token is in the fragment, so it never reaches a
+ * server log or a Referer header. At most one mail per address per 5 minutes.
+ */
+export const handler = handle('Request password reset', async (event: APIGatewayProxyEvent) => {
+  const { email } = parseBody(event);
+  if (!email || typeof email !== 'string' || email.length > 254) {
+    return response.error('Email is required', 400);
+  }
+
+  await enforceLimit('reset-ip', clientIp(event), LIMITS.resetRequestPerIp.limit, LIMITS.resetRequestPerIp.windowSec);
+
+  const address = email.trim().toLowerCase();
+  const db = getStore();
+  const user = await db.getUserByEmail(address);
+  if (!user) {
+    // As slow as sending the mail, so the timing doesn't reveal the account either
+    await paddedNoMail();
+    return response.success({ message: MESSAGE });
+  }
+
+  // Over the per-address limits: answer as usual, send nothing (no mail bombing)
+  const allowed = await enforceLimit('reset-mail', address, LIMITS.resetMailPerEmail.limit, LIMITS.resetMailPerEmail.windowSec, { silent: true })
+    && await enforceLimit('reset-mail-day', address, LIMITS.resetMailPerEmailDaily.limit, LIMITS.resetMailPerEmailDaily.windowSec, { silent: true });
+  if (!allowed) {
+    await paddedNoMail();
+    return response.success({ message: MESSAGE });
+  }
+
+  const token = randomBytes(32).toString('base64url');
+  await db.putResetToken(hashResetToken(token), {
+    userId: user.userId,
+    tv: user.tokenVersion || 0,
+    expiresAt: Date.now() + RESET_TOKEN_TTL_MS,
+  });
+
+  const resetUrl = `${FRONTEND_URL()}/#reset=${token}`;
+  const minutes = Math.round(RESET_TOKEN_TTL_MS / 60000);
+  const name = escapeHtml(user.username || 'there');
   try {
-    const body = JSON.parse(event.body || '{}');
-    const { email } = body;
+    await getMailer()({
+      to: user.email,
+      subject: 'Reset your PatchToy password',
+      html: `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .button { display: inline-block; padding: 12px 24px; background: #007acc; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+    .footer { margin-top: 30px; font-size: 12px; color: #666; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Reset your password</h2>
+    <p>Hi ${name},</p>
+    <p>You asked to reset the password of your PatchToy account. Click the button below to choose a new one:</p>
+    <a href="${resetUrl}" class="button">Reset password</a>
+    <p>Or copy and paste this link into your browser:</p>
+    <p><a href="${resetUrl}">${resetUrl}</a></p>
+    <p>The link works once and expires in ${minutes} minutes. Resetting your password signs you out on every device.</p>
+    <p>If you didn't ask for this, you can ignore this email: your password stays the same.</p>
+    <div class="footer"><p>— PatchToy</p></div>
+  </div>
+</body>
+</html>`,
+      text: `Hi ${user.username || 'there'},
 
-    if (!email) {
-      return error('Email is required', 400);
-    }
-
-    // Find user by email
-    const user = await getUserByEmail(email.toLowerCase());
-
-    // Always return success to prevent email enumeration attacks
-    // (Don't reveal whether the email exists in the database)
-    if (!user) {
-      return success({
-        message: 'If that email exists, a password reset link has been sent',
-      });
-    }
-
-    // Generate password reset token (expires in 1 minute for security)
-    const resetToken = signToken(
-      {
-        userId: user.userId,
-        email: user.email,
-        type: 'password-reset',
-      },
-      '1m'
-    );
-
-    // Create reset URL
-    const resetUrl = `${FRONTEND_URL}?reset=${resetToken}`;
-
-    // Send email with reset link
-    const emailParams = {
-      Source: FROM_EMAIL,
-      Destination: {
-        ToAddresses: [user.email],
-      },
-      Message: {
-        Subject: {
-          Data: 'Reset Your PatchToy Password',
-        },
-        Body: {
-          Html: {
-            Data: `
-              <!DOCTYPE html>
-              <html>
-              <head>
-                <style>
-                  body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-                  .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                  .button {
-                    display: inline-block;
-                    padding: 12px 24px;
-                    background: #007acc;
-                    color: #ffffff !important;
-                    text-decoration: none;
-                    border-radius: 4px;
-                    margin: 20px 0;
-                  }
-                  .footer { margin-top: 30px; font-size: 12px; color: #666; }
-                  .warning { color: #f44336; font-weight: bold; }
-                </style>
-              </head>
-              <body>
-                <div class="container">
-                  <h2>Reset Your Password</h2>
-                  <p>Hi ${user.username},</p>
-                  <p>You requested to reset your password for your PatchToy account.</p>
-                  <p>Click the button below to reset your password:</p>
-                  <a href="${resetUrl}" class="button">Reset Password</a>
-                  <p>Or copy and paste this link into your browser:</p>
-                  <p><a href="${resetUrl}">${resetUrl}</a></p>
-                  <p class="warning">⚠️ This link will expire in 1 minute for security reasons.</p>
-                  <p>If you didn't request this password reset, you can safely ignore this email.</p>
-                  <div class="footer">
-                    <p>— The PatchToy Team</p>
-                  </div>
-                </div>
-              </body>
-              </html>
-            `,
-          },
-          Text: {
-            Data: `
-Hi ${user.username},
-
-You requested to reset your password for your PatchToy account.
-
-Click this link to reset your password:
+You asked to reset the password of your PatchToy account. Open this link to choose a new one:
 ${resetUrl}
 
-⚠️ This link will expire in 1 minute for security reasons.
+The link works once and expires in ${minutes} minutes. Resetting your password signs you out on every device.
 
-If you didn't request this password reset, you can safely ignore this email.
+If you didn't ask for this, you can ignore this email: your password stays the same.
 
-— The PatchToy Team
-            `,
-          },
-        },
-      },
-    };
-
-    try {
-      await sesClient.send(new SendEmailCommand(emailParams));
-    } catch (emailError) {
-      console.error('Failed to send email:', emailError);
-      // Still return success to user to avoid revealing email exists
-      // but log the error for debugging
-      return success({
-        message: 'If that email exists, a password reset link has been sent',
-      });
-    }
-
-    return success({
-      message: 'If that email exists, a password reset link has been sent',
+— PatchToy
+`,
     });
-  } catch (err) {
-    console.error('Error in request-password-reset:', err);
-    return error('Internal server error', 500);
+  } catch (err: any) {
+    // Never log the error object: SES messages can contain the recipient address
+    console.error('Password reset mail failed:', err?.name || 'Error');
   }
-};
+  return response.success({ message: MESSAGE });
+});

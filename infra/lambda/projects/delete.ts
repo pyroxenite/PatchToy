@@ -1,43 +1,28 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
 import * as response from '../shared/response';
-import * as jwt from '../shared/jwt';
-import * as db from '../shared/db';
+import { getStore } from '../shared/store';
+import { getBlobStore } from '../shared/blobs';
+import { handle, requireAuth } from '../shared/http';
+import { isProjectId } from '../shared/validate';
 
-export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  try {
-    // Verify auth
-    const token = jwt.extractToken(event.headers.Authorization || event.headers.authorization);
-    if (!token) {
-      return response.error('Missing authorization token', 401);
+export const handler = handle('Delete project', async (event: APIGatewayProxyEvent) => {
+  const auth = await requireAuth(event);
+  const projectId = event.pathParameters?.id;
+  if (!isProjectId(projectId)) return response.error('Project not found', 404);
+
+  const db = getStore();
+  const project = await db.getProject(projectId);
+  if (!project) return response.error('Project not found', 404);
+  if (project.userId !== auth.userId) return response.error('Unauthorized', 403);
+
+  await db.deleteProject(projectId);
+  await db.releaseProjectSlot(auth.userId);
+  if (project.thumbKey) {
+    try {
+      await getBlobStore().delete(project.thumbKey);
+    } catch (err: any) {
+      console.warn('Could not delete thumbnail', project.thumbKey, err?.name || err);
     }
-
-    const payload = jwt.verify(token);
-    if (!payload) {
-      return response.error('Invalid token', 401);
-    }
-
-    // Get project ID from path
-    const projectId = event.pathParameters?.id;
-    if (!projectId) {
-      return response.error('Project ID is required', 400);
-    }
-
-    // Check ownership
-    const project = await db.getProject(projectId);
-    if (!project) {
-      return response.error('Project not found', 404);
-    }
-
-    if (project.userId !== payload.userId) {
-      return response.error('Unauthorized', 403);
-    }
-
-    // Delete project
-    await db.deleteProject(projectId);
-
-    return response.success({ success: true });
-  } catch (err: any) {
-    console.error('Delete project error:', err);
-    return response.error('Internal server error', 500);
   }
-}
+  return response.success({ success: true });
+});

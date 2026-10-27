@@ -1,0 +1,484 @@
+{
+  "name": "JS Clock Sky",
+  "description": "JavaScript node demo: the real time of day drives the sky. The JS reads Date(), computes sun and moon directions, the moon phase and the turn of the stars, and draws a clock into a canvas; a GLSL node paints the sky looking south over hills (golden hour, phased moon, stars, clouds, town lights). Time speed fast-forwards. Tweak it in the Parameters panel (P): Time and Sky.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T07:34:56.764Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 0,
+        "type": "Comment",
+        "x": 80,
+        "y": -448,
+        "data": {
+          "text": "# JS Clock Sky\nThe sky outside your window, right now: a JavaScript node reads the clock with Date() and turns the local time into sun and moon directions, the moon phase and the turn of the stars; a GLSL node paints the sky looking south over hills.\nFast-forward with Time speed (1 = real time, 3600 = an hour per second) to watch sunsets, starry nights and the moon rise.\n## What the JS does\n- Every frame: hour = now + Hour offset + fast-forwarded hours (state.ff += dt × (speed − 1) / 3600, so speeding up never jumps).\n- Sun: declination from the day of the year, hour angle from the hour, latitude from the param → sunDir (x = east, y = up, z = north).\n- Moon: phase from a known new moon and the 29.53-day synodic month; it trails the sun by phase × 24 h → moonDir, moonPhase.\n- Clock: a 512×160 canvas with HH:MM and the moon phase name, redrawn once a minute (a canvas texture output).\n- Outputs: sunDir, moonDir, moonPhase, pole, starTurn, clock, hour.\n## Make it yours\nDouble-click the JS node (Clock group): add a sunrise alarm, use your exact longitude for true solar time, or fetch the weather in setup (await fetch(...)) and drive the Clouds from it. Clock Sky (Sky group) is plain GLSL.\n## Tweak it in the Parameters panel\nPress P: Time and Sky settings; hover a name for what it does, double-click a slider to reset it.\nDouble-click a group box to open it, Esc to come back.",
+          "width": 470,
+          "height": 480,
+          "color": "orange"
+        }
+      },
+      {
+        "id": 1,
+        "type": "Comment",
+        "x": 80,
+        "y": -98,
+        "data": {
+          "text": "## Clock (JS)\nReads params['Time speed'], ['Hour offset'], ['Latitude'] by label, Date() and dt.\nAll directions are in a local frame: x = east, y = up, z = north. The camera looks south.",
+          "width": 330,
+          "height": 130,
+          "color": "yellow"
+        }
+      },
+      {
+        "id": 2,
+        "type": "Comment",
+        "x": 80,
+        "y": -128,
+        "data": {
+          "text": "## Sky\nClock Sky: day/night gradient, golden and blue hour toward the sun, sun disc and halo, phased moon with craters, stars turning around the pole, drifting clouds lit by sun / dusk / moon, hills with town lights at night, and the clock canvas in the corner. Then ACES, vignette and grain.",
+          "width": 340,
+          "height": 160,
+          "color": "blue"
+        }
+      },
+      {
+        "id": 3,
+        "type": "JS",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "setupCode": "// A small canvas for the clock overlay (white text, the shader tints and places it)\nstate.c = canvas(512, 160);\nstate.g = state.c.getContext('2d');\nstate.ff = 0;            // extra hours added by \"Time speed\" (fast-forward)\nstate.label = '';",
+          "code": "// The real time of day drives the sky. Date() gives the local time; \"Time speed\"\n// fast-forwards (1 = real time, 3600 = one hour per second) and \"Hour offset\" shifts it.\nconst speed = params['Time speed'] ?? 1;\nstate.ff += dt * (speed - 1) / 3600;                    // hours gained by fast-forwarding\nconst now = new Date();\nconst realH = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600 + now.getMilliseconds() / 3.6e6;\nconst total = realH + (params['Hour offset'] ?? 0) + state.ff;   // hours since today's midnight\nconst hour = ((total % 24) + 24) % 24;\nconst dayShift = Math.floor(total / 24);\nconst start = new Date(now.getFullYear(), 0, 0);\nconst doy = (now - start) / 864e5 + dayShift;                     // day of the year\n\n// Sun: declination over the year, hour angle over the day (solar time ~ clock time)\nconst rad = Math.PI / 180;\nconst lat = (params['Latitude'] ?? 48) * rad;\nconst dec = -23.44 * rad * Math.cos(2 * Math.PI * (doy + 10) / 365);\nconst H = (hour - 12) / 24 * 2 * Math.PI;\n// local frame: x = east, y = up, z = north (the camera looks south, -z)\nconst dir = (d, h) => [\n  -Math.cos(d) * Math.sin(h),\n  Math.sin(lat) * Math.sin(d) + Math.cos(lat) * Math.cos(d) * Math.cos(h),\n  Math.cos(lat) * Math.sin(d) - Math.sin(lat) * Math.cos(d) * Math.cos(h),\n];\nconst sun = dir(dec, H);\n\n// Moon: phase from a known new moon (2000-01-06 18:14 UTC), synodic month 29.53 days;\n// it trails the sun by phase x 24 h (a rough but pretty approximation)\nconst days = (now.getTime() - Date.UTC(2000, 0, 6, 18, 14)) / 864e5 + (params['Hour offset'] ?? 0) / 24 + state.ff / 24;\nconst phase = ((days / 29.530588) % 1 + 1) % 1;                 // 0 new, 0.5 full\nconst moonDec = -23.44 * rad * Math.cos(2 * Math.PI * (doy + 10 + phase * 182.6) / 365);\nconst moon = dir(moonDec, H - phase * 2 * Math.PI);\n\n// Clock overlay, redrawn only when the minute changes\nconst hh = Math.floor(hour), mm = Math.floor((hour - hh) * 60);\nconst label = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;\nif (label !== state.label) {\n  state.label = label;\n  const g = state.g;\n  g.clearRect(0, 0, 512, 160);\n  g.fillStyle = '#000';\n  g.fillRect(0, 0, 512, 160);\n  g.fillStyle = '#fff';\n  g.textBaseline = 'middle';\n  g.font = '600 104px \"Helvetica Neue\", Arial, sans-serif';\n  g.fillText(label, 16, 70);\n  g.font = '500 26px \"Helvetica Neue\", Arial, sans-serif';\n  const names = ['new moon', 'waxing crescent', 'first quarter', 'waxing gibbous', 'full moon', 'waning gibbous', 'last quarter', 'waning crescent'];\n  g.globalAlpha = 0.75;\n  g.fillText(`${speed > 1.01 ? `×${Math.round(speed)}  ·  ` : ''}${names[Math.round(phase * 8) % 8]}`, 20, 140);\n  g.globalAlpha = 1;\n}\n// Stars turn with the sky around the celestial pole\nconst pole = [0, Math.sin(lat), Math.cos(lat)];\nreturn {\n  sunDir: vec3(sun), moonDir: vec3(moon), moonPhase: float(phase),\n  pole: vec3(pole), starTurn: float(H), clock: state.c, hour: float(hour),\n};",
+          "outputs": [
+            {
+              "name": "sunDir",
+              "type": "vec3"
+            },
+            {
+              "name": "moonDir",
+              "type": "vec3"
+            },
+            {
+              "name": "moonPhase",
+              "type": "float"
+            },
+            {
+              "name": "pole",
+              "type": "vec3"
+            },
+            {
+              "name": "starTurn",
+              "type": "float"
+            },
+            {
+              "name": "clock",
+              "type": "sampler2D",
+              "tex": "canvas 512x160"
+            },
+            {
+              "name": "hour",
+              "type": "float"
+            }
+          ]
+        }
+      },
+      {
+        "id": 4,
+        "type": "UV",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "mode": "stretch"
+        }
+      },
+      {
+        "id": 5,
+        "type": "ClockSky",
+        "x": 80,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 6,
+        "type": "TonemapACES",
+        "x": 320,
+        "y": 168,
+        "data": {
+          "exposure": 1,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 7,
+        "type": "Vignette",
+        "x": 560,
+        "y": 146,
+        "data": {
+          "radius": 1.6,
+          "softness": 1,
+          "color": "vec3(1.0)",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 8,
+        "type": "Grain",
+        "x": 800,
+        "y": 157,
+        "data": {
+          "amount": 0.025,
+          "color": "vec3(1.0)",
+          "t": "u_time"
+        }
+      },
+      {
+        "id": 9,
+        "type": "Preview",
+        "x": 756,
+        "y": 220,
+        "data": {},
+        "width": 300,
+        "height": 219.5,
+        "isBackground": false
+      },
+      {
+        "id": 10,
+        "type": "Param",
+        "x": 756,
+        "y": 487,
+        "data": {
+          "label": "Time speed",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 1,
+          "max": 7200,
+          "step": 1,
+          "scale": "log",
+          "section": "Time",
+          "order": 0,
+          "description": "1 = real time, 60 = a minute per second, 3600 = an hour per second (read by the JS node)."
+        }
+      },
+      {
+        "id": 11,
+        "type": "Param",
+        "x": 756,
+        "y": 613,
+        "data": {
+          "label": "Hour offset",
+          "kind": "float",
+          "value": 0,
+          "default": 0,
+          "min": -12,
+          "max": 12,
+          "step": 0.25,
+          "scale": "linear",
+          "section": "Time",
+          "order": 1,
+          "description": "Shift the clock by this many hours (read by the JS node)."
+        }
+      },
+      {
+        "id": 12,
+        "type": "Param",
+        "x": 756,
+        "y": 739,
+        "data": {
+          "label": "Latitude",
+          "kind": "float",
+          "value": 48,
+          "default": 48,
+          "min": -60,
+          "max": 60,
+          "step": 1,
+          "scale": "linear",
+          "section": "Time",
+          "order": 2,
+          "description": "Your latitude in degrees: sets how high the sun climbs (read by the JS node)."
+        }
+      },
+      {
+        "id": 13,
+        "type": "Param",
+        "x": 80,
+        "y": 186,
+        "data": {
+          "label": "Show clock",
+          "kind": "bool",
+          "value": true,
+          "default": true,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Sky",
+          "order": 3,
+          "description": "The HH:MM overlay in the corner."
+        }
+      },
+      {
+        "id": 14,
+        "type": "Param",
+        "x": 80,
+        "y": 334,
+        "data": {
+          "label": "Clouds",
+          "kind": "float",
+          "value": 0.45,
+          "default": 0.45,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Sky",
+          "order": 4,
+          "description": "Cloud cover."
+        }
+      },
+      {
+        "id": 15,
+        "type": "Param",
+        "x": 80,
+        "y": 460,
+        "data": {
+          "label": "Stars",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Sky",
+          "order": 5,
+          "description": "Star brightness at night."
+        }
+      },
+      {
+        "id": 16,
+        "type": "Param",
+        "x": 80,
+        "y": 586,
+        "data": {
+          "label": "Exposure",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0.3,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Sky",
+          "order": 6,
+          "description": "Tone-mapping exposure."
+        }
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 4,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 1,
+        "toId": 5,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 2,
+        "toId": 5,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 3,
+        "toId": 5,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 4,
+        "toId": 5,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 5,
+        "toId": 5,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 14,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 8,
+        "swizzle": null
+      },
+      {
+        "fromId": 13,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 9,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 16,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 0,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 17,
+    "panX": 311.39359430604986,
+    "panY": 294.4782918149466,
+    "zoom": 0.501067615658363,
+    "groups": [
+      {
+        "id": "g1",
+        "name": "Clock",
+        "parentId": null,
+        "nodeIds": [
+          3,
+          1
+        ],
+        "x": 80,
+        "y": 719,
+        "color": "source"
+      },
+      {
+        "id": "g2",
+        "name": "Sky",
+        "parentId": null,
+        "nodeIds": [
+          5,
+          6,
+          7,
+          8,
+          2
+        ],
+        "x": 418,
+        "y": 348,
+        "color": "color"
+      }
+    ]
+  },
+  "customNodes": {
+    "ClockSky": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "uv",
+          "type": "vec2",
+          "paramName": "uv"
+        },
+        {
+          "name": "sunDir",
+          "type": "vec3",
+          "paramName": "sunDir"
+        },
+        {
+          "name": "moonDir",
+          "type": "vec3",
+          "paramName": "moonDir"
+        },
+        {
+          "name": "moonPhase",
+          "type": "float",
+          "paramName": "moonPhase"
+        },
+        {
+          "name": "pole",
+          "type": "vec3",
+          "paramName": "pole"
+        },
+        {
+          "name": "starTurn",
+          "type": "float",
+          "paramName": "starTurn"
+        },
+        {
+          "name": "clockTex",
+          "type": "sampler2D",
+          "paramName": "clockTex"
+        },
+        {
+          "name": "clouds",
+          "type": "float",
+          "paramName": "clouds"
+        },
+        {
+          "name": "stars",
+          "type": "float",
+          "paramName": "stars"
+        },
+        {
+          "name": "showClock",
+          "type": "float",
+          "paramName": "showClock"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "// @node clockSky\n// @title Clock Sky\n// @category custom\n// @description A sky for any time of day, looking south over hills: day / night gradient, golden and blue hour toward the sun, sun disc and halo, a phased moon with craters, stars turning around the celestial pole (pole, starTurn), drifting clouds lit by sun, dusk or moon, hills with town lights at night, and a clock overlay (clockTex, a canvas). Directions come from the JS node (x = east, y = up, z = north). Returns HDR color.\nfloat cs_hash(vec2 p) {\n    p = fract(p * vec2(123.34, 456.21));\n    p += dot(p, p + 45.32);\n    return fract(p.x * p.y);\n}\n\nfloat cs_noise(vec2 p) {\n    vec2 i = floor(p);\n    vec2 f = fract(p);\n    f = f * f * (3.0 - 2.0 * f);\n    return mix(mix(cs_hash(i), cs_hash(i + vec2(1.0, 0.0)), f.x), mix(cs_hash(i + vec2(0.0, 1.0)), cs_hash(i + vec2(1.0, 1.0)), f.x), f.y);\n}\n\nfloat cs_fbm(vec2 p) {\n    float s = 0.0;\n    float a = 0.5;\n    for (int i = 0; i < 5; i++) {\n        s += a * cs_noise(p);\n        p = p * 2.03 + 17.1;\n        a *= 0.5;\n    }\n    return s;\n}\n\nvec3 cs_rotate(vec3 v, vec3 k, float a) {\n    return v * cos(a) + cross(k, v) * sin(a) + k * dot(k, v) * (1.0 - cos(a));\n}\n\nvec3 clockSky(vec2 uv, vec3 sunDir, vec3 moonDir, float moonPhase, vec3 pole, float starTurn, sampler2D clockTex, float clouds, float stars, float showClock) {\n    float aspect = u_resolution.x / max(u_resolution.y, 1.0);\n    vec2 p = (uv - 0.5) * vec2(aspect, 1.0);\n    vec3 rd = normalize(vec3(-p.x * 1.1, p.y * 1.1 + 0.2, -1.0));   // facing south: screen right = west (-x)\n    vec3 sun = normalize(sunDir);\n    vec3 moon = normalize(moonDir);\n    float sAlt = sun.y;\n    float day = smoothstep(-0.1, 0.22, sAlt);\n    float twilight = exp(-abs(sAlt + 0.03) * 8.0);\n    float night = 1.0 - smoothstep(-0.16, 0.0, sAlt);\n    float h = max(rd.y, 0.0);\n\n    // Sky gradient\n    vec3 zen = mix(vec3(0.004, 0.008, 0.026), vec3(0.14, 0.34, 0.8), day);\n    vec3 hor = mix(vec3(0.02, 0.035, 0.08), vec3(0.6, 0.76, 0.97), day);\n    vec3 sky = mix(hor, zen, pow(h, 0.45));\n    float toward = max(dot(normalize(rd.xz + 1e-5), normalize(sun.xz + 1e-5)), 0.0);\n    vec3 dusk = mix(vec3(1.0, 0.36, 0.1), vec3(0.95, 0.5, 0.6), smoothstep(0.0, 0.4, h));\n    sky = mix(sky, dusk, twilight * exp(-h * 3.5) * (0.3 + 0.7 * pow(toward, 3.0)));\n    sky += vec3(0.28, 0.12, 0.4) * twilight * exp(-h * 1.5) * 0.18;\n\n    // Stars, turning around the celestial pole\n    if (night > 0.0 && rd.y > -0.05) {\n        vec3 q = cs_rotate(rd, normalize(pole), -starTurn);\n        vec2 sp = vec2(atan(q.z, q.x), asin(clamp(q.y, -1.0, 1.0))) * 70.0;\n        vec2 cell = floor(sp);\n        vec2 f = fract(sp) - 0.5;\n        float rnd = cs_hash(cell);\n        vec2 off = vec2(cs_hash(cell + 3.1), cs_hash(cell + 7.7)) - 0.5;\n        float star = smoothstep(0.08, 0.0, length(f - off * 0.6)) * step(0.82, rnd);\n        float tw = 0.65 + 0.35 * sin(u_time * (2.0 + rnd * 4.0) + rnd * 40.0);\n        sky += vec3(0.85, 0.9, 1.0) * star * tw * pow(rnd, 6.0) * 2.5 * night * stars * smoothstep(0.0, 0.15, rd.y);\n    }\n\n    // Sun: halo and disc\n    float cs = dot(rd, sun);\n    float up = smoothstep(-0.06, 0.02, sAlt);\n    sky += mix(vec3(1.0, 0.5, 0.2), vec3(1.0, 0.9, 0.7), day) * (pow(max(cs, 0.0), 10.0) * 0.45 + pow(max(cs, 0.0), 300.0) * 0.8) * smoothstep(-0.2, 0.0, sAlt);\n    sky += vec3(1.0, 0.95, 0.85) * smoothstep(0.99985, 0.99992, cs) * 12.0 * up;\n\n    // Moon with its phase (0 new, 0.5 full; waxing = lit on the right) and craters\n    float cm = dot(rd, moon);\n    float mR = 0.035;\n    if (cm > cos(mR * 1.6)) {\n        vec3 mr = normalize(cross(moon, vec3(0.0, 1.0, 0.0)));\n        vec3 mu = cross(mr, moon);\n        vec3 dv = rd - moon * cm;\n        vec2 q = vec2(dot(dv, -mr), dot(dv, mu)) / sin(mR);\n        float r2 = dot(q, q);\n        float ang = moonPhase * 6.2831853;\n        vec3 ld = vec3(sin(ang), 0.0, -cos(ang));\n        vec3 nrm = vec3(q, sqrt(max(1.0 - r2, 0.0)));\n        float lit = smoothstep(-0.04, 0.08, dot(nrm, ld));\n        float crater = 0.72 + 0.28 * cs_fbm(q * 3.0 + 5.0);\n        vec3 mcol = vec3(0.98, 0.95, 0.86) * crater * lit * 1.4 + vec3(0.025, 0.03, 0.05);\n        float disc = 1.0 - smoothstep(0.92, 1.0, r2);\n        sky = mix(sky, mcol, disc * (1.0 - 0.75 * day) * smoothstep(-0.02, 0.02, moon.y));\n    }\n    float lunar = 0.5 - 0.5 * cos(moonPhase * 6.2831853);\n    sky += vec3(0.5, 0.6, 0.85) * pow(max(cm, 0.0), 300.0) * 0.6 * lunar * (1.0 - day) * smoothstep(-0.02, 0.05, moon.y);\n\n    // Clouds on a plane above\n    if (rd.y > 0.0 && clouds > 0.0) {\n        vec2 cp = rd.xz / (rd.y + 0.12) * 0.5 + vec2(u_time * 0.006, u_time * 0.002);\n        float c = cs_fbm(cp * 2.0);\n        float th = 0.78 - clouds * 0.5;\n        float cov = smoothstep(th, th + 0.25, c) * smoothstep(0.0, 0.18, rd.y);\n        vec3 moonLit = vec3(0.07, 0.08, 0.12) * (0.4 + 0.8 * lunar * smoothstep(0.0, 0.2, moon.y));\n        vec3 cc = mix(moonLit, vec3(0.92, 0.94, 1.0) * (0.75 + 0.25 * sAlt), day);\n        cc = mix(cc, vec3(1.0, 0.55, 0.4), twilight * (0.5 + 0.5 * toward) * 0.8);\n        cc *= 0.8 + 0.2 * smoothstep(th, th + 0.4, c);\n        sky = mix(sky, cc, cov * 0.92);\n    }\n\n    // Hills (screen space): a far ridge and a near ridge, town lights at night\n    float hy = -0.2 / 1.1;                              // horizon height in p\n    float far = hy + 0.035 + 0.06 * cs_fbm(vec2(p.x * 2.2 + 11.0, 1.0));\n    float nearR = hy - 0.05 + 0.09 * cs_fbm(vec2(p.x * 1.3 + 3.0, 5.0));\n    vec3 amb = mix(hor, zen, 0.3);\n    vec3 col = sky;\n    col = mix(col, amb * 0.45 + dusk * twilight * 0.06, smoothstep(far + 0.002, far - 0.002, p.y));\n    if (p.y < nearR + 0.003) {\n        vec3 ground = amb * 0.18;\n        float depth = clamp((nearR - p.y) * 4.0, 0.0, 1.0);\n        vec2 lc = floor(vec2(p.x * 90.0, p.y * 90.0));\n        float lr = cs_hash(lc + 1.3);\n        vec2 lf = fract(vec2(p.x * 90.0, p.y * 90.0)) - 0.5;\n        float town = smoothstep(0.55, 0.7, cs_noise(vec2(p.x * 5.0 + 2.0, 0.5)));          // a few villages\n        float band = smoothstep(0.02, 0.08, depth) * (1.0 - smoothstep(0.25, 0.45, depth)); // along the valley\n        float lamp = step(0.88, lr) * smoothstep(0.25, 0.0, length(lf)) * town * band * (0.7 + 0.3 * sin(u_time * 3.0 + lr * 50.0));\n        ground += vec3(1.0, 0.7, 0.35) * lamp * 1.5 * night;\n        col = mix(col, ground, smoothstep(nearR + 0.002, nearR - 0.002, p.y));\n    }\n\n    // Clock overlay (bottom left)\n    vec2 cq = vec2((uv.x - 0.06) / 0.26, (uv.y - 0.07) / (0.26 * 0.3125 * aspect));\n    if (cq.x > 0.0 && cq.x < 1.0 && cq.y > 0.0 && cq.y < 1.0) {\n        float t = texture(clockTex, cq).r;\n        col = mix(col, vec3(1.0, 0.97, 0.92) * 1.8, t * showClock * 0.9);\n    }\n    return col;\n}"
+    }
+  },
+  "editorStates": []
+}

@@ -10,7 +10,7 @@ export class ForLoopStartNode extends Node {
         this.minInputs = 1; // At least one iteration variable
 
         // Generate or use existing pair ID
-        if (!this.data.pairNodeId) {
+        if (this.data.pairNodeId === undefined) { // note: node id 0 is a valid pair id
             this.data.pairNodeId = null; // Will be set when paired
         }
 
@@ -45,11 +45,13 @@ export class ForLoopStartNode extends Node {
             this.outputs.push({ name: `inter${i}`, type: varType });
         }
 
-        // Calculate height based on number of variables
-        const baseHeight = 80;
-        const portSpacing = 25;
+        // Calculate height based on number of variables (one row per port pair)
         const totalPorts = Math.max(this.inputs.length, this.outputs.length);
-        this.height = baseHeight + Math.max(0, totalPorts - 2) * portSpacing;
+        this.height = this.heightForRows(Math.max(1, totalPorts));
+    }
+
+    getHeaderIcon() {
+        return 'loop';
     }
 
     // Override port positioning to align outputs with inputs
@@ -157,7 +159,7 @@ export class ForLoopStartNode extends Node {
 
     // Sync configuration with paired ForLoopEnd node
     syncWithPair() {
-        if (!this.data.pairNodeId || !this.graph) return;
+        if (this.data.pairNodeId == null || !this.graph) return;
 
         // Find the paired node
         const pairNode = this.graph.nodes.find(n => n.id === this.data.pairNodeId);

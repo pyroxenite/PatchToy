@@ -1,12 +1,16 @@
 import { Node } from './Node.js';
 import { CanvasTextInput } from '../rendering/CanvasTextInput.js';
 import { midiService } from '../services/MIDIService.js';
+import { clock } from '../core/Clock.js';
+import { COLORS, FONTS, CANVAS, NODE_LAYOUT } from '../ui/theme.js';
+import { drawLabel, drawTag, drawValueBar } from '../rendering/NodePainter.js';
 
 export class MidiCCNode extends Node {
     constructor(id, type, x, y) {
         super(id, type, x, y);
 
         this.isMidiCCNode = true;
+        this.fixedWidth = true;
 
         // MIDI configuration
         this.data.channel = this.data.channel ?? 1; // MIDI channel 1-16
@@ -17,9 +21,9 @@ export class MidiCCNode extends Node {
         this.rawValue = 0.0; // Direct from MIDI (0.0-1.0)
         this.smoothedValue = 0.0; // After first-order filter
 
-        // Frame tracking for smoothing (ensure smoothing only happens once per frame)
-        this.lastFrameTime = 0;
-        this.currentFrameTime = 0;
+        // Smoothing advances once per clock frame (see getValue)
+        this._smoothFrame = -1;
+        this._smoothAt = 0;
 
         // MIDI learn state
         this.isLearning = false;
@@ -81,95 +85,98 @@ export class MidiCCNode extends Node {
         this.updateTextInputPositions();
     }
 
+    // Layout: row 0 = ch/cc (+ output jack), row 1 = smoothing, row 2 = live value bar
     updateTextInputPositions() {
         if (!this.textInputs) return;
 
-        let yOffset = 30; // Start below title and labels
-        const inputWidth = (this.width - 30) / 2 - 20; // Two inputs side by side
+        const fieldH = NODE_LAYOUT.fieldHeight;
+        const y0 = this.getRowCenterY(0) - fieldH / 2;
+        const y1 = this.getRowCenterY(1) - fieldH / 2;
+        const right = this.x + this.width - 14;
 
-        // Channel and CC on the same line
         if (this.textInputs.channel) {
-            this.textInputs.channel.x = this.x + 10 + 20;
-            this.textInputs.channel.y = this.y + yOffset;
-            this.textInputs.channel.width = inputWidth;
+            this.textInputs.channel.x = this.x + 26;
+            this.textInputs.channel.y = y0;
+            this.textInputs.channel.width = 40;
+            this.textInputs.channel.height = fieldH;
         }
         if (this.textInputs.ccNumber) {
-            this.textInputs.ccNumber.x = this.x + this.width / 2 + 5 + 20;
-            this.textInputs.ccNumber.y = this.y + yOffset;
-            this.textInputs.ccNumber.width = inputWidth;
+            const cx = this.x + 26 + 40 + 24;
+            this.textInputs.ccNumber.x = cx;
+            this.textInputs.ccNumber.y = y0;
+            this.textInputs.ccNumber.width = right - cx;
+            this.textInputs.ccNumber.height = fieldH;
         }
-
-        yOffset += 25;
-
-        // Smoothing on its own line
         if (this.textInputs.smoothing) {
-            this.textInputs.smoothing.x = this.x + this.width / 2 + 5 + 20;
-            this.textInputs.smoothing.y = this.y + yOffset;
-            this.textInputs.smoothing.width = inputWidth;
+            const sx = this.x + 54;
+            this.textInputs.smoothing.x = sx;
+            this.textInputs.smoothing.y = y1;
+            this.textInputs.smoothing.width = right - sx;
+            this.textInputs.smoothing.height = fieldH;
         }
     }
 
-    draw(ctx, options = {}) {
-        // Update text input positions before drawing
+    getLearnButtonRect() {
+        return this.getHeaderTagRect(34);
+    }
+
+    getHeaderIcon() {
+        return 'midi';
+    }
+
+    drawHeaderTags(ctx, options = {}) {
+        const r = this.getLearnButtonRect();
+        // Blink while waiting for a CC message
+        const blinkOn = this.isLearning && Math.floor((options.time || 0) / 350) % 2 === 0;
+        drawTag(ctx, r, this.isLearning ? 'learn' : 'learn', this.isLearning && blinkOn, CANVAS.uniform, {
+            hovered: this.isHoveringRect(options, r, 2) || (this.isLearning && !blinkOn)
+        });
+        return r.x;
+    }
+
+    drawBody(ctx, options = {}) {
         this.updateTextInputPositions();
 
-        // Call parent draw
-        super.draw(ctx, options);
+        const cy0 = this.getRowCenterY(0);
+        drawLabel(ctx, 'ch', this.x + 11, cy0, COLORS.textFaint);
+        drawLabel(ctx, 'cc', this.x + 26 + 40 + 7, cy0, COLORS.textFaint);
+        drawLabel(ctx, 'smooth', this.x + 11, this.getRowCenterY(1), COLORS.textFaint);
 
-        // Draw field labels
-        if (this.hasInputFields && this.textInputs) {
-            ctx.fillStyle = '#888';
-            ctx.font = '10px -apple-system, sans-serif';
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'top';
-
-            ctx.fillText('CH', this.x + 10, this.y + 36);
-            ctx.fillText('CC', this.x + this.width/2 + 5, this.y + 36);
-
-            // Smoothing label (left aligned above the input)
-            if (this.textInputs.smoothing) {
-                ctx.textAlign = 'left';
-                ctx.fillText('SMOOTHING', this.x + 10, this.y + 60);
-            }
-
-            ctx.textAlign = 'left';
+        for (const field of ['channel', 'ccNumber', 'smoothing']) {
+            const input = this.textInputs && this.textInputs[field];
+            if (input) input.draw(ctx, options);
         }
 
-        // Draw MIDI learn button
-        this.drawLearnButton(ctx);
+        // Live value meter
+        const cy2 = this.getRowCenterY(2);
+        const value = Math.max(0, Math.min(1, this.smoothedValue || 0));
+        const barX = this.x + 11;
+        const barW = this.width - 22 - 34;
+        drawValueBar(ctx, barX, cy2 - 5, barW, 10, value, this.getAccentColor());
+        ctx.font = FONTS.value;
+        ctx.fillStyle = value > 0 ? COLORS.text : COLORS.textFaint;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(value.toFixed(2), Math.round(this.x + this.width - 11), Math.round(cy2 + 3));
+        ctx.textAlign = 'left';
     }
 
-    drawLearnButton(ctx) {
-        const buttonWidth = 40;
-        const buttonHeight = 16;
-        const buttonX = this.x + this.width - buttonWidth - 6;
-        const buttonY = this.y + 6;
+    needsContinuousRender() {
+        return this.isLearning || midiService.isEnabled;
+    }
 
-        // Button background
-        ctx.fillStyle = this.isLearning ? '#f0a000' : '#444';
-        ctx.beginPath();
-        ctx.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 3);
-        ctx.fill();
-
-        // Button text
-        ctx.fillStyle = this.isLearning ? '#000' : '#fff';
-        ctx.font = '10px -apple-system, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('learn', buttonX + buttonWidth / 2, buttonY + buttonHeight / 2);
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'alphabetic';
+    getControlCursor(x, y) {
+        const r = this.getLearnButtonRect();
+        if (x >= r.x - 2 && x <= r.x + r.w + 2 && y >= r.y - 2 && y <= r.y + r.h + 2) return 'pointer';
+        return super.getControlCursor(x, y);
     }
 
     _checkTextInputs(x, y) {
-        // Check learn button (top right)
-        const buttonWidth = 40;
-        const buttonHeight = 16;
-        const buttonX = this.x + this.width - buttonWidth - 6;
-        const buttonY = this.y + 6;
+        // Check learn button (header, right)
+        const r = this.getLearnButtonRect();
 
-        if (x >= buttonX && x <= buttonX + buttonWidth &&
-            y >= buttonY && y <= buttonY + buttonHeight) {
+        if (x >= r.x - 2 && x <= r.x + r.w + 2 &&
+            y >= r.y - 2 && y <= r.y + r.h + 2) {
             this.toggleLearn();
             return { type: 'TOGGLE_LEARN', node: this };
         }
@@ -182,14 +189,13 @@ export class MidiCCNode extends Node {
     handleMouseDown(x, y, event) {
         // Auto-enable MIDI if not already enabled (uses user gesture from this click)
         if (!midiService.isEnabled) {
-            console.log('[MIDI CC Node] Auto-enabling MIDI from user gesture...');
             midiService.enable().then(success => {
                 if (success) {
                     const btn = document.getElementById('midiBtn');
                     if (btn) {
-                        btn.style.background = '#007acc';
-                        btn.style.borderColor = '#007acc';
-                        btn.title = 'MIDI Active';
+                        btn.classList.add('is-on');
+                        btn.classList.remove('is-error');
+                        btn.setAttribute('data-tip', 'MIDI on');
                     }
                 }
             });
@@ -202,7 +208,6 @@ export class MidiCCNode extends Node {
     async toggleLearn() {
         // Auto-enable MIDI if not already enabled (uses user gesture from this click)
         if (!midiService.isEnabled) {
-            console.log('[MIDI Learn] Auto-enabling MIDI from user gesture...');
             const success = await midiService.enable();
             if (!success) {
                 console.error('[MIDI Learn] Failed to enable MIDI');
@@ -211,16 +216,15 @@ export class MidiCCNode extends Node {
             // Update button state
             const btn = document.getElementById('midiBtn');
             if (btn) {
-                btn.style.background = '#007acc';
-                btn.style.borderColor = '#007acc';
-                btn.title = 'MIDI Active';
+                btn.classList.add('is-on');
+                btn.classList.remove('is-error');
+                btn.setAttribute('data-tip', 'MIDI on');
             }
         }
 
         this.isLearning = !this.isLearning;
 
         if (this.isLearning) {
-            console.log('[MIDI Learn] Waiting for MIDI CC input...');
             // Set up one-time learn listener
             this.learnCallback = (channel, ccNumber, value) => {
                 if (this.isLearning) {
@@ -237,7 +241,9 @@ export class MidiCCNode extends Node {
                         this.textInputs.ccNumber.setValue(String(ccNumber));
                     }
 
-                    console.log(`[MIDI Learn] Learned: Channel ${channel}, CC ${ccNumber}`);
+                    // One-shot: stop listening once learned
+                    midiService.unsubscribe(`${this.id}_learn`);
+                    this.learnCallback = null;
 
                     if (this.graph && this.graph.onGraphChanged) {
                         this.graph.onGraphChanged();
@@ -252,15 +258,11 @@ export class MidiCCNode extends Node {
                 midiService.unsubscribe(`${this.id}_learn`);
                 this.learnCallback = null;
             }
-            console.log('[MIDI Learn] Cancelled');
         }
     }
 
     updateDimensions() {
-        const baseHeight = 30;
-        // Headers (15) + 2 rows of text inputs (50) + bottom padding (5)
-        const controlsHeight = 56;
-        this.height = baseHeight + controlsHeight;
+        this.height = this.heightForRows(3);
     }
 
     // Override to hide output port label
@@ -275,7 +277,6 @@ export class MidiCCNode extends Node {
             rawValue: this.rawValue,
             smoothedValue: this.smoothedValue
         };
-        console.log(`[MidiCCNode ${this.id}] Serializing: rawValue=${this.rawValue}, smoothedValue=${this.smoothedValue}`);
         return serialized;
     }
 
@@ -291,29 +292,29 @@ export class MidiCCNode extends Node {
     }
 
     /**
-     * Get current value (smoothed if enabled)
-     * Called every frame by the renderer
+     * Current value (smoothed if enabled). Read by every renderer and the control runtime,
+     * several times per frame: the filter advances once per clock frame (clock.frame), by the
+     * time since its previous step, so it smooths the same with 1 or 5 readers, at 60 or 120 Hz,
+     * and in offline export (fixed steps). data.smoothing is the factor per 60 Hz frame:
+     * k = smoothing ^ (dt / 16.67 ms); 0 = instant.
      */
     getValue() {
-        // Get current timestamp
-        this.currentFrameTime = performance.now();
-
-        // Only update smoothing once per frame (multiple renderers might call this)
-        if (this.currentFrameTime !== this.lastFrameTime) {
-            this.lastFrameTime = this.currentFrameTime;
-
-            // Apply first-order smoothing (exponential moving average)
-            // This happens every frame, so smoothing is time-based
-            // smoothing = 0.0 → no smoothing (instant response)
-            // smoothing = 0.99 → heavy smoothing (slow response)
-            if (this.data.smoothing > 0.0) {
-                this.smoothedValue = this.smoothedValue * this.data.smoothing +
-                                     this.rawValue * (1.0 - this.data.smoothing);
+        const f = clock.frame;
+        if (f !== this._smoothFrame) {
+            const now = clock.elapsedMs;
+            const first = this._smoothFrame < 0;
+            const dtMs = first ? 0 : Math.min(250, Math.max(0, now - this._smoothAt));
+            this._smoothFrame = f;
+            this._smoothAt = now;
+            const raw = Number.isFinite(this.rawValue) ? this.rawValue : 0;
+            const s = Number(this.data.smoothing);
+            if (!(s > 0) || first || !Number.isFinite(this.smoothedValue)) {
+                this.smoothedValue = raw;
             } else {
-                this.smoothedValue = this.rawValue;
+                const k = s >= 1 ? 1 : Math.pow(s, dtMs / (1000 / 60));
+                this.smoothedValue = this.smoothedValue * k + raw * (1 - k);
             }
         }
-
         return this.smoothedValue;
     }
 

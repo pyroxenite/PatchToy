@@ -1,0 +1,163 @@
+{
+  "name": "Beat Lab",
+  "description": "Diagnostic view of the beat tracker for judging it on your own music: the raw estimate (beat pulse, phase hand, BPM, confidence) next to the stable published clock shaders see (green hand, BPM, trust), kick flashes, band meters and a scrolling kicks-vs-beat-grid timeline.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T07:23:08.617Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 5,
+        "type": "Comment",
+        "x": 60,
+        "y": -260,
+        "data": {
+          "text": "# Beat Lab\nA diagnostic view for judging the beat tracker on your own music. Open the audio menu -> Mic (or File / Tab), play a track and watch. White = the tracker's raw (live) estimate (u_beatRaw, Beat node clock = raw); green = the stable published clock every other shader sees (u_beatPhase, u_bpm), which coasts while the estimate is untrusted and glides to a new tempo.\n## Top left - the beat\n- Circle flashes on each detected beat (orange = downbeat of the 4-beat bar, blue = other beats); dim = low confidence.\n- The white hand sweeps once per beat (raw); the green dot outside the ring is the stable clock. They overlap when locked; after a track change the white hand jumps to the new beat while the green one keeps going, then glides onto it.\n- The orange tick at 12 o'clock is where the beat lands.\n- The 4 dots show the beat within the bar.\n## Kick (middle)\n- Flashes on detected kick onsets. If the tracker is right, kick and beat circle flash together.\n## Right\n- Raw BPM (large, bright when locked), stable BPM (small, green), thin green trust bar (u_beatTrust: 0 while the stable clock coasts), confidence bar (u_beatConfidence: green locked / amber tentative / red lost), level - bass - mid - high meters.\n## Timeline (bottom, ~8 s, newest on the right)\n- Orange spikes = kicks, blue = bass, white lines = raw beat grid (warm = downbeat), green ticks at the bottom = stable beats, top strip = confidence, bottom green strip = trust.\n- Good tracking: white lines sit on the orange spikes and stay evenly spaced.\n## If it's off\n- Late/early: Offset slider in the audio menu. A beat off: tap TAP a few times.",
+          "width": 520,
+          "height": 480,
+          "color": "orange"
+        }
+      },
+      {
+        "id": 0,
+        "type": "UV",
+        "x": 80,
+        "y": 360,
+        "data": {
+          "mode": "stretch"
+        }
+      },
+      {
+        "id": 1,
+        "type": "BeatHistory",
+        "x": 340,
+        "y": 200,
+        "data": {}
+      },
+      {
+        "id": 2,
+        "type": "Feedback",
+        "x": 600,
+        "y": 200,
+        "data": {
+          "width": 512,
+          "height": 3,
+          "format": "rgba16f",
+          "filter": "nearest",
+          "keepRunning": false
+        }
+      },
+      {
+        "id": 3,
+        "type": "BeatLabDisplay",
+        "x": 600,
+        "y": 420,
+        "data": {}
+      },
+      {
+        "id": 4,
+        "type": "Preview",
+        "x": 900,
+        "y": 360,
+        "data": {},
+        "width": 300,
+        "height": 219.5,
+        "isBackground": true
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 1,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 1,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 2,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 3,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 3,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 4,
+        "toInput": 0,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 6,
+    "panX": 63.18284693269803,
+    "panY": 289.8927933293627,
+    "zoom": 0.8457415128052412
+  },
+  "customNodes": {
+    "BeatHistory": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "UV",
+          "type": "vec2",
+          "paramName": "uv"
+        },
+        {
+          "name": "Previous",
+          "type": "sampler2D",
+          "paramName": "prev"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec4"
+        }
+      ],
+      "customGLSL": "/* @node beatHistory\n   @title Beat History\n   @input uv \"UV\"\n   @input prev \"Previous\"\n   @description Scrolling record of the beat tracker: each frame shifts one column left and writes the newest values in the right-most column. Row 0 = (kick, raw beat phase, raw bar phase, confidence) of the tracker's live estimate (u_beatRaw), row 1 = (level, bass, mid, high), row 2 = (stable beat phase, stable bar phase, trust, 0) of the published clock shaders see. Feed into a 512x3 rgba16f / nearest Feedback node. */\nvec4 beatHistory(vec2 uv, sampler2D prev) {\n    ivec2 size = textureSize(prev, 0);\n    ivec2 px = ivec2(floor(uv * vec2(size)));\n    if (px.x < size.x - 1) return texelFetch(prev, px + ivec2(1, 0), 0);\n    if (px.y == 0) return vec4(u_kick, u_beatRaw.x, u_beatRaw.y, u_beatConfidence);\n    if (px.y == 1) return vec4(u_level, u_bass, u_mid, u_high);\n    return vec4(u_beatPhase, u_barPhase, u_beatTrust, 0.0);\n}\n"
+    },
+    "BeatLabDisplay": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "UV",
+          "type": "vec2",
+          "paramName": "uv"
+        },
+        {
+          "name": "History",
+          "type": "sampler2D",
+          "paramName": "hist"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "/* @node beatLab\n   @title Beat Lab Display\n   @input uv \"UV\"\n   @input hist \"History\"\n   @description Diagnostic view of the beat tracker: the raw (live) estimate as beat pulse + phase hand, kick flash, BPM readout and confidence; the stable published clock as a green hand, green BPM readout and trust bar; band meters and a scrolling timeline (kicks vs. the raw beat grid, stable beats in green). */\n\nfloat bl_box(vec2 p, vec2 b) { vec2 d = abs(p) - b; return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0); }\n\n// 7-segment digit, cell about [-0.5,0.5] x [-1,1]; returns a signed distance\nfloat bl_digit(vec2 p, int d) {\n    int bits = d == 0 ? 0x3F : d == 1 ? 0x06 : d == 2 ? 0x5B : d == 3 ? 0x4F : d == 4 ? 0x66 :\n               d == 5 ? 0x6D : d == 6 ? 0x7D : d == 7 ? 0x07 : d == 8 ? 0x7F : 0x6F;\n    float w = 0.085, m = 1e3;\n    if ((bits & 1) != 0)  m = min(m, bl_box(p - vec2(0.0, 0.9), vec2(0.34, w)));\n    if ((bits & 2) != 0)  m = min(m, bl_box(p - vec2(0.42, 0.45), vec2(w, 0.34)));\n    if ((bits & 4) != 0)  m = min(m, bl_box(p - vec2(0.42, -0.45), vec2(w, 0.34)));\n    if ((bits & 8) != 0)  m = min(m, bl_box(p - vec2(0.0, -0.9), vec2(0.34, w)));\n    if ((bits & 16) != 0) m = min(m, bl_box(p - vec2(-0.42, -0.45), vec2(w, 0.34)));\n    if ((bits & 32) != 0) m = min(m, bl_box(p - vec2(-0.42, 0.45), vec2(w, 0.34)));\n    if ((bits & 64) != 0) m = min(m, bl_box(p, vec2(0.34, w)));\n    return m;\n}\n\nvec3 bl_lockColor(float c) {\n    return c > 0.8 ? vec3(0.29, 0.87, 0.5) : (c > 0.4 ? vec3(0.96, 0.78, 0.29) : vec3(0.95, 0.33, 0.33));\n}\n\nvec3 beatLab(vec2 uv, sampler2D hist) {\n    // Layout lives in a 1.6 x 1 design space, fitted (letterboxed) into any canvas shape\n    float aspect = u_resolution.x / u_resolution.y;\n    float fit = min(1.0, aspect / 1.6);\n    vec2 q = (vec2(uv.x * aspect, uv.y) - vec2(aspect * 0.5, 0.5)) / fit + vec2(0.8, 0.5);\n    float px = 1.5 / (u_resolution.y * fit);\n    float conf = clamp(u_beatConfidence, 0.0, 1.0);\n    float trust = clamp(u_beatTrust, 0.0, 1.0);\n    // Raw clock: the tracker's live estimate (Beat node clock = raw); the stable clock is u_beatPhase...\n    float rph = u_beatRaw.x;\n    float rpulse = exp(-6.0 * rph);\n    int beatInBar = int(floor(fract(u_beatRaw.y) * 4.0));\n    bool downbeat = beatInBar == 0;\n    vec3 stableCol = vec3(0.35, 0.95, 0.55);\n\n    vec3 col = vec3(0.045, 0.05, 0.065) + 0.02 * rpulse * conf;\n\n    // ---- Beat circle + phase hand --------------------------------------\n    vec2 bc = vec2(0.36, 0.67);\n    float r0 = 0.12 + 0.045 * rpulse;\n    float d = length(q - bc);\n    vec3 beatCol = downbeat ? vec3(1.0, 0.45, 0.17) : vec3(0.35, 0.8, 1.0);\n    float body = 1.0 - smoothstep(r0 - px, r0 + px, d);\n    col = mix(col, beatCol * (0.18 + 0.82 * rpulse) * mix(0.35, 1.0, conf), body);\n    // ring track + phase arc (12 o'clock = the beat)\n    float ang = atan(q.x - bc.x, q.y - bc.y) / 6.2831853;\n    ang = fract(ang);\n    float ring = 1.0 - smoothstep(0.004 - px, 0.004 + px, abs(d - 0.205));\n    col = mix(col, vec3(0.16, 0.18, 0.22), ring);\n    float arc = ring * step(ang, rph);\n    col = mix(col, vec3(0.85, 0.9, 1.0) * mix(0.5, 1.0, conf), arc);\n    // stable (published) clock: green hand just outside the ring, bright as far as it is trusted\n    vec2 shand = bc + 0.232 * vec2(sin(6.2831853 * u_beatPhase), cos(6.2831853 * u_beatPhase));\n    col = mix(col, stableCol * mix(0.4, 1.0, trust), 1.0 - smoothstep(0.011 - px, 0.011 + px, length(q - shand)));\n    vec2 hand = bc + 0.205 * vec2(sin(6.2831853 * rph), cos(6.2831853 * rph));\n    col = mix(col, vec3(1.0), 1.0 - smoothstep(0.014 - px, 0.014 + px, length(q - hand)));\n    // top tick: where the beat lands\n    col = mix(col, vec3(1.0, 0.45, 0.17), 1.0 - smoothstep(-px, px, bl_box(q - (bc + vec2(0.0, 0.235)), vec2(0.004, 0.018))));\n    // bar dots\n    for (int i = 0; i < 4; i++) {\n        vec2 c = vec2(bc.x + (float(i) - 1.5) * 0.07, 0.42);\n        float on = i == beatInBar ? 1.0 : 0.0;\n        vec3 dc = i == 0 ? vec3(1.0, 0.45, 0.17) : vec3(0.35, 0.8, 1.0);\n        float m = 1.0 - smoothstep(0.016 - px, 0.016 + px, length(q - c));\n        col = mix(col, mix(vec3(0.14, 0.15, 0.19), dc * (0.6 + 0.4 * rpulse), on), m);\n    }\n\n    // ---- Kick flash (compare its timing with the beat circle) ----------\n    vec2 kc = vec2(0.82, 0.67);\n    float kr = 0.06 + 0.035 * u_kick;\n    float km = 1.0 - smoothstep(kr - px, kr + px, length(q - kc));\n    col = mix(col, mix(vec3(0.12, 0.08, 0.06), vec3(1.0, 0.55, 0.2), clamp(u_kick, 0.0, 1.0)), km);\n    float kring = 1.0 - smoothstep(0.003 - px, 0.003 + px, abs(length(q - kc) - 0.1));\n    col = mix(col, vec3(0.22, 0.16, 0.12), kring);\n\n    // ---- BPM readout (7-segment) ---------------------------------------\n    // raw (tracker) tempo large, stable (published) tempo small and green below it\n    for (int k = 0; k < 2; k++) {\n        float bpm = clamp(k == 0 ? u_beatRaw.w : u_bpm, 0.0, 999.9);\n        int tenths = int(floor(bpm * 10.0 + 0.5));\n        int dg[4];\n        dg[0] = (tenths / 1000) % 10; dg[1] = (tenths / 100) % 10; dg[2] = (tenths / 10) % 10; dg[3] = tenths % 10;\n        vec2 o = k == 0 ? vec2(1.08, 0.80) : vec2(1.10, 0.645);\n        float sz = k == 0 ? 0.075 : 0.042;\n        float sp = k == 0 ? 0.097 : 0.055;\n        vec3 numCol = k == 0 ? mix(vec3(0.45, 0.48, 0.55), vec3(0.95, 0.97, 1.0), conf) : stableCol * mix(0.45, 1.0, trust);\n        for (int i = 0; i < 4; i++) {\n            if (i == 0 && dg[0] == 0) continue;\n            float x = o.x + float(i) * sp + (i == 3 ? sp * 0.45 : 0.0);\n            float sd = bl_digit((q - vec2(x, o.y)) / sz, dg[i]) * sz;\n            col = mix(col, numCol, 1.0 - smoothstep(-px, px, sd));\n        }\n        col = mix(col, numCol, 1.0 - smoothstep(sz * 0.14 - px, sz * 0.14 + px, length(q - vec2(o.x + sp * 2.72, o.y - sz * 0.9))));\n    }\n\n    // ---- Confidence bar ----------------------------------------------\n    vec2 cb0 = vec2(1.03, 0.55), cbs = vec2(0.5, 0.022);\n    float inBar = 1.0 - smoothstep(-px, px, bl_box(q - (cb0 + cbs * 0.5), cbs * 0.5));\n    float fill = step(q.x, cb0.x + cbs.x * conf);\n    col = mix(col, mix(vec3(0.12, 0.13, 0.16), bl_lockColor(conf), fill), inBar);\n    // trust bar (u_beatTrust: how far the published clock follows the estimate), thin, green\n    vec2 tb0 = vec2(1.03, 0.585), tbs = vec2(0.5, 0.01);\n    float inT = 1.0 - smoothstep(-px, px, bl_box(q - (tb0 + tbs * 0.5), tbs * 0.5));\n    col = mix(col, mix(vec3(0.1, 0.12, 0.11), stableCol, step(q.x, tb0.x + tbs.x * trust)), inT);\n\n    // ---- Band meters: level, bass, mid, high --------------------------\n    vec4 bands = vec4(u_level, u_bass, u_mid, u_high);\n    vec3 bandCol[4];\n    bandCol[0] = vec3(0.4, 0.9, 0.7); bandCol[1] = vec3(1.0, 0.45, 0.25); bandCol[2] = vec3(0.98, 0.82, 0.35); bandCol[3] = vec3(0.55, 0.75, 1.0);\n    for (int i = 0; i < 4; i++) {\n        vec2 b0 = vec2(1.03, 0.49 - float(i) * 0.03), bs = vec2(0.5, 0.014);\n        float m = 1.0 - smoothstep(-px, px, bl_box(q - (b0 + bs * 0.5), bs * 0.5));\n        float f = step(q.x, b0.x + bs.x * clamp(bands[i], 0.0, 1.0));\n        col = mix(col, mix(vec3(0.1, 0.11, 0.14), bandCol[i], f), m);\n    }\n\n    // ---- Timeline: kicks vs. the beat grid (newest on the right) -------\n    float x0 = 0.05, x1 = 1.55, y0 = 0.05, y1 = 0.33;\n    if (q.x > x0 && q.x < x1 && q.y > y0 - 0.02 && q.y < y1 + 0.02) {\n        ivec2 hs = textureSize(hist, 0);\n        float hx = (q.x - x0) / (x1 - x0);\n        int ix = clamp(int(hx * float(hs.x)), 1, hs.x - 1);\n        vec4 a = texelFetch(hist, ivec2(ix, 0), 0);\n        vec4 prev = texelFetch(hist, ivec2(ix - 1, 0), 0);\n        vec4 bnd = texelFetch(hist, ivec2(ix, 1), 0);\n        vec4 st = texelFetch(hist, ivec2(ix, 2), 0);\n        vec4 stPrev = texelFetch(hist, ivec2(ix - 1, 2), 0);\n        float h = (q.y - y0) / (y1 - y0);\n        vec3 tl = vec3(0.07, 0.075, 0.095);\n        if (h < 0.0) {\n            tl = stableCol * (0.15 + 0.85 * st.z);                                  // trust strip\n        } else if (h <= 1.0) {\n            tl = mix(tl, vec3(0.16, 0.22, 0.4), step(h, bnd.y * 0.7));          // bass area\n            tl = mix(tl, vec3(1.0, 0.55, 0.2), step(h, clamp(a.x, 0.0, 1.0)) * 0.9); // kick spikes\n            bool beatTick = a.y < prev.y - 0.5;                                     // beat phase wrapped\n            bool barTick = a.z < prev.z - 0.5;\n            if (beatTick) tl = mix(tl, barTick ? vec3(1.0, 0.85, 0.6) : vec3(0.9, 0.95, 1.0), mix(0.35, 1.0, a.w));\n            // stable (published) beats: green ticks in the lower quarter\n            if (h < 0.25 && st.x < stPrev.x - 0.5) tl = stableCol * mix(0.4, 1.0, st.z);\n        } else {\n            tl = bl_lockColor(a.w) * (0.35 + 0.65 * a.w);                          // confidence strip\n        }\n        col = tl;\n    }\n    // \"now\" marker\n    col = mix(col, vec3(1.0), (1.0 - smoothstep(-px, px, bl_box(q - vec2(x1 + 0.008, (y0 + y1) * 0.5), vec2(0.002, (y1 - y0) * 0.5)))) * 0.6);\n\n    return col;\n}\n"
+    }
+  },
+  "editorStates": []
+}

@@ -1,0 +1,2910 @@
+{
+  "name": "Kaleido Tunnel",
+  "description": "Hypnotic kaleidoscopic tunnel: PolarCoords 1/r depth mapping scrolled by Time, Kaleidoscope folding with a depth twist, Voronoi cells with glowing CosinePalette edges, a self-sampling Feedback buffer for zoom-rotate echo trails, multi-level bloom, lens chromatic aberration and vignette. Tweak it in the Parameters panel (P): Tunnel, Colour, Post and Music.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T07:14:59.008Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 110,
+        "type": "Comment",
+        "x": 80,
+        "y": -248,
+        "data": {
+          "text": "# Kaleido Tunnel\nA hypnotic kaleidoscopic tunnel: polar coordinates with a 1/r depth mapping scrolled by time, kaleidoscope folding with a depth twist, and glowing Voronoi cells, finished with echo trails and bloom.\nReacts to music: open the audio menu → Mic (the kaleidoscope twists on the beat, the palette swings on the bar).\n## Tweak it in the Parameters panel\nPress P (or the sliders button in the top bar): Tunnel, Colour, Post and Music settings with pretty names; hover a name for what it does, double-click a slider to reset it.\nDouble-click a group box to open it, Esc to come back.",
+          "width": 400,
+          "height": 280,
+          "color": "orange"
+        }
+      },
+      {
+        "id": 111,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Tunnel Mapping\nScreen UV → polar (angle, radius). 1/r gives depth, which twists the rotation; the kaleidoscope folds the angle, and depth + time scroll the cells toward the viewer.",
+          "width": 320,
+          "height": 136,
+          "color": "blue"
+        }
+      },
+      {
+        "id": 112,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Voronoi Cells\nVoronoi on the tunnel coordinates: glowing cell centers, animated edge rings (sin + smoothstep) and a second Voronoi layer for sparkle.",
+          "width": 300,
+          "height": 136,
+          "color": "yellow"
+        }
+      },
+      {
+        "id": 113,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Tonemap & Echo Trails\nThe tonemapped frame goes into a Feedback render target; each frame samples it slightly zoomed and rotated, fades it and keeps the max, leaving trails.",
+          "width": 320,
+          "height": 136,
+          "color": "gray"
+        }
+      },
+      {
+        "id": 114,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Bloom\nA bright pass is blurred through a chain of Feedback buffers (one blur per buffer) and three blur levels are added back.",
+          "width": 300,
+          "height": 118,
+          "color": "orange"
+        }
+      },
+      {
+        "id": 131,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Music\nAudio level gates everything: with the audio off or silent, drive = 0 and the piece looks exactly as before. drive = music × smoothstep(level).\n- Beat: the kaleidoscope twists forward and the tunnel lunges toward you on each beat, then both glide back (Beat Surge: eased, net zero per beat).\n- Bar: the palette swings ahead on each downbeat and drifts back over the bar.\n- Bass: the glow rings breathe (up to +30%).\nBeat-phase couplings (beat twist and lunge, bar palette swing) are also multiplied by the beat tracker's confidence and by Beat.gate (amount = drive x confidence x gate): confidence (u_beatConfidence) is 0 with the audio off, ~1 once the beat locks, 1 with the metronome; gate is the stable beat clock's certainty (u_beatTrust): after a track change the clock holds the old tempo, then glides to the new one without jumps, and the surges fade out until the new beat is trusted. Level and band couplings (bass ring glow) are not.",
+          "width": 320,
+          "height": 250,
+          "color": "green"
+        }
+      },
+      {
+        "id": 0,
+        "type": "CenteredUV",
+        "x": 80,
+        "y": 135,
+        "data": {}
+      },
+      {
+        "id": 1,
+        "type": "Time",
+        "x": 80,
+        "y": 352,
+        "data": {}
+      },
+      {
+        "id": 2,
+        "type": "Vec2",
+        "x": 80,
+        "y": 273,
+        "data": {
+          "x": 0,
+          "y": 0,
+          "useUniform": false
+        }
+      },
+      {
+        "id": 3,
+        "type": "PolarCoords",
+        "x": 320,
+        "y": 193,
+        "data": {}
+      },
+      {
+        "id": 4,
+        "type": "Max",
+        "x": 560,
+        "y": 204,
+        "data": {
+          "a": 0,
+          "b": 0.02
+        }
+      },
+      {
+        "id": 5,
+        "type": "Pow",
+        "x": 800,
+        "y": 204,
+        "data": {
+          "a": 1,
+          "b": -1
+        }
+      },
+      {
+        "id": 6,
+        "type": "Remap",
+        "x": 1040,
+        "y": 80,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.05
+        }
+      },
+      {
+        "id": 7,
+        "type": "Remap",
+        "x": 1040,
+        "y": 262,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.12
+        }
+      },
+      {
+        "id": 8,
+        "type": "Add",
+        "x": 1280,
+        "y": 220,
+        "data": {}
+      },
+      {
+        "id": 9,
+        "type": "RotateUV",
+        "x": 1418,
+        "y": 193,
+        "data": {
+          "angle": 0.785,
+          "uv": "pt_uv()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 10,
+        "type": "Param",
+        "x": 80,
+        "y": 100,
+        "data": {
+          "label": "Segments",
+          "kind": "float",
+          "value": 8,
+          "default": 8,
+          "min": 2,
+          "max": 24,
+          "step": 1,
+          "scale": "linear",
+          "section": "Tunnel",
+          "order": 0,
+          "description": "Number of kaleidoscope mirror segments."
+        }
+      },
+      {
+        "id": 11,
+        "type": "Remap",
+        "x": 560,
+        "y": 80,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -0.05
+        }
+      },
+      {
+        "id": 12,
+        "type": "Kaleidoscope",
+        "x": 80,
+        "y": 182,
+        "data": {
+          "segments": 6,
+          "angle": 0,
+          "uv": "pt_uv()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 13,
+        "type": "PolarCoords",
+        "x": 320,
+        "y": 193,
+        "data": {}
+      },
+      {
+        "id": 14,
+        "type": "Remap",
+        "x": 560,
+        "y": 262,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 2.2
+        }
+      },
+      {
+        "id": 15,
+        "type": "Param",
+        "x": 80,
+        "y": 226,
+        "data": {
+          "label": "Scroll speed",
+          "kind": "float",
+          "value": 0.55,
+          "default": 0.55,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Tunnel",
+          "order": 1,
+          "description": "How fast the tunnel streams toward you."
+        }
+      },
+      {
+        "id": 16,
+        "type": "Multiply",
+        "x": 458,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 17,
+        "type": "Remap",
+        "x": 80,
+        "y": 89,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.6
+        }
+      },
+      {
+        "id": 18,
+        "type": "Add",
+        "x": 320,
+        "y": 138,
+        "data": {}
+      },
+      {
+        "id": 19,
+        "type": "MakeVec2",
+        "x": 458,
+        "y": 164,
+        "data": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 20,
+        "type": "Voronoi",
+        "x": 80,
+        "y": 366,
+        "data": {
+          "scale": 2.3,
+          "jitter": 0.6,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 21,
+        "type": "Glow",
+        "x": 560,
+        "y": 80,
+        "data": {
+          "d": 0.1,
+          "radius": 0.035,
+          "intensity": 1,
+          "falloff": 1.35
+        }
+      },
+      {
+        "id": 22,
+        "type": "Remap",
+        "x": 340,
+        "y": 247,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 1
+        }
+      },
+      {
+        "id": 23,
+        "type": "Remap",
+        "x": 340,
+        "y": 441,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.12
+        }
+      },
+      {
+        "id": 24,
+        "type": "Add",
+        "x": 600,
+        "y": 371,
+        "data": {}
+      },
+      {
+        "id": 25,
+        "type": "Remap",
+        "x": 600,
+        "y": 467,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.05
+        }
+      },
+      {
+        "id": 26,
+        "type": "Add",
+        "x": 860,
+        "y": 706,
+        "data": {}
+      },
+      {
+        "id": 27,
+        "type": "Vec3",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "x": 0.55,
+          "y": 0.35,
+          "z": 0.65,
+          "useUniform": false
+        }
+      },
+      {
+        "id": 28,
+        "type": "Vec3",
+        "x": 80,
+        "y": 218,
+        "data": {
+          "x": 0.45,
+          "y": 0.45,
+          "z": 0.35,
+          "useUniform": false
+        }
+      },
+      {
+        "id": 29,
+        "type": "Param",
+        "x": 80,
+        "y": 356,
+        "data": {
+          "label": "Palette frequency",
+          "kind": "vec3",
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "default": [
+            1,
+            1,
+            1
+          ],
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "section": "Colour",
+          "order": 4,
+          "description": "Cosine palette frequency per channel (c)."
+        }
+      },
+      {
+        "id": 30,
+        "type": "Param",
+        "x": 80,
+        "y": 450,
+        "data": {
+          "label": "Palette phase",
+          "kind": "vec3",
+          "value": [
+            0,
+            0.2,
+            0.55
+          ],
+          "default": [
+            0,
+            0.2,
+            0.55
+          ],
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "section": "Colour",
+          "order": 5,
+          "description": "Cosine palette phase per channel (d): shifts the hues."
+        }
+      },
+      {
+        "id": 31,
+        "type": "CosinePalette",
+        "x": 474,
+        "y": 108,
+        "data": {}
+      },
+      {
+        "id": 32,
+        "type": "Remap",
+        "x": 80,
+        "y": 329,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.3,
+          "outMax": 1.3
+        }
+      },
+      {
+        "id": 33,
+        "type": "CosinePalette",
+        "x": 474,
+        "y": 302,
+        "data": {}
+      },
+      {
+        "id": 34,
+        "type": "Smoothstep",
+        "x": 698,
+        "y": 124,
+        "data": {
+          "edge0": 0,
+          "edge1": 0.45,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 35,
+        "type": "Remap",
+        "x": 938,
+        "y": 80,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.16,
+          "outMax": 0.04000000000000001
+        }
+      },
+      {
+        "id": 36,
+        "type": "Remap",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 40
+        }
+      },
+      {
+        "id": 37,
+        "type": "Remap",
+        "x": 80,
+        "y": 262,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 1.7
+        }
+      },
+      {
+        "id": 38,
+        "type": "Add",
+        "x": 320,
+        "y": 220,
+        "data": {}
+      },
+      {
+        "id": 39,
+        "type": "Sin",
+        "x": 458,
+        "y": 215,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 40,
+        "type": "Smoothstep",
+        "x": 698,
+        "y": 262,
+        "data": {
+          "edge0": 0.93,
+          "edge1": 1,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 41,
+        "type": "Remap",
+        "x": 938,
+        "y": 262,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.3
+        }
+      },
+      {
+        "id": 42,
+        "type": "Add",
+        "x": 1178,
+        "y": 220,
+        "data": {}
+      },
+      {
+        "id": 43,
+        "type": "Multiply",
+        "x": 734,
+        "y": 206,
+        "data": {}
+      },
+      {
+        "id": 44,
+        "type": "Param",
+        "x": 1040,
+        "y": 214,
+        "data": {
+          "label": "Ring glow",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Colour",
+          "order": 2,
+          "description": "Brightness of the animated cell-edge rings."
+        }
+      },
+      {
+        "id": 45,
+        "type": "Multiply",
+        "x": 800,
+        "y": 96,
+        "data": {}
+      },
+      {
+        "id": 46,
+        "type": "Remap",
+        "x": 80,
+        "y": 138,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 2.4
+        }
+      },
+      {
+        "id": 47,
+        "type": "Sin",
+        "x": 320,
+        "y": 182,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 48,
+        "type": "Smoothstep",
+        "x": 560,
+        "y": 240,
+        "data": {
+          "edge0": 0.75,
+          "edge1": 1,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 49,
+        "type": "Remap",
+        "x": 800,
+        "y": 180,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.55,
+          "outMax": 2.75
+        }
+      },
+      {
+        "id": 50,
+        "type": "Multiply",
+        "x": 1040,
+        "y": 130,
+        "data": {}
+      },
+      {
+        "id": 51,
+        "type": "Multiply",
+        "x": 734,
+        "y": 302,
+        "data": {}
+      },
+      {
+        "id": 52,
+        "type": "Voronoi",
+        "x": 600,
+        "y": 221,
+        "data": {
+          "scale": 7,
+          "jitter": 1,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 53,
+        "type": "Glow",
+        "x": 860,
+        "y": 80,
+        "data": {
+          "d": 0.1,
+          "radius": 0.02,
+          "intensity": 0.07,
+          "falloff": 1.6
+        }
+      },
+      {
+        "id": 54,
+        "type": "Multiply",
+        "x": 892,
+        "y": 206,
+        "data": {}
+      },
+      {
+        "id": 55,
+        "type": "Add",
+        "x": 892,
+        "y": 302,
+        "data": {}
+      },
+      {
+        "id": 56,
+        "type": "Add",
+        "x": 1050,
+        "y": 254,
+        "data": {}
+      },
+      {
+        "id": 57,
+        "type": "Smoothstep",
+        "x": 320,
+        "y": 80,
+        "data": {
+          "edge0": 0.05,
+          "edge1": 0.6,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 58,
+        "type": "Smoothstep",
+        "x": 80,
+        "y": 262,
+        "data": {
+          "edge0": 0.55,
+          "edge1": 1.7,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 59,
+        "type": "Remap",
+        "x": 320,
+        "y": 218,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 1,
+          "outMax": 0.35
+        }
+      },
+      {
+        "id": 60,
+        "type": "Multiply",
+        "x": 560,
+        "y": 182,
+        "data": {}
+      },
+      {
+        "id": 61,
+        "type": "Multiply",
+        "x": 818,
+        "y": 247,
+        "data": {}
+      },
+      {
+        "id": 62,
+        "type": "Remap",
+        "x": 320,
+        "y": 400,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -6
+        }
+      },
+      {
+        "id": 63,
+        "type": "Exp",
+        "x": 560,
+        "y": 266,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 64,
+        "type": "Param",
+        "x": 560,
+        "y": 360,
+        "data": {
+          "label": "Depth glow",
+          "kind": "color",
+          "value": [
+            0.8,
+            0.45,
+            0.75
+          ],
+          "default": [
+            0.8,
+            0.45,
+            0.75
+          ],
+          "alpha": false,
+          "section": "Colour",
+          "order": 3,
+          "description": "Colour of the glow deep in the tunnel."
+        }
+      },
+      {
+        "id": 65,
+        "type": "Multiply",
+        "x": 818,
+        "y": 331,
+        "data": {}
+      },
+      {
+        "id": 66,
+        "type": "Add",
+        "x": 956,
+        "y": 289,
+        "data": {}
+      },
+      {
+        "id": 67,
+        "type": "Param",
+        "x": 1830,
+        "y": 113,
+        "data": {
+          "label": "Exposure",
+          "kind": "float",
+          "value": 0.9,
+          "default": 0.9,
+          "min": 0.2,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 7,
+          "description": "ACES tone-mapping exposure."
+        }
+      },
+      {
+        "id": 68,
+        "type": "TonemapACES",
+        "x": 80,
+        "y": 130,
+        "data": {
+          "exposure": 1,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 69,
+        "type": "Saturation",
+        "x": 340,
+        "y": 80,
+        "data": {
+          "amount": 1.3,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 70,
+        "type": "UV",
+        "x": 80,
+        "y": 148,
+        "data": {
+          "mode": "stretch"
+        }
+      },
+      {
+        "id": 71,
+        "type": "ScaleUV",
+        "x": 350,
+        "y": 126,
+        "data": {
+          "scale": 1.012,
+          "uv": "pt_uv()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 72,
+        "type": "RotateUV",
+        "x": 590,
+        "y": 126,
+        "data": {
+          "angle": 0.006,
+          "uv": "pt_uv()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 73,
+        "type": "TextureSample",
+        "x": 830,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 74,
+        "type": "Param",
+        "x": 830,
+        "y": 196,
+        "data": {
+          "label": "Echo trails",
+          "kind": "float",
+          "value": 0.82,
+          "default": 0.82,
+          "min": 0,
+          "max": 0.97,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 6,
+          "description": "How much of the zoomed, rotated previous frame stays (feedback persistence)."
+        }
+      },
+      {
+        "id": 75,
+        "type": "Multiply",
+        "x": 1088,
+        "y": 153,
+        "data": {}
+      },
+      {
+        "id": 76,
+        "type": "Remap",
+        "x": 1226,
+        "y": 104,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.018,
+          "outMax": 0.982
+        }
+      },
+      {
+        "id": 77,
+        "type": "Max",
+        "x": 746,
+        "y": 183,
+        "data": {
+          "a": 0,
+          "b": 1
+        }
+      },
+      {
+        "id": 78,
+        "type": "Vec3ToVec4",
+        "x": 1006,
+        "y": 183,
+        "data": {}
+      },
+      {
+        "id": 79,
+        "type": "Feedback",
+        "x": 80,
+        "y": 258,
+        "data": {
+          "width": 1600,
+          "height": 1000
+        }
+      },
+      {
+        "id": 80,
+        "type": "TextureBlur",
+        "x": 80,
+        "y": 254,
+        "data": {
+          "radius": 2,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 81,
+        "type": "Grayscale",
+        "x": 320,
+        "y": 265,
+        "data": {}
+      },
+      {
+        "id": 82,
+        "type": "Smoothstep",
+        "x": 560,
+        "y": 254,
+        "data": {
+          "edge0": 0.25,
+          "edge1": 0.8,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 83,
+        "type": "Multiply",
+        "x": 800,
+        "y": 187,
+        "data": {}
+      },
+      {
+        "id": 84,
+        "type": "Vec3ToVec4",
+        "x": 1040,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 85,
+        "type": "Feedback",
+        "x": 800,
+        "y": 271,
+        "data": {
+          "width": 400,
+          "height": 250
+        }
+      },
+      {
+        "id": 86,
+        "type": "TextureBlur",
+        "x": 1040,
+        "y": 196,
+        "data": {
+          "radius": 2,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 87,
+        "type": "Feedback",
+        "x": 800,
+        "y": 365,
+        "data": {
+          "width": 100,
+          "height": 62
+        }
+      },
+      {
+        "id": 88,
+        "type": "TextureBlur",
+        "x": 1040,
+        "y": 334,
+        "data": {
+          "radius": 2,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 89,
+        "type": "Feedback",
+        "x": 1040,
+        "y": 472,
+        "data": {
+          "width": 32,
+          "height": 20
+        }
+      },
+      {
+        "id": 90,
+        "type": "Distance",
+        "x": 80,
+        "y": 171,
+        "data": {
+          "a": 0,
+          "b": 0.5
+        }
+      },
+      {
+        "id": 91,
+        "type": "Multiply",
+        "x": 320,
+        "y": 130,
+        "data": {}
+      },
+      {
+        "id": 92,
+        "type": "Param",
+        "x": 320,
+        "y": 214,
+        "data": {
+          "label": "Aberration",
+          "kind": "float",
+          "value": 0.02,
+          "default": 0.02,
+          "min": 0,
+          "max": 0.06,
+          "step": 0.001,
+          "scale": "linear",
+          "section": "Post",
+          "order": 8,
+          "description": "Lens chromatic aberration."
+        }
+      },
+      {
+        "id": 93,
+        "type": "Multiply",
+        "x": 578,
+        "y": 229,
+        "data": {}
+      },
+      {
+        "id": 94,
+        "type": "ChromaticAberration",
+        "x": 716,
+        "y": 218,
+        "data": {
+          "amount": 0.006,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 95,
+        "type": "TextureBlur",
+        "x": 796,
+        "y": 80,
+        "data": {
+          "radius": 1.5,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 96,
+        "type": "TextureBlur",
+        "x": 518,
+        "y": 266,
+        "data": {
+          "radius": 1.5,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 97,
+        "type": "TextureBlur",
+        "x": 796,
+        "y": 230,
+        "data": {
+          "radius": 1.5,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 98,
+        "type": "Param",
+        "x": 796,
+        "y": 476,
+        "data": {
+          "label": "Bloom tight",
+          "kind": "float",
+          "value": 0.35,
+          "default": 0.35,
+          "min": 0,
+          "max": 1.5,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 9,
+          "description": "Smallest bloom level."
+        }
+      },
+      {
+        "id": 99,
+        "type": "Param",
+        "x": 518,
+        "y": 416,
+        "data": {
+          "label": "Bloom medium",
+          "kind": "float",
+          "value": 0.45,
+          "default": 0.45,
+          "min": 0,
+          "max": 1.5,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 10,
+          "description": "Middle bloom level."
+        }
+      },
+      {
+        "id": 100,
+        "type": "Param",
+        "x": 796,
+        "y": 602,
+        "data": {
+          "label": "Bloom wide",
+          "kind": "float",
+          "value": 0.35,
+          "default": 0.35,
+          "min": 0,
+          "max": 1.5,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 11,
+          "description": "Widest bloom level."
+        }
+      },
+      {
+        "id": 101,
+        "type": "Multiply",
+        "x": 1074,
+        "y": 260,
+        "data": {}
+      },
+      {
+        "id": 102,
+        "type": "Multiply",
+        "x": 796,
+        "y": 380,
+        "data": {}
+      },
+      {
+        "id": 103,
+        "type": "Multiply",
+        "x": 1074,
+        "y": 452,
+        "data": {}
+      },
+      {
+        "id": 104,
+        "type": "Add",
+        "x": 956,
+        "y": 267,
+        "data": {}
+      },
+      {
+        "id": 105,
+        "type": "Add",
+        "x": 1074,
+        "y": 356,
+        "data": {}
+      },
+      {
+        "id": 106,
+        "type": "Add",
+        "x": 578,
+        "y": 145,
+        "data": {}
+      },
+      {
+        "id": 107,
+        "type": "Grain",
+        "x": 716,
+        "y": 80,
+        "data": {
+          "amount": 0.03,
+          "color": "vec3(1.0)",
+          "t": "u_time"
+        }
+      },
+      {
+        "id": 108,
+        "type": "Vignette",
+        "x": 956,
+        "y": 107,
+        "data": {
+          "radius": 0.9,
+          "softness": 0.55,
+          "color": "vec3(1.0)",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 109,
+        "type": "Preview",
+        "x": 3412,
+        "y": 145,
+        "data": {},
+        "width": 300,
+        "height": 219.5,
+        "isBackground": true
+      },
+      {
+        "id": 115,
+        "type": "Param",
+        "x": 770,
+        "y": 80,
+        "data": {
+          "label": "Music reactivity",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Music",
+          "order": 12,
+          "description": "0 = ignore the music. The kaleidoscope twists on the beat, the palette swings on the bar, rings breathe on the bass."
+        }
+      },
+      {
+        "id": 116,
+        "type": "Audio",
+        "x": 80,
+        "y": 184,
+        "data": {}
+      },
+      {
+        "id": 117,
+        "type": "Smoothstep",
+        "x": 320,
+        "y": 206,
+        "data": {
+          "edge0": 0.02,
+          "edge1": 0.12,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 118,
+        "type": "Multiply",
+        "x": 560,
+        "y": 120,
+        "data": {}
+      },
+      {
+        "id": 119,
+        "type": "Beat",
+        "x": 560,
+        "y": 204,
+        "data": {
+          "decay": 6,
+          "rate": 1,
+          "threshold": 0.5,
+          "clock": "stable",
+          "gate": "fade"
+        }
+      },
+      {
+        "id": 120,
+        "type": "BeatSurge",
+        "x": 938,
+        "y": 201,
+        "data": {}
+      },
+      {
+        "id": 121,
+        "type": "BeatSurge",
+        "x": 938,
+        "y": 317,
+        "data": {}
+      },
+      {
+        "id": 122,
+        "type": "Multiply",
+        "x": 1178,
+        "y": 218,
+        "data": {
+          "b": 0.6
+        }
+      },
+      {
+        "id": 123,
+        "type": "Add",
+        "x": 1418,
+        "y": 191,
+        "data": {}
+      },
+      {
+        "id": 124,
+        "type": "Multiply",
+        "x": 1178,
+        "y": 302,
+        "data": {
+          "b": 0.35
+        }
+      },
+      {
+        "id": 125,
+        "type": "Add",
+        "x": 1418,
+        "y": 275,
+        "data": {}
+      },
+      {
+        "id": 126,
+        "type": "Multiply",
+        "x": 1178,
+        "y": 386,
+        "data": {
+          "b": 0.3
+        }
+      },
+      {
+        "id": 127,
+        "type": "Add",
+        "x": 1418,
+        "y": 359,
+        "data": {}
+      },
+      {
+        "id": 128,
+        "type": "Multiply",
+        "x": 938,
+        "y": 117,
+        "data": {}
+      },
+      {
+        "id": 129,
+        "type": "Mix",
+        "x": 1178,
+        "y": 80,
+        "data": {
+          "a": 1,
+          "b": 1.3,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 130,
+        "type": "Multiply",
+        "x": 1418,
+        "y": 107,
+        "data": {}
+      },
+      {
+        "id": 132,
+        "type": "Multiply",
+        "x": 800,
+        "y": 233,
+        "data": {}
+      },
+      {
+        "id": 133,
+        "type": "Multiply",
+        "x": 800,
+        "y": 329,
+        "data": {}
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 3,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 3,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 2,
+        "toId": 4,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 11,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 12,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 12,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 12,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 12,
+        "fromOutput": 0,
+        "toId": 13,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 13,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 13,
+        "fromOutput": 1,
+        "toId": 14,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 16,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 16,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 17,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 18,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 14,
+        "fromOutput": 0,
+        "toId": 19,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 19,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 1,
+        "toId": 21,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 2,
+        "toId": 22,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 24,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 23,
+        "fromOutput": 0,
+        "toId": 24,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 24,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 27,
+        "fromOutput": 0,
+        "toId": 31,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 28,
+        "fromOutput": 0,
+        "toId": 31,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 31,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 30,
+        "fromOutput": 0,
+        "toId": 31,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 0,
+        "toId": 33,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 27,
+        "fromOutput": 0,
+        "toId": 33,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 28,
+        "fromOutput": 0,
+        "toId": 33,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 33,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 30,
+        "fromOutput": 0,
+        "toId": 33,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 1,
+        "toId": 34,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 34,
+        "fromOutput": 0,
+        "toId": 35,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 2,
+        "toId": 36,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 36,
+        "fromOutput": 0,
+        "toId": 38,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 37,
+        "fromOutput": 0,
+        "toId": 38,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 38,
+        "fromOutput": 0,
+        "toId": 39,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 39,
+        "fromOutput": 0,
+        "toId": 40,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 40,
+        "fromOutput": 0,
+        "toId": 41,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 35,
+        "fromOutput": 0,
+        "toId": 42,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 41,
+        "fromOutput": 0,
+        "toId": 42,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 31,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 42,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 46,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 46,
+        "fromOutput": 0,
+        "toId": 47,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 47,
+        "fromOutput": 0,
+        "toId": 48,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 48,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 45,
+        "fromOutput": 0,
+        "toId": 50,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 49,
+        "fromOutput": 0,
+        "toId": 50,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 33,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 50,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 52,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 52,
+        "fromOutput": 1,
+        "toId": 53,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 31,
+        "fromOutput": 0,
+        "toId": 54,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 53,
+        "fromOutput": 0,
+        "toId": 54,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 43,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 51,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 55,
+        "fromOutput": 0,
+        "toId": 56,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 54,
+        "fromOutput": 0,
+        "toId": 56,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 2,
+        "toId": 57,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 2,
+        "toId": 58,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 58,
+        "fromOutput": 0,
+        "toId": 59,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 57,
+        "fromOutput": 0,
+        "toId": 60,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 59,
+        "fromOutput": 0,
+        "toId": 60,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 0,
+        "toId": 61,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 60,
+        "fromOutput": 0,
+        "toId": 61,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 2,
+        "toId": 62,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 62,
+        "fromOutput": 0,
+        "toId": 63,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 64,
+        "fromOutput": 0,
+        "toId": 65,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 63,
+        "fromOutput": 0,
+        "toId": 65,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 61,
+        "fromOutput": 0,
+        "toId": 66,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 65,
+        "fromOutput": 0,
+        "toId": 66,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 66,
+        "fromOutput": 0,
+        "toId": 68,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 67,
+        "fromOutput": 0,
+        "toId": 68,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 68,
+        "fromOutput": 0,
+        "toId": 69,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 70,
+        "fromOutput": 0,
+        "toId": 71,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 71,
+        "fromOutput": 0,
+        "toId": 72,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 79,
+        "fromOutput": 0,
+        "toId": 73,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 72,
+        "fromOutput": 0,
+        "toId": 73,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 73,
+        "fromOutput": 0,
+        "toId": 75,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 74,
+        "fromOutput": 0,
+        "toId": 75,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 75,
+        "fromOutput": 0,
+        "toId": 76,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 69,
+        "fromOutput": 0,
+        "toId": 77,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 76,
+        "fromOutput": 0,
+        "toId": 77,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 77,
+        "fromOutput": 0,
+        "toId": 78,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 78,
+        "fromOutput": 0,
+        "toId": 79,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 79,
+        "fromOutput": 0,
+        "toId": 80,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 80,
+        "fromOutput": 0,
+        "toId": 81,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 81,
+        "fromOutput": 1,
+        "toId": 82,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 80,
+        "fromOutput": 0,
+        "toId": 83,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 82,
+        "fromOutput": 0,
+        "toId": 83,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 83,
+        "fromOutput": 0,
+        "toId": 84,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 84,
+        "fromOutput": 0,
+        "toId": 85,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 85,
+        "fromOutput": 0,
+        "toId": 86,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 86,
+        "fromOutput": 0,
+        "toId": 87,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 87,
+        "fromOutput": 0,
+        "toId": 88,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 88,
+        "fromOutput": 0,
+        "toId": 89,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 70,
+        "fromOutput": 0,
+        "toId": 90,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 90,
+        "fromOutput": 0,
+        "toId": 91,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 90,
+        "fromOutput": 0,
+        "toId": 91,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 91,
+        "fromOutput": 0,
+        "toId": 93,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 92,
+        "fromOutput": 0,
+        "toId": 93,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 79,
+        "fromOutput": 0,
+        "toId": 94,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 93,
+        "fromOutput": 0,
+        "toId": 94,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 85,
+        "fromOutput": 0,
+        "toId": 95,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 87,
+        "fromOutput": 0,
+        "toId": 96,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 89,
+        "fromOutput": 0,
+        "toId": 97,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 95,
+        "fromOutput": 0,
+        "toId": 101,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 98,
+        "fromOutput": 0,
+        "toId": 101,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 96,
+        "fromOutput": 0,
+        "toId": 102,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 99,
+        "fromOutput": 0,
+        "toId": 102,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 97,
+        "fromOutput": 0,
+        "toId": 103,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 100,
+        "fromOutput": 0,
+        "toId": 103,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 94,
+        "fromOutput": 0,
+        "toId": 104,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 101,
+        "fromOutput": 0,
+        "toId": 104,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 104,
+        "fromOutput": 0,
+        "toId": 105,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 102,
+        "fromOutput": 0,
+        "toId": 105,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 105,
+        "fromOutput": 0,
+        "toId": 106,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 103,
+        "fromOutput": 0,
+        "toId": 106,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 106,
+        "fromOutput": 0,
+        "toId": 107,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 107,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 107,
+        "fromOutput": 0,
+        "toId": 108,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 108,
+        "fromOutput": 0,
+        "toId": 109,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 116,
+        "fromOutput": 0,
+        "toId": 117,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 115,
+        "fromOutput": 0,
+        "toId": 118,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 117,
+        "fromOutput": 0,
+        "toId": 118,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 119,
+        "fromOutput": 1,
+        "toId": 120,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 132,
+        "fromOutput": 0,
+        "toId": 120,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 119,
+        "fromOutput": 2,
+        "toId": 121,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 132,
+        "fromOutput": 0,
+        "toId": 121,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 120,
+        "fromOutput": 0,
+        "toId": 122,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 11,
+        "fromOutput": 0,
+        "toId": 123,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 122,
+        "fromOutput": 0,
+        "toId": 123,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 123,
+        "fromOutput": 0,
+        "toId": 12,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 120,
+        "fromOutput": 0,
+        "toId": 124,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 16,
+        "fromOutput": 0,
+        "toId": 125,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 124,
+        "fromOutput": 0,
+        "toId": 125,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 125,
+        "fromOutput": 0,
+        "toId": 18,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 121,
+        "fromOutput": 0,
+        "toId": 126,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 127,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 126,
+        "fromOutput": 0,
+        "toId": 127,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 127,
+        "fromOutput": 0,
+        "toId": 31,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 127,
+        "fromOutput": 0,
+        "toId": 32,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 118,
+        "fromOutput": 0,
+        "toId": 128,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 116,
+        "fromOutput": 1,
+        "toId": 128,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 128,
+        "fromOutput": 0,
+        "toId": 129,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 44,
+        "fromOutput": 0,
+        "toId": 130,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 129,
+        "fromOutput": 0,
+        "toId": 130,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 130,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 118,
+        "fromOutput": 0,
+        "toId": 132,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 133,
+        "fromOutput": 0,
+        "toId": 132,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 119,
+        "fromOutput": 6,
+        "toId": 133,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 119,
+        "fromOutput": 7,
+        "toId": 133,
+        "toInput": 1,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 134,
+    "panX": 32.2114537444934,
+    "panY": 395.08920704845815,
+    "zoom": 0.2973568281938326,
+    "groups": [
+      {
+        "id": "g1",
+        "name": "Tunnel Mapping",
+        "parentId": null,
+        "nodeIds": [
+          111
+        ],
+        "x": 358,
+        "y": 150,
+        "color": "uv"
+      },
+      {
+        "id": "g2",
+        "name": "Polar Depth",
+        "parentId": "g1",
+        "nodeIds": [
+          0,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "x": 80,
+        "y": 98
+      },
+      {
+        "id": "g3",
+        "name": "Kaleidoscope Fold",
+        "parentId": "g1",
+        "nodeIds": [
+          11,
+          12,
+          13,
+          14
+        ],
+        "x": 442,
+        "y": 87
+      },
+      {
+        "id": "g4",
+        "name": "Depth Scroll",
+        "parentId": "g1",
+        "nodeIds": [
+          16,
+          17,
+          18,
+          19
+        ],
+        "x": 878,
+        "y": 87
+      },
+      {
+        "id": "g5",
+        "name": "Voronoi Cells",
+        "parentId": null,
+        "nodeIds": [
+          20,
+          22,
+          23,
+          24,
+          25,
+          26,
+          52,
+          53,
+          112
+        ],
+        "x": 770,
+        "y": 213,
+        "color": "noise"
+      },
+      {
+        "id": "g6",
+        "name": "Cell Edges",
+        "parentId": "g5",
+        "nodeIds": [
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42
+        ],
+        "x": 860,
+        "y": 259
+      },
+      {
+        "id": "g7",
+        "name": "Glow Rings",
+        "parentId": "g5",
+        "nodeIds": [
+          21,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50
+        ],
+        "x": 860,
+        "y": 486
+      },
+      {
+        "id": "g8",
+        "name": "Coloring",
+        "parentId": null,
+        "nodeIds": [
+          31,
+          32,
+          33,
+          43,
+          51,
+          54,
+          55,
+          56
+        ],
+        "x": 1492,
+        "y": 161,
+        "color": "color"
+      },
+      {
+        "id": "g9",
+        "name": "Cosine Palette",
+        "parentId": "g8",
+        "nodeIds": [
+          27,
+          28,
+          29,
+          30
+        ],
+        "x": 80,
+        "y": 87
+      },
+      {
+        "id": "g10",
+        "name": "Depth Glow & Fade",
+        "parentId": null,
+        "nodeIds": [
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66
+        ],
+        "x": 1830,
+        "y": 246,
+        "color": "effect"
+      },
+      {
+        "id": "g11",
+        "name": "Tonemap & Echo Trails",
+        "parentId": null,
+        "nodeIds": [
+          68,
+          69,
+          77,
+          78,
+          79,
+          113
+        ],
+        "x": 2278,
+        "y": 183,
+        "color": "logic"
+      },
+      {
+        "id": "g12",
+        "name": "Zoom Feedback",
+        "parentId": "g11",
+        "nodeIds": [
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76
+        ],
+        "x": 340,
+        "y": 215
+      },
+      {
+        "id": "g13",
+        "name": "Bloom",
+        "parentId": null,
+        "nodeIds": [
+          95,
+          96,
+          97,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          105,
+          114
+        ],
+        "x": 2736,
+        "y": 172,
+        "color": "effect"
+      },
+      {
+        "id": "g14",
+        "name": "Bright Pass Chain",
+        "parentId": "g13",
+        "nodeIds": [
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89
+        ],
+        "x": 80,
+        "y": 298
+      },
+      {
+        "id": "g15",
+        "name": "Post FX",
+        "parentId": null,
+        "nodeIds": [
+          90,
+          91,
+          92,
+          93,
+          94,
+          104,
+          106,
+          107,
+          108
+        ],
+        "x": 3074,
+        "y": 139,
+        "color": "effect"
+      },
+      {
+        "id": "g16",
+        "name": "Music",
+        "parentId": null,
+        "nodeIds": [
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125,
+          126,
+          127,
+          128,
+          129,
+          130,
+          131,
+          132,
+          133
+        ],
+        "x": 1154,
+        "y": 150,
+        "color": "source"
+      }
+    ]
+  },
+  "customNodes": {
+    "BeatSurge": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "phase",
+          "type": "float",
+          "paramName": "phase"
+        },
+        {
+          "name": "amount",
+          "type": "float",
+          "paramName": "amount"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "float"
+        }
+      ],
+      "customGLSL": "// @node beatSurge\n// @title Beat Surge\n// @category custom\n// @description Eased push for a phase 0..1 (Beat.phase or Beat.bar): easeOutCubic(phase) - phase, times amount. It rushes ahead right after the beat and glides back to 0 by the next one, so adding it to an angle or a scroll makes motion step on the beat without drifting (net zero per beat, 0 when amount is 0).\nfloat beatSurge(float phase, float amount) {\n    float p = clamp(phase, 0.0, 1.0);\n    float q = 1.0 - p;\n    return amount * (1.0 - q * q * q - p);\n}\n"
+    }
+  },
+  "editorStates": []
+}

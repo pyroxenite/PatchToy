@@ -1,7 +1,24 @@
+import { clock, applyClockUniforms } from '../core/Clock.js';
+import { programCache, quadBuffer, noiseProgram, cameraTexture } from './glResources.js';
+import { renderLoop } from './RenderLoop.js';
+
+/**
+ * Renders one compiled shader (a Preview node's thumbnail, the background / fullscreen
+ * preview, output / recording sources, probes) in the shared GL context.
+ *
+ * Programs come from the context's ProgramCache (glResources.js): every renderer showing
+ * the same source shares one linked program, and loading a source that was linked
+ * before costs nothing. `program` is the current program (setting it to null releases it).
+ *
+ * Frames are driven by the page's RenderLoop (no requestAnimationFrame per preview):
+ * animate() registers the preview, stopRendering() unregisters it, frameTick() renders
+ * one frame. `animationId` is truthy while registered (kept for older callers).
+ */
 export class ShaderPreview {
     // Shared mouse position (normalized 0-1, Y flipped for WebGL)
     static mouseX = 0;
     static mouseY = 0;
+    static programLinks = 0; // programs linked by any ShaderPreview (diagnostics)
 
     constructor(canvas, videoElement, options = {}) {
         this.videoElement = videoElement;
@@ -9,6 +26,12 @@ export class ShaderPreview {
         this.nodeId = options.nodeId || null;
         this.canManageCamera = !this.isOffscreen; // Only main preview manages camera
         this.uniformRegistry = options.uniformRegistry || null; // Centralized uniform management
+        this.ownerNode = null;      // Preview node showing this renderer (visibility checks)
+        this.governor = null;       // quality governor name ('background') for shared-canvas outputs
+        this.frameCount = 0;        // frames rendered (the node canvas redraws only for new frames)
+        this._entry = null;         // ProgramCache entry of `program`
+        this._rawProgram = null;    // a program assigned from outside (not cached)
+        this._pending = null;       // async load in flight: { entry, source, onError }
 
         // Use shared GL context if provided, otherwise create own (for backwards compatibility)
         if (options.sharedGL) {
@@ -43,7 +66,7 @@ export class ShaderPreview {
         }
 
         this.program = null;
-        this.startTime = Date.now();
+        // u_time and the audio / beat uniforms come from the global clock (core/Clock.js)
         this.animationId = null;
         this.cameraTexture = null;
         this.cameraEnabled = false;
@@ -55,8 +78,35 @@ export class ShaderPreview {
         this.setupCameraTexture();
         this.setupNoiseShader();
 
-        // Start animation loop for all instances (needed for noise shader)
+        // Render every frame (RenderLoop) - also needed for the noise shader
         this.animate();
+    }
+
+    /** The current GL program (null: none; the TV-noise program is drawn instead). */
+    get program() {
+        return this._entry ? this._entry.program : this._rawProgram;
+    }
+
+    set program(p) {
+        if (this._entry && p === this._entry.program) return;
+        this._releaseEntry();
+        this._rawProgram = p || null;
+    }
+
+    _releaseEntry() {
+        if (this._entry) {
+            const e = this._entry;
+            this._entry = null;
+            programCache(this.gl).release(e);
+        }
+    }
+
+    _cancelPending() {
+        if (this._pending) {
+            const p = this._pending;
+            this._pending = null;
+            programCache(this.gl).release(p.entry);
+        }
     }
 
     createFramebuffer(gl, width, height) {
@@ -89,94 +139,22 @@ export class ShaderPreview {
     }
 
     setupNoiseShader() {
-        // Create a simple noise shader for when no program is loaded
-        const gl = this.gl;
-
-        const vertexShaderSource = `#version 300 es
-        in vec2 a_position;
-        void main() {
-            gl_Position = vec4(a_position, 0.0, 1.0);
-        }`;
-
-        const fragmentShaderSource = `#version 300 es
-        precision highp float;
-        uniform float u_time;
-        uniform vec2 u_resolution;
-        out vec4 fragColor;
-
-        // Better hash function for noise (less repetition)
-        float hash(vec2 p) {
-            vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-            p3 += dot(p3, p3.yzx + 33.33);
-            return fract((p3.x + p3.y) * p3.z);
-        }
-
-        void main() {
-            // Lower spatial resolution - make bigger pixels (4x4 blocks)
-            vec2 pixelSize = vec2(4.0);
-            vec2 uv = floor(gl_FragCoord.xy / pixelSize);
-
-            // Animate the noise over time with better randomness
-            float t = u_time * 10.0;
-            float noise = hash(uv + vec2(t * 1.3, t * 0.7));
-
-            // Add some subtle scanlines (less frequent)
-            float scanline = sin(gl_FragCoord.y * 3.14159 * 0.5) * 0.03;
-            noise += scanline;
-
-            fragColor = vec4(vec3(noise * 0.7), 1.0);
-        }`;
-
-        const vertexShader = gl.createShader(gl.VERTEX_SHADER);
-        gl.shaderSource(vertexShader, vertexShaderSource);
-        gl.compileShader(vertexShader);
-
-        const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
-        gl.shaderSource(fragmentShader, fragmentShaderSource);
-        gl.compileShader(fragmentShader);
-
-        this.noiseProgram = gl.createProgram();
-        gl.attachShader(this.noiseProgram, vertexShader);
-        gl.attachShader(this.noiseProgram, fragmentShader);
-        gl.linkProgram(this.noiseProgram);
-
-        // Get uniform locations for noise shader
-        this.noiseUniforms = {
-            u_time: gl.getUniformLocation(this.noiseProgram, 'u_time'),
-            u_resolution: gl.getUniformLocation(this.noiseProgram, 'u_resolution')
-        };
+        // TV static shown while no program is loaded (one program per context, shared)
+        const n = noiseProgram(this.gl);
+        this.noiseProgram = n ? n.program : null;
+        this.noiseUniforms = n ? n.uniforms : {};
+        this._noiseAttrib = n ? n.aPosition : -1;
     }
 
     setupGeometry() {
-        const gl = this.gl;
-
-        // Create a full-screen quad
-        const positions = new Float32Array([
-            -1, -1,
-            1, -1,
-            -1, 1,
-            1, 1,
-        ]);
-
-        this.positionBuffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+        // Full-screen quad (one buffer per context, shared)
+        this.positionBuffer = quadBuffer(this.gl);
     }
 
     setupCameraTexture() {
-        const gl = this.gl;
-        this.cameraTexture = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, this.cameraTexture);
-
-        // Set texture parameters
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-        // Initialize with a 1x1 black pixel
-        const pixel = new Uint8Array([0, 0, 0, 255]);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+        // The camera / video frame texture is shared by every renderer of the context and
+        // uploaded once per frame (glResources.cameraTexture); bound only by shaders using u_camera
+        this.cameraTexture = null;
     }
 
     async enableCamera() {
@@ -221,38 +199,20 @@ export class ShaderPreview {
         }
     }
 
+    /** Bind the shared camera texture (current video frame) for u_camera. */
     updateCameraTexture() {
-        // Try to find an active video source node
-        let videoElement = this.videoElement;
-
-        // If we have a graph context, try to find active video source nodes
-        if (this.graph) {
-            const activeVideoNode = this.graph.nodes.find(n =>
-                (n.isCameraNode || n.isScreenCaptureNode || n.isVideoURLNode) && n.isActive && n.videoElement
-            );
-            if (activeVideoNode) {
-                videoElement = activeVideoNode.videoElement;
-            }
-        }
-
-        // Check if video element has valid data (works for both main and offscreen instances)
-        if (!videoElement || !videoElement.readyState || videoElement.readyState < 2) {
-            return;
-        }
-
-        // Check if video is actually playing (has source and not paused)
-        const hasSource = videoElement.srcObject !== null || (videoElement.src && videoElement.src !== '');
-        if (videoElement.paused || !hasSource) {
-            return;
-        }
-
-        const gl = this.gl;
-        gl.bindTexture(gl.TEXTURE_2D, this.cameraTexture);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+        this.cameraTexture = cameraTexture(this.gl, this.graph || null, this.videoElement || null);
+        return this.cameraTexture;
     }
 
-    loadShader(shaderSource, onError) {
+    /**
+     * Load a compiled shader ({ vertex, fragment, uniformValues }).
+     * Returns true when the program is ready (now in use), false when it failed to
+     * compile (the previous program stays), or 'pending' with { async: true } while the
+     * driver links it in parallel (the previous program keeps rendering; the new one
+     * takes over in applyPending(), see CompilationManager).
+     */
+    loadShader(shaderSource, onError, { async = false } = {}) {
         const gl = this.gl;
 
         // Check if we got a valid shader (for offscreen mode)
@@ -271,64 +231,72 @@ export class ShaderPreview {
         // Store shader source for code inspection (even if compilation fails)
         this.currentShaderSource = shaderSource;
 
-        // Compile vertex shader
-        const vertexShader = gl.createShader(gl.VERTEX_SHADER);
-        gl.shaderSource(vertexShader, shaderSource.vertex);
-        gl.compileShader(vertexShader);
+        this._cancelPending();
+        const cache = programCache(gl);
+        const entry = cache.acquire(shaderSource.vertex, shaderSource.fragment, { async });
+        if (entry.status === 'pending') {
+            this._pending = { entry, source: shaderSource, onError };
+            return 'pending';
+        }
+        return this._applyEntry(entry, shaderSource, onError);
+    }
 
-        if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
-            const error = gl.getShaderInfoLog(vertexShader);
-            console.error((this.isOffscreen ? 'Preview node v' : 'V') + 'ertex shader' + (this.isOffscreen ? '' : ' compile') + ' error:', error);
-            if (onError) onError('Vertex shader compile error:\n' + error);
-            shaderSource.webglErrors.push(error);
+    /** Is an async load still linking? */
+    isPending() {
+        return !!this._pending && this._pending.entry.status === 'pending';
+    }
+
+    /** Has the async load's link finished (never blocks)? */
+    pendingComplete() {
+        if (!this._pending) return true;
+        return programCache(this.gl).isComplete(this._pending.entry);
+    }
+
+    /** Switch to the async-loaded program (blocks if it is still linking). Returns like loadShader. */
+    applyPending() {
+        const p = this._pending;
+        if (!p) return true;
+        this._pending = null;
+        programCache(this.gl).finish(p.entry);
+        return this._applyEntry(p.entry, p.source, p.onError);
+    }
+
+    _applyEntry(entry, shaderSource, onError) {
+        const cache = programCache(this.gl);
+        if (entry.status !== 'ready') {
+            const err = entry.error || { stage: 'link', log: 'program failed to link' };
+            const off = this.isOffscreen;
+            if (err.stage === 'vertex') {
+                console.error((off ? 'Preview node v' : 'V') + 'ertex shader' + (off ? '' : ' compile') + ' error:', err.log);
+                if (onError) onError('Vertex shader compile error:\n' + err.log);
+            } else if (err.stage === 'fragment') {
+                console.error((off ? 'Preview node f' : 'F') + 'ragment shader' + (off ? '' : ' compile') + ' error:', err.log);
+                if (onError) onError('Fragment shader compile error:\n' + err.log);
+            } else {
+                console.error((off ? 'Preview node p' : 'P') + 'rogram link error:', err.log);
+                if (onError) onError('Program link error:\n' + err.log);
+            }
+            shaderSource.webglErrors.push(err.log);
+            cache.release(entry);
             return false;
         }
 
-        // Compile fragment shader
-        const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
-        gl.shaderSource(fragmentShader, shaderSource.fragment);
-        gl.compileShader(fragmentShader);
-
-        if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
-            const error = gl.getShaderInfoLog(fragmentShader);
-            console.error((this.isOffscreen ? 'Preview node f' : 'F') + 'ragment shader' + (this.isOffscreen ? '' : ' compile') + ' error:', error);
-            if (onError) onError('Fragment shader compile error:\n' + error);
-            shaderSource.webglErrors.push(error);
-            return false;
+        // Swap in (the previous program is released; the cache frees it when unused)
+        if (this._entry !== entry) {
+            const old = this._entry;
+            this._entry = entry;
+            this._rawProgram = null;
+            if (old) cache.release(old);
+        } else {
+            cache.release(entry); // already held: drop the extra reference
         }
-
-        // Link program
-        const program = gl.createProgram();
-        gl.attachShader(program, vertexShader);
-        gl.attachShader(program, fragmentShader);
-        gl.linkProgram(program);
-
-        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-            const error = gl.getProgramInfoLog(program);
-            console.error((this.isOffscreen ? 'Preview node p' : 'P') + 'rogram link error:', error);
-            if (onError) onError('Program link error:\n' + error);
-            shaderSource.webglErrors.push(error);
-            return false;
+        if (entry.fresh) {
+            ShaderPreview.programLinks++; // diagnostics: get_audio_status reports it (no relinks per frame)
+            entry.fresh = false;
         }
-
-        // Clean up old program
-        if (this.program) {
-            gl.deleteProgram(this.program);
-        }
-
-        this.program = program;
         this.customUniformValues = shaderSource.uniformValues || []; // Store custom uniform values
-
-        // Get all uniform locations dynamically
-        this.uniforms = {};
-        const numUniforms = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
-        for (let i = 0; i < numUniforms; i++) {
-            const info = gl.getActiveUniform(program, i);
-            this.uniforms[info.name] = gl.getUniformLocation(program, info.name);
-        }
-
-        if (!this.isOffscreen) {
-        }
+        this.uniforms = entry.uniforms;
+        this._attrib = entry.aPosition;
 
         // Start animation
         if (!this.animationId) {
@@ -338,36 +306,53 @@ export class ShaderPreview {
         return true;
     }
 
+    /** Render every frame (registers with the page's RenderLoop). */
     animate() {
+        renderLoop.add(this);
+        this.animationId = this.animationId || 1;
+    }
+
+    /** One frame: pre-render hook, per-frame texture uniforms, draw. */
+    frameTick() {
         // Call pre-render callback if set (for feedback nodes and texture updates)
         if (this.onBeforeRender) {
             this.onBeforeRender();
         }
 
         // Update feedback texture references before rendering
-        if (this.customUniformValues && this.customUniformValues.length > 0) {
-            for (const uniform of this.customUniformValues) {
+        this.refreshTextureUniforms();
+
+        this.render();
+    }
+
+    /** Re-resolve per-frame texture uniforms (Feedback read buffers, node-owned textures). */
+    refreshTextureUniforms() {
+        const list = this.customUniformValues;
+        if (list && list.length > 0) {
+            for (let i = 0; i < list.length; i++) {
+                const uniform = list[i];
                 // Update feedback texture each frame (all in same context now!)
                 if (uniform.type === 'sampler2D' && uniform.feedbackNodeId !== undefined && uniform.feedbackNode) {
                     uniform.texture = uniform.feedbackNode.getReadTexture();
                 }
+                // Textures owned by a node (image Param, JS texture outputs): null once freed
+                if (uniform.textureOwner) {
+                    uniform.texture = uniform.textureOwner.liveTexture(uniform.textureKey);
+                }
             }
         }
-
-        this.render();
-        this.animationId = requestAnimationFrame(() => this.animate());
     }
 
     stopRendering() {
         if (this.animationId) {
-            cancelAnimationFrame(this.animationId);
+            renderLoop.remove(this);
             this.animationId = null;
-            console.log('Rendering stopped');
         }
     }
 
     render() {
         const gl = this.gl;
+        this.frameCount++; // every draw (also direct render() calls: thumbnails, captures)
 
         // Bind framebuffer if using shared context
         if (this.usingSharedContext && this.framebuffer) {
@@ -378,7 +363,8 @@ export class ShaderPreview {
         const width = this.usingSharedContext ? this.width : this.canvas.width;
         const height = this.usingSharedContext ? this.height : this.canvas.height;
 
-        if (!this.program) {
+        const program = this.program;
+        if (!program) {
             // Render TV static noise when no program is loaded
             if (this.noiseProgram) {
                 gl.viewport(0, 0, width, height);
@@ -389,11 +375,11 @@ export class ShaderPreview {
                     gl.uniform2f(this.noiseUniforms.u_resolution, width, height);
                 }
                 if (this.noiseUniforms.u_time) {
-                    gl.uniform1f(this.noiseUniforms.u_time, (Date.now() - this.startTime) / 1000.0);
+                    gl.uniform1f(this.noiseUniforms.u_time, clock.u.time);
                 }
 
                 // Setup vertex attributes
-                const positionLocation = gl.getAttribLocation(this.noiseProgram, 'a_position');
+                const positionLocation = this._noiseAttrib;
                 gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
                 gl.enableVertexAttribArray(positionLocation);
                 gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
@@ -413,96 +399,116 @@ export class ShaderPreview {
             return;
         }
 
-        // Always try to update camera texture (will check internally if video is playing)
-        this.updateCameraTexture();
+        // viewportRect: [x, y, w, h] sub-rectangle of the target (debug probes render
+        // into cells of a shared atlas while u_resolution stays width x height)
+        const vp = this.viewportRect;
+        if (vp) gl.viewport(vp[0], vp[1], vp[2], vp[3]);
+        else gl.viewport(0, 0, width, height);
+        gl.useProgram(program);
 
-        gl.viewport(0, 0, width, height);
-        gl.useProgram(this.program);
-
+        const locs = this.uniforms;
         // Set standard uniforms
-        if (this.uniforms.u_resolution) {
-            gl.uniform2f(this.uniforms.u_resolution, width, height);
+        if (locs.u_resolution) {
+            gl.uniform2f(locs.u_resolution, width, height);
         }
-        if (this.uniforms.u_time) {
-            gl.uniform1f(this.uniforms.u_time, (Date.now() - this.startTime) / 1000.0);
-        }
-        if (this.uniforms.u_mouse) {
-            gl.uniform2f(this.uniforms.u_mouse,
+        // u_time + audio / beat uniforms (global clock, same values for every renderer this frame)
+        applyClockUniforms(gl, locs);
+        if (locs.u_mouse) {
+            gl.uniform2f(locs.u_mouse,
                 ShaderPreview.mouseX,
                 ShaderPreview.mouseY);
         }
 
-        // Set camera texture
-        if (this.uniforms.u_camera) {
+        // Set camera texture (current video frame, shared, uploaded once per frame)
+        if (locs.u_camera) {
             gl.activeTexture(gl.TEXTURE0);
-            gl.bindTexture(gl.TEXTURE_2D, this.cameraTexture);
-            gl.uniform1i(this.uniforms.u_camera, 0);
+            gl.bindTexture(gl.TEXTURE_2D, this.updateCameraTexture());
+            gl.uniform1i(locs.u_camera, 0);
         }
 
+        const uniformsToSet = this.customUniformValues || [];
+        const n = uniformsToSet.length;
+
         // Set custom uniforms - update values from UniformRegistry if available
-        if (this.customUniformValues && this.customUniformValues.length > 0) {
+        if (n > 0) {
             // If we have a uniform registry, update values from it
-            if (this.uniformRegistry) {
-                for (const uniform of this.customUniformValues) {
-                    const registryUniform = this.uniformRegistry.getUniform(uniform.name);
+            const registry = this.uniformRegistry;
+            if (registry) {
+                for (let i = 0; i < n; i++) {
+                    const uniform = uniformsToSet[i];
+                    const registryUniform = registry.getUniform(uniform.name);
                     if (registryUniform) {
                         uniform.value = registryUniform.value;
                     }
                 }
-            } else {
-                if (Math.random() < 0.01) {
-                    console.warn('[ShaderPreview] No uniformRegistry! Cannot fetch realtime uniform values');
-                }
+            } else if (!this._warnedRegistry) {
+                this._warnedRegistry = true;
+                console.warn('[ShaderPreview] No uniformRegistry! Cannot fetch realtime uniform values');
             }
-        }
 
-        const uniformsToSet = this.customUniformValues || [];
-
-        if (uniformsToSet.length > 0) {
             let textureUnit = 1; // Start at 1 since camera uses 0
 
-            for (const uniform of uniformsToSet) {
-                const location = this.uniforms[uniform.name];
+            for (let i = 0; i < n; i++) {
+                const uniform = uniformsToSet[i];
+                const location = locs[uniform.name];
 
                 if (location !== null && location !== undefined) {
-                    if (uniform.type === 'float') {
-                        // Update microphone RMS value each frame if this is a microphone node
-                        if (uniform.microphoneNode && uniform.microphoneNode.isActive) {
-                            const rms = uniform.microphoneNode.getRMS();
-                            uniform.value = rms;
-                        }
-                        // Update MIDI CC value each frame if this is a MIDI CC node
-                        if (uniform.midiCCNode) {
-                            uniform.value = uniform.midiCCNode.getValue();
-                        }
-                        gl.uniform1f(location, uniform.value);
-                    } else if (uniform.type === 'int') {
-                        gl.uniform1i(location, uniform.value);
-                    } else if (uniform.type === 'bool') {
-                        // GLSL bools are set as integers (0 or 1)
-                        gl.uniform1i(location, uniform.value ? 1 : 0);
-                    } else if (uniform.type === 'vec2') {
-                        gl.uniform2f(location, uniform.value[0], uniform.value[1]);
-                    } else if (uniform.type === 'vec3') {
-                        gl.uniform3f(location, uniform.value[0], uniform.value[1], uniform.value[2]);
-                    } else if (uniform.type === 'vec4') {
-                        gl.uniform4f(location, uniform.value[0], uniform.value[1], uniform.value[2], uniform.value[3]);
-                    } else if (uniform.type === 'sampler2D' && uniform.texture) {
-                        // Bind feedback texture
-                        gl.activeTexture(gl.TEXTURE0 + textureUnit);
-                        gl.bindTexture(gl.TEXTURE_2D, uniform.texture);
-                        gl.uniform1i(location, textureUnit);
-                        textureUnit++;
+                    const v = uniform.value;
+                    switch (uniform.type) {
+                        case 'float':
+                            // Update microphone RMS value each frame if this is a microphone node
+                            if (uniform.microphoneNode && uniform.microphoneNode.isActive) {
+                                uniform.value = uniform.microphoneNode.getRMS();
+                            }
+                            // Update MIDI CC value each frame if this is a MIDI CC node
+                            if (uniform.midiCCNode) {
+                                uniform.value = uniform.midiCCNode.getValue();
+                            }
+                            gl.uniform1f(location, uniform.value);
+                            break;
+                        case 'int':
+                            gl.uniform1i(location, v);
+                            break;
+                        case 'bool':
+                            // GLSL bools are set as integers (0 or 1)
+                            gl.uniform1i(location, v ? 1 : 0);
+                            break;
+                        case 'vec2':
+                            if (v) gl.uniform2f(location, v[0], v[1]);
+                            break;
+                        case 'vec3':
+                            if (v) gl.uniform3f(location, v[0], v[1], v[2]);
+                            break;
+                        case 'vec4':
+                            if (v) gl.uniform4f(location, v[0], v[1], v[2], v[3]);
+                            break;
+                        case 'sampler2D':
+                            // Node-owned textures (image Param, JS outputs, audio textures) are
+                            // re-resolved per draw: audio textures update on their first bind of a
+                            // frame, also inside pinned renders (render_preview)
+                            if (uniform.textureOwner) uniform.texture = uniform.textureOwner.liveTexture(uniform.textureKey);
+                            if (uniform.texture) {
+                                gl.activeTexture(gl.TEXTURE0 + textureUnit);
+                                gl.bindTexture(gl.TEXTURE_2D, uniform.texture);
+                                gl.uniform1i(location, textureUnit);
+                                textureUnit++;
+                            } else {
+                                // Programs are shared: don't inherit another renderer's unit
+                                gl.uniform1i(location, 0);
+                            }
+                            break;
                     }
-                } else {
-                    // Silently skip uniforms that don't exist in this shader
-                    // This is expected - different shaders use different subsets of nodes
                 }
+                // (uniforms this shader doesn't use are skipped: different shaders use different subsets)
             }
         }
 
+        // Extra per-draw uniforms (debug probes: sample-point mapping)
+        if (this.onSetUniforms) this.onSetUniforms(gl, locs);
+
         // Setup vertex attributes
-        const positionLocation = gl.getAttribLocation(this.program, 'a_position');
+        let positionLocation = this._attrib;
+        if (positionLocation === undefined || this._entry === null) positionLocation = gl.getAttribLocation(program, 'a_position');
         gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
         gl.enableVertexAttribArray(positionLocation);
         gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
@@ -516,13 +522,26 @@ export class ShaderPreview {
         }
     }
 
+    /** Free this renderer's GPU objects (the shared program / quad / camera texture are refcounted or shared). */
     destroy() {
-        if (this.animationId) {
-            cancelAnimationFrame(this.animationId);
+        this.stopRendering();
+        this._cancelPending();
+        const gl = this.gl;
+        if (gl) {
+            this._releaseEntry();
+            if (this._rawProgram) {
+                try { gl.deleteProgram(this._rawProgram); } catch (e) { /* ignore */ }
+                this._rawProgram = null;
+            }
+            if (this.framebuffer && this.framebuffer.texture) {
+                try {
+                    gl.deleteTexture(this.framebuffer.texture);
+                    gl.deleteFramebuffer(this.framebuffer.framebuffer);
+                } catch (e) { /* context lost */ }
+                this.framebuffer = null;
+            }
         }
-        if (this.program) {
-            this.gl.deleteProgram(this.program);
-        }
-        this.disableCamera();
+        // Only stop a camera this renderer started itself (the video element is shared)
+        if (this.cameraStream) this.disableCamera();
     }
 }

@@ -1,46 +1,34 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
 import * as response from '../shared/response';
-import * as jwt from '../shared/jwt';
-import * as db from '../shared/db';
+import { getStore } from '../shared/store';
+import { handle, optionalAuth, publicSummary } from '../shared/http';
+import { isProjectId } from '../shared/validate';
 
-export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  try {
-    // Get project ID from path
-    const projectId = event.pathParameters?.id;
-    if (!projectId) {
-      return response.error('Project ID is required', 400);
-    }
+/**
+ * GET /api/projects/{id} - full project. Unlisted and public projects are readable
+ * without auth; private ones only by their owner (anyone else gets the same 404 as
+ * for a missing project, so private projects don't leak their existence).
+ */
+export const handler = handle('Get project', async (event: APIGatewayProxyEvent) => {
+  const projectId = event.pathParameters?.id;
+  if (!isProjectId(projectId)) return response.error('Project not found', 404, { code: 'not_found' });
 
-    // Get project
-    const project = await db.getProject(projectId);
-    if (!project) {
-      return response.error('Project not found', 404);
-    }
+  const project = await getStore().getProject(projectId);
+  const auth = await optionalAuth(event);
+  const isOwner = !!(project && auth && project.userId === auth.userId);
 
-    // Try to get auth token (optional)
-    const token = jwt.extractToken(event.headers.Authorization || event.headers.authorization);
-    const payload = token ? jwt.verify(token) : null;
-
-    // Check if user has access
-    const isOwner = payload && project.userId === payload.userId;
-    const isPublic = project.isPublic === true;
-
-    if (!isOwner && !isPublic) {
-      return response.error('Project not found', 404); // Don't reveal existence of private projects
-    }
-
-    return response.success({
-      id: project.projectId,
-      name: project.name,
-      username: project.username,
-      data: project.data,
-      isPublic: project.isPublic,
-      isOwner: isOwner,
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-    });
-  } catch (err: any) {
-    console.error('Get project error:', err);
-    return response.error('Internal server error', 500);
+  if (!project || (!isOwner && project.isPublic !== true)) {
+    return response.error('This project is private or does not exist', 404, { code: 'not_found' });
   }
-}
+
+  return response.success(
+    {
+      ...publicSummary(project),
+      userId: project.userId,
+      data: project.data,
+      isOwner,
+    },
+    200,
+    { 'Cache-Control': isOwner || !project.isPublic ? 'private, no-store' : 'public, max-age=30' },
+  );
+});

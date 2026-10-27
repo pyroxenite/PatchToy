@@ -1,5 +1,20 @@
 import { NodeDefinitions } from '../core/NodeDefinitions.js';
 import { FloatingCodeEditor } from '../ui/FloatingCodeEditor.js';
+import { UIHelpers, h } from '../ui/UIHelpers.js';
+import { navigate, paths } from '../core/router.js';
+import { collectCustomNodes, sanitizeCustomNodeMap } from '../core/customNodes.js';
+import { contentGate } from '../core/contentGate.js';
+
+const AUTOSAVE_KEY = 'patchtoy_graph';
+/** Raw copy of an autosave that failed to restore (never overwritten by a later autosave). */
+const AUTOSAVE_BACKUP_KEY = 'patchtoy_graph_corrupt';
+
+/** Client-side visibility of a project card / state ('private' | 'unlisted' | 'public'). */
+export function visibilityOf(p) {
+    if (!p) return 'private';
+    if (p.visibility === 'public' || p.visibility === 'unlisted' || p.visibility === 'private') return p.visibility;
+    return p.isPublic ? 'unlisted' : 'private';
+}
 
 export class ProjectManager {
     constructor(nodeGraph, apiClient) {
@@ -8,6 +23,11 @@ export class ProjectManager {
         this.projectTitle = 'Untitled Project';
         this.currentProjectId = null;
         this.viewingSharedProject = null; // { id, name, username, isOwner }
+        /** Set by main.js: register a custom node scoped to the opened project / forget them. */
+        this.registerProjectCustomNode = null;
+        this.releaseCustomNodes = null;
+        /** False while a restore failed: autosaving would overwrite what couldn't be read. */
+        this.autosaveEnabled = true;
 
         // Enhanced project state
         this.projectState = {
@@ -22,35 +42,80 @@ export class ProjectManager {
         };
     }
 
+    /**
+     * Register a project's embedded custom nodes, scoped to that project. Invalid ones
+     * (bad names, built-in names like "UV", "__proto__") are skipped with one warning.
+     */
+    registerCustomNodes(customNodes, onCreateCustomNode = null, { quiet = false } = {}) {
+        const dropped = [];
+        const valid = sanitizeCustomNodeMap(customNodes, (name, why) => dropped.push({ name, why }));
+        const register = this.registerProjectCustomNode || onCreateCustomNode;
+        for (const [name, glsl] of valid) {
+            const ok = register ? register(name, glsl) : false;
+            if (!ok) dropped.push({ name, why: 'its GLSL could not be parsed' });
+        }
+        if (dropped.length) {
+            for (const d of dropped) console.warn(`[custom nodes] skipped ${JSON.stringify(String(d.name).slice(0, 60))}: ${d.why}`);
+            if (!quiet) {
+                UIHelpers.notify(
+                    dropped.map(d => `“${String(d.name).slice(0, 40)}”: ${d.why}`).slice(0, 4).join('\n'),
+                    'warning',
+                    { title: `${dropped.length} custom node${dropped.length > 1 ? 's' : ''} in this project ${dropped.length > 1 ? 'were' : 'was'} ignored` }
+                );
+            }
+        }
+        return dropped;
+    }
+
+    /** Warn about nodes that couldn't be restored (kept in the project data, see NodeGraph.deserialize). */
+    reportMissingNodes() {
+        const missing = this.nodeGraph.missingNodes || [];
+        if (!missing.length) return;
+        const types = [...new Set(missing.map(n => n.type))].slice(0, 5).join(', ');
+        UIHelpers.notify(`Unknown node types: ${types}. They are kept in the project but not shown.`, 'warning', {
+            title: `${missing.length} node${missing.length > 1 ? 's' : ''} couldn’t be restored`
+        });
+    }
+
     saveGraph() {
+        if (!this.autosaveEnabled) return;
         try {
+            const graph = this.nodeGraph.serialize();
             const data = {
-                graph: this.nodeGraph.serialize(),
+                graph,
+                // The custom nodes this patch needs travel with the autosave (scoped to it)
+                customNodes: collectCustomNodes(graph),
                 projectTitle: this.projectTitle,
                 currentProjectId: this.currentProjectId,
                 editorStates: FloatingCodeEditor.getAllStates(),
                 projectState: this.projectState
             };
-            localStorage.setItem('patchtoy_graph', JSON.stringify(data));
+            localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data));
         } catch (e) {
             console.error('Failed to save graph:', e);
         }
     }
 
     loadGraph() {
+        let saved = null;
         try {
-            const saved = localStorage.getItem('patchtoy_graph');
+            saved = localStorage.getItem(AUTOSAVE_KEY);
             if (saved) {
                 const data = JSON.parse(saved);
 
                 // Handle old format (just graph) and new format (with metadata)
                 if (data.graph) {
-                    this.nodeGraph.deserialize(data.graph);
+                    // Set metadata first: deserialize() fires onGraphChanged -> saveGraph(),
+                    // which would otherwise persist the default title over the saved one.
                     this.projectTitle = data.projectTitle || 'Untitled Project';
                     this.currentProjectId = data.currentProjectId || null;
                     document.getElementById('projectTitleDisplay').textContent = this.projectTitle;
 
+                    // Custom nodes embedded in the autosave (2.0+), scoped to this patch
+                    if (data.customNodes) this.registerCustomNodes(data.customNodes, null, { quiet: true });
+
                     // Restore project state if present
+                    const wasDirty = data.projectState ? !!data.projectState.isDirty : false;
                     if (data.projectState) {
                         this.projectState = { ...data.projectState };
                         this.updateOwnershipDisplay();
@@ -64,6 +129,16 @@ export class ProjectManager {
                         }
                     }
 
+                    // Someone else's project (restored after a reload): remote media waits for consent
+                    const ps = this.projectState;
+                    contentGate.setRestricted(ps.source === 'cloud' && !!ps.projectId && !ps.isOwner);
+                    this.nodeGraph.deserialize(data.graph);
+                    this.reportMissingNodes();
+                    // Loading isn't an edit: keep the saved dirty flag (and persist it, since
+                    // deserialize() just autosaved isDirty=true via onGraphChanged)
+                    this.projectState.isDirty = wasDirty;
+                    this.saveGraph();
+
                     // Return editor states if present (caller will restore them)
                     return data.editorStates || [];
                 } else {
@@ -73,13 +148,27 @@ export class ProjectManager {
                 }
             } else {
                 // No saved data - initialize with bare minimum
-                console.log('No saved graph found, initializing empty project');
                 this.initializeEmptyProject();
             }
         } catch (e) {
             console.error('Failed to load graph:', e);
-            // On error, initialize with bare minimum
-            this.initializeEmptyProject();
+            // Never overwrite an autosave that couldn't be read: keep a raw copy, start empty
+            // without saving, and tell the user
+            try {
+                if (saved) localStorage.setItem(AUTOSAVE_BACKUP_KEY, saved);
+            } catch (err) { /* quota */ }
+            this.autosaveEnabled = false;
+            try {
+                try { this.nodeGraph.deserialize({ nodes: [], connections: [], nextNodeId: 0 }); } catch (err) { /* ignore */ }
+                this.initializeEmptyProject();
+            } finally {
+                this.autosaveEnabled = true;
+            }
+            UIHelpers.notify(
+                `Your last patch couldn’t be restored (${e.message}). A copy is kept in this browser (localStorage “${AUTOSAVE_BACKUP_KEY}”).`,
+                'error',
+                { title: 'Autosave not restored' }
+            );
         }
         return [];
     }
@@ -88,6 +177,7 @@ export class ProjectManager {
      * Initialize an empty project with bare minimum data
      */
     initializeEmptyProject() {
+        contentGate.setRestricted(false);
         this.projectTitle = 'Untitled Project';
         this.currentProjectId = null;
         this.viewingSharedProject = null;
@@ -116,23 +206,14 @@ export class ProjectManager {
 
     saveProjectToFile() {
         try {
-            // Collect all custom nodes
-            const customNodes = {};
-            for (const [name, def] of Object.entries(NodeDefinitions)) {
-                if (def.isCustomNode) {
-                    customNodes[name] = {
-                        category: def.category,
-                        inputs: def.inputs,
-                        outputs: def.outputs,
-                        customGLSL: def.customGLSL
-                    };
-                }
-            }
+            // The custom nodes the graph uses
+            const graph = this.nodeGraph.serialize();
+            const customNodes = collectCustomNodes(graph);
 
             // Create project data
             const projectData = {
                 version: '1.0',
-                graph: this.nodeGraph.serialize(),
+                graph,
                 customNodes: customNodes,
                 editorStates: FloatingCodeEditor.getAllStates(),
                 timestamp: new Date().toISOString()
@@ -150,14 +231,17 @@ export class ProjectManager {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
 
-            console.log('Project saved to file');
         } catch (e) {
             console.error('Failed to save project to file:', e);
-            alert('Failed to save project: ' + e.message);
+            UIHelpers.notify(e.message, 'error', { title: 'Failed to save project' });
         }
     }
 
-    async loadProjectFromFile(file, onCreateCustomNode, onSaveCustomNodes) {
+    /**
+     * @param {{releaseCustomNodes?: boolean}} [options] - releaseCustomNodes: false when the caller
+     *   already registered this project's custom nodes (automation)
+     */
+    async loadProjectFromFile(file, onCreateCustomNode, onSaveCustomNodes, { releaseCustomNodes = true } = {}) {
         if (!file) return;
 
         try {
@@ -169,35 +253,18 @@ export class ProjectManager {
                 throw new Error('Invalid project file: missing graph data');
             }
 
-            // Handle custom nodes
-            const customNodesToLoad = projectData.customNodes || {};
-            const conflictingNodes = [];
+            // Custom nodes: the project's own versions, scoped to it. The user's library is
+            // never changed and same-named library nodes come back when another project opens,
+            // so projects with different versions of a node (demos) open in any order.
+            if (releaseCustomNodes) this.releaseCustomNodes?.();
+            this.registerCustomNodes(projectData.customNodes || {}, onCreateCustomNode);
 
-            // Check for conflicts with existing custom nodes
-            for (const [name, nodeData] of Object.entries(customNodesToLoad)) {
-                const existing = NodeDefinitions[name];
-                if (existing && existing.isCustomNode) {
-                    // Check if GLSL is different
-                    if (existing.customGLSL !== nodeData.customGLSL) {
-                        conflictingNodes.push({ name, existing, incoming: nodeData });
-                    }
-                } else if (!existing) {
-                    // New custom node - load it
-                    onCreateCustomNode(name, nodeData.customGLSL, true);
-                }
-            }
-
-            // Handle conflicts
-            if (conflictingNodes.length > 0) {
-                const resolved = await this.resolveCustomNodeConflicts(conflictingNodes, onCreateCustomNode);
-                if (!resolved) {
-                    console.log('Load cancelled by user');
-                    return;
-                }
-            }
+            // Files you open yourself load their media directly
+            contentGate.setRestricted(false);
 
             // Load the graph
             this.nodeGraph.deserialize(projectData.graph);
+            this.reportMissingNodes();
 
             // Update project state - loaded from file has no cloud ID
             this.projectState = {
@@ -217,9 +284,8 @@ export class ProjectManager {
 
             // Save to localStorage (skip project copy since loaded from file)
             this.saveGraph();
-            onSaveCustomNodes();
+            onSaveCustomNodes?.();
 
-            console.log('Project loaded from file');
 
             // Return editor states for restoration
             return {
@@ -228,128 +294,72 @@ export class ProjectManager {
             };
         } catch (e) {
             console.error('Failed to load project from file:', e);
-            alert('Failed to load project: ' + e.message);
+            UIHelpers.notify(e.message, 'error', { title: 'Failed to load project' });
             return false;
         }
     }
 
     async resolveCustomNodeConflicts(conflicts, onCreateCustomNode) {
         return new Promise((resolve) => {
-            const overlay = document.createElement('div');
-            overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;';
-
-            const dialog = document.createElement('div');
-            dialog.style.cssText = 'background: #2d2d2d; border: 1px solid #444; border-radius: 8px; padding: 20px; width: 600px; max-width: 90vw; max-height: 80vh; overflow-y: auto;';
-
-            const title = document.createElement('h2');
-            title.textContent = 'Custom Node Conflicts';
-            title.style.cssText = 'margin: 0 0 15px 0; color: #fff; font-size: 18px;';
-            dialog.appendChild(title);
-
-            const description = document.createElement('p');
-            description.textContent = 'The following custom nodes already exist with different code. Choose which version to keep:';
-            description.style.cssText = 'color: #ccc; margin-bottom: 20px;';
-            dialog.appendChild(description);
+            let result = false;
+            const m = UIHelpers.createModal({
+                title: 'Custom node conflicts',
+                subtitle: 'These custom nodes already exist with different code. Choose which version to keep.',
+                className: 'pt-modal--wide',
+                onClose: () => resolve(result)
+            });
 
             const choices = {};
 
             for (const conflict of conflicts) {
-                const conflictDiv = document.createElement('div');
-                conflictDiv.style.cssText = 'margin-bottom: 20px; padding: 15px; background: #1e1e1e; border-radius: 4px;';
+                const card = h('div', { className: 'pt-choice-card' });
+                card.appendChild(h('div', { className: 'pt-choice-title', text: conflict.name }));
 
-                const nodeName = document.createElement('div');
-                nodeName.textContent = `Node: ${conflict.name}`;
-                nodeName.style.cssText = 'color: #4ec9b0; font-weight: bold; margin-bottom: 10px;';
-                conflictDiv.appendChild(nodeName);
-
-                const optionLocal = document.createElement('label');
-                optionLocal.style.cssText = 'display: block; color: #ccc; margin: 5px 0; cursor: pointer;';
-                const radioLocal = document.createElement('input');
-                radioLocal.type = 'radio';
-                radioLocal.name = `conflict_${conflict.name}`;
-                radioLocal.value = 'local';
+                const group = `conflict_${conflict.name}`;
+                const radioLocal = h('input', { type: 'radio', name: group, value: 'local' });
                 radioLocal.checked = true;
-                radioLocal.style.marginRight = '8px';
-                optionLocal.appendChild(radioLocal);
-                optionLocal.appendChild(document.createTextNode('Keep local version (currently in editor)'));
-                conflictDiv.appendChild(optionLocal);
+                const radioIncoming = h('input', { type: 'radio', name: group, value: 'incoming' });
 
-                const optionIncoming = document.createElement('label');
-                optionIncoming.style.cssText = 'display: block; color: #ccc; margin: 5px 0; cursor: pointer;';
-                const radioIncoming = document.createElement('input');
-                radioIncoming.type = 'radio';
-                radioIncoming.name = `conflict_${conflict.name}`;
-                radioIncoming.value = 'incoming';
-                radioIncoming.style.marginRight = '8px';
-                optionIncoming.appendChild(radioIncoming);
-                optionIncoming.appendChild(document.createTextNode('Use version from file'));
-                conflictDiv.appendChild(optionIncoming);
-
-                dialog.appendChild(conflictDiv);
+                card.appendChild(h('label', { className: 'pt-radio' }, [radioLocal, 'Keep my version (currently in this browser)']));
+                card.appendChild(h('label', { className: 'pt-radio' }, [radioIncoming, 'Use the version from the file']));
+                m.body.appendChild(card);
 
                 choices[conflict.name] = { radioLocal, radioIncoming, conflict };
             }
 
-            const buttonContainer = document.createElement('div');
-            buttonContainer.style.cssText = 'display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;';
-
-            const cancelBtn = document.createElement('button');
-            cancelBtn.textContent = 'Cancel';
-            cancelBtn.style.cssText = 'padding: 8px 16px; background: #444; border: 1px solid #666; border-radius: 4px; color: #fff; cursor: pointer;';
-            cancelBtn.addEventListener('click', () => {
-                overlay.remove();
-                resolve(false);
-            });
-
-            const continueBtn = document.createElement('button');
-            continueBtn.textContent = 'Continue';
-            continueBtn.style.cssText = 'padding: 8px 16px; background: #007acc; border: 1px solid #007acc; border-radius: 4px; color: #fff; cursor: pointer;';
-            continueBtn.addEventListener('click', () => {
-                // Apply choices
-                for (const [name, choice] of Object.entries(choices)) {
-                    if (choice.radioIncoming.checked) {
-                        // Use incoming version - recreate the node
-                        onCreateCustomNode(name, choice.conflict.incoming.customGLSL, true);
+            const cancelBtn = UIHelpers.button('Cancel', { variant: 'ghost', onClick: () => m.close() });
+            const continueBtn = UIHelpers.button('Continue', {
+                variant: 'primary',
+                onClick: () => {
+                    for (const [name, choice] of Object.entries(choices)) {
+                        if (choice.radioIncoming.checked) {
+                            // Use incoming version - recreate the node
+                            onCreateCustomNode(name, choice.conflict.incoming.customGLSL, true);
+                        }
+                        // If radioLocal is checked, do nothing (keep existing)
                     }
-                    // If radioLocal is checked, do nothing (keep existing)
+                    result = true;
+                    m.close();
                 }
-                overlay.remove();
-                resolve(true);
             });
-
-            buttonContainer.appendChild(cancelBtn);
-            buttonContainer.appendChild(continueBtn);
-            dialog.appendChild(buttonContainer);
-
-            overlay.appendChild(dialog);
-            document.body.appendChild(overlay);
+            m.footer.append(cancelBtn, continueBtn);
         });
     }
 
     async saveToCloud() {
         if (!this.apiClient.isLoggedIn()) {
-            alert('Please login first');
             return { needsLogin: true };
         }
 
         try {
-            // Collect all custom nodes
-            const customNodes = {};
-            for (const [nodeName, def] of Object.entries(NodeDefinitions)) {
-                if (def.isCustomNode) {
-                    customNodes[nodeName] = {
-                        category: def.category,
-                        inputs: def.inputs,
-                        outputs: def.outputs,
-                        customGLSL: def.customGLSL
-                    };
-                }
-            }
+            // The custom nodes the graph uses
+            const graph = this.nodeGraph.serialize();
+            const customNodes = collectCustomNodes(graph);
 
             // Create project data with custom nodes
             const projectData = {
                 version: '1.0',
-                graph: this.nodeGraph.serialize(),
+                graph,
                 customNodes: customNodes,
                 editorStates: FloatingCodeEditor.getAllStates(),
                 timestamp: new Date().toISOString()
@@ -383,7 +393,6 @@ export class ProjectManager {
                     customNodes: projectData.customNodes
                 });
 
-                console.log('Project updated:', this.projectTitle);
                 return { success: true };
             } else if (source === 'cloud' && !isOwner) {
                 // Fork: Create copy of someone else's project
@@ -391,19 +400,26 @@ export class ProjectManager {
                     needsName: true,
                     projectData,
                     isFork: true,
-                    originalName: this.projectState.title
+                    forkedFrom: projectId,
+                    originalName: this.projectState.title,
+                    originalOwner: this.projectState.ownerUsername
                 };
             }
         } catch (err) {
-            alert('Failed to save project: ' + err.message);
+            UIHelpers.notify(err.message, 'error', { title: 'Failed to save project' });
             return { error: err };
         }
     }
 
-    async saveNewProject(name, projectData) {
+    /**
+     * Create a cloud project from the current graph.
+     * @param {{forkedFrom?: string, description?: string}} [extra] - forkedFrom: id of the project copied
+     */
+    async saveNewProject(name, projectData, extra = {}) {
         try {
             const currentUser = this.apiClient.getCurrentUser();
-            const result = await this.apiClient.saveProject(name, projectData);
+            const description = extra.description ?? this.projectState.description ?? '';
+            const result = await this.apiClient.saveProject(name, projectData, { forkedFrom: extra.forkedFrom, description });
 
             // Update legacy fields
             this.currentProjectId = result.id;
@@ -419,8 +435,16 @@ export class ProjectManager {
                 isDirty: false,
                 source: 'cloud',
                 lastModified: projectData.timestamp || new Date().toISOString(),
-                title: name
+                title: name,
+                isPublic: !!result.isPublic,
+                visibility: visibilityOf(result),
+                description: result.description || description || '',
+                forkedFrom: result.forkedFrom || null,
+                thumbUrl: null
             };
+
+            // Your project now: its media loads directly
+            contentGate.setRestricted(false);
 
             // Update UI
             document.getElementById('projectTitleDisplay').textContent = name;
@@ -438,7 +462,11 @@ export class ProjectManager {
         }
     }
 
-    async loadCloudProject(projectId, onCreateCustomNode) {
+    /**
+     * Load a cloud project (own or public). Errors are reported with a toast, or
+     * rethrown with `throwErrors` (the caller shows its own message).
+     */
+    async loadCloudProject(projectId, onCreateCustomNode, { throwErrors = false } = {}) {
         try {
             // IMPORTANT: Save current project's local copy before switching
             // This must happen BEFORE we change projectState
@@ -451,11 +479,9 @@ export class ProjectManager {
                     projectState: this.projectState
                 };
                 this.saveLocalProjectCopy(this.projectState.projectId, currentData);
-                console.log(`Saved local copy of project ${this.projectState.projectId} before switching`);
             }
 
             const project = await this.apiClient.getProject(projectId);
-            console.log('Loaded project from API:', project);
             const currentUser = this.apiClient.getCurrentUser();
 
             // Check if we have a local copy
@@ -471,7 +497,6 @@ export class ProjectManager {
 
                 if (localTime > cloudTime) {
                     useLocalCopy = true;
-                    console.log('Using local copy (more recent than cloud version)');
 
                     // Local copy has the full localStorage structure, extract the project data
                     // Need to reconstruct it in the same format as project.data
@@ -485,24 +510,25 @@ export class ProjectManager {
                 }
             }
 
+            if (!dataToLoad || !(dataToLoad.graph || dataToLoad.nodes)) throw new Error('Invalid project data format');
+            const isOwnerEarly = project.isOwner || (currentUser && project.userId === currentUser.userId);
+            // Someone else's project: remote media waits for consent (src/core/contentGate.js)
+            contentGate.setRestricted(!isOwnerEarly);
+            this.releaseCustomNodes?.();
+
             // Handle new format (with version, graph, customNodes)
             if (dataToLoad.graph) {
                 // New format: {version, graph, customNodes, ...}
-                // Load custom nodes first
-                if (dataToLoad.customNodes) {
-                    for (const [nodeName, nodeData] of Object.entries(dataToLoad.customNodes)) {
-                        onCreateCustomNode(nodeName, nodeData.customGLSL);
-                    }
-                }
+                // Custom nodes first, scoped to this project (never written to the user's library)
+                if (dataToLoad.customNodes) this.registerCustomNodes(dataToLoad.customNodes, onCreateCustomNode);
 
                 // Then deserialize the graph
                 this.nodeGraph.deserialize(dataToLoad.graph);
-            } else if (dataToLoad.nodes) {
+            } else {
                 // Very old format - graph data directly with nodes/connections
                 this.nodeGraph.deserialize(dataToLoad);
-            } else {
-                throw new Error('Invalid project data format');
             }
+            this.reportMissingNodes();
 
             // Update legacy fields
             this.projectTitle = project.name;
@@ -518,7 +544,13 @@ export class ProjectManager {
                 isDirty: useLocalCopy, // Mark as dirty if using local (newer) copy
                 source: 'cloud',
                 lastModified: useLocalCopy ? localCopy.localTimestamp : (project.data.timestamp || new Date().toISOString()),
-                title: project.name
+                title: project.name,
+                isPublic: project.isPublic === true,
+                visibility: visibilityOf(project),
+                description: project.description || '',
+                forkedFrom: project.forkedFrom || null,
+                thumbUrl: project.thumbUrl || null,
+                views: project.views || 0
             };
 
             // Update legacy viewingSharedProject for compatibility
@@ -543,7 +575,6 @@ export class ProjectManager {
             // Save to localStorage (but skip project copy to avoid overwriting)
             this.saveGraph();
 
-            console.log(`Loaded project: ${project.name}${useLocalCopy ? ' (from local copy)' : ''}`);
 
             // Return editor states if present
             return {
@@ -552,7 +583,8 @@ export class ProjectManager {
             };
         } catch (err) {
             console.error('Load error:', err);
-            alert('Failed to load project: ' + err.message);
+            if (throwErrors) throw err;
+            UIHelpers.notify(err.message, 'error', { title: 'Failed to load project' });
             return false;
         }
     }
@@ -583,6 +615,7 @@ export class ProjectManager {
         };
 
         this.clearProjectUrl();
+        this.updateOwnershipDisplay();
         // Save to localStorage only (no project copy for cleared project)
         this.saveGraph();
     }
@@ -592,16 +625,19 @@ export class ProjectManager {
      */
     setProjectUrl(projectId) {
         if (!projectId) return;
-        const url = new URL(window.location);
-        url.searchParams.set('project', projectId);
-        window.history.replaceState({}, '', url);
+        // Share links are /p/<id> (src/core/router.js). Opened from the project browser
+        // (/explore, /u/<name>), keep that page in the history so Back returns to it.
+        const fromBrowser = /^\/(explore|u)(\/|$)/.test(window.location.pathname);
+        navigate(paths.project(projectId), { replace: !fromBrowser, silent: true });
     }
 
     /**
      * Clear project from URL
      */
     clearProjectUrl() {
-        window.history.replaceState({}, '', window.location.pathname);
+        if (/^\/(p|u|explore)(\/|$)/.test(window.location.pathname) || new URLSearchParams(window.location.search).has('project')) {
+            navigate(paths.home(), { replace: true, silent: true });
+        }
     }
 
     /**
@@ -670,7 +706,7 @@ export class ProjectManager {
             const container = titleElement.parentElement;
             const newElement = document.createElement('div');
             newElement.id = 'projectOwnershipDisplay';
-            newElement.style.cssText = 'font-size: 11px; color: #888; margin-top: 2px;';
+            newElement.className = 'tb-project-owner';
             container.appendChild(newElement);
             ownershipElement = newElement;
         }
@@ -685,5 +721,7 @@ export class ProjectManager {
         } else {
             ownershipElement.style.display = 'none';
         }
+        // Community chrome (viewing banner, "Save a copy", URL / title) follows the project state
+        window.dispatchEvent(new CustomEvent('patchtoy:project-state'));
     }
 }

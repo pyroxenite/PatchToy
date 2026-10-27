@@ -3,45 +3,221 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PatchToy - GLSL Node Editor</title>
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/editor/editor.main.min.css">
+    <title>PatchToy — Node-based GLSL shader playground</title>
+    <meta name="description" content="PatchToy is a node-based GLSL shader editor: patch nodes together like a modular synth and watch live WebGL previews update as you go.">
+    <meta name="theme-color" content="#14161c">
+    <meta name="color-scheme" content="dark">
+    <meta property="og:title" content="PatchToy">
+    <meta property="og:description" content="Patch GLSL shaders together like a modular synth, with live WebGL previews.">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-    <div id="app">
-        <!-- Floating UI Controls -->
-        <div id="floatingControls">
-            <!-- Top-left: Logo and Project Menu -->
-            <div id="topLeftControls">
-                <img src="patchtoy.png" alt="PatchToy" class="patchtoy-logo">
-                <button id="projectMenuBtn" class="project-title-btn">
-                    <span id="projectTitleDisplay">Untitled Project</span>
-                    <span class="dropdown-arrow">▾</span>
+    <div id="app" class="pt-app">
+        <!-- ============ Top bar ============ -->
+        <header id="topbar" class="pt-topbar">
+            <div class="tb-group">
+                <button id="sidebarToggleBtn" class="pt-icon-btn is-active" data-tip="Toggle library" data-kbd="\" aria-pressed="true" aria-controls="librarySidebar">
+                    <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-sidebar"/></svg>
                 </button>
-                <button id="saveCloudBtn" class="icon-btn" title="Save to Cloud" style="display: none;">💾</button>
-                <button id="playStopBtn" class="icon-btn active" title="Playing - auto-compile enabled">▶️</button>
-                <button id="cameraBtn" class="icon-btn" title="Toggle Camera">📷</button>
-                <button id="micBtn" class="icon-btn" title="Enable Microphone">🎤</button>
-                <button id="midiBtn" class="icon-btn" title="Enable MIDI">🎹</button>
-                <button id="addNodeBtn" class="icon-btn" title="Add Node">➕</button>
+                <span class="tb-logo"><img src="/patchtoy.png" alt="PatchToy" width="59" height="12"></span>
             </div>
 
-            <!-- Top-right: Account -->
-            <div id="topRightControls">
-                <button id="accountBtn" class="floating-btn" title="Account">👤</button>
+            <span class="tb-sep"></span>
+
+            <button id="projectMenuBtn" class="tb-project" aria-haspopup="dialog" data-tip="Project">
+                <span class="tb-project-text">
+                    <span id="projectTitleDisplay">Untitled Project</span>
+                </span>
+                <span id="projectDirtyDot" class="tb-dirty" aria-hidden="true"></span>
+                <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-chevronDown"/></svg>
+            </button>
+            <!-- Open: My projects / Community / Demos as a panel under the button (src/ui/ProjectBrowser.js) -->
+            <button id="openBtn" class="pt-btn pt-btn--ghost tb-open" aria-haspopup="dialog" aria-expanded="false" data-tip="Open a project: yours, Community or a demo" data-kbd="⌘O">
+                <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-folder"/></svg>
+                <span class="tb-btn-label">Open</span>
+            </button>
+
+            <span class="tb-sep"></span>
+
+            <div class="tb-group" role="group" aria-label="Transport">
+                <button id="playStopBtn" class="pt-icon-btn tb-play is-active" data-tip="Live — auto-compile on" aria-pressed="true">
+                    <svg class="pt-i i-play" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-play"/></svg>
+                    <svg class="pt-i i-pause" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-pause"/></svg>
+                </button>
+                <button id="compileStatusBtn" class="tb-pill is-ok" data-tip="Show shader console">
+                    <span class="tb-pill-led"></span>
+                    <span class="tb-pill-label">Compiled</span>
+                </button>
             </div>
+
+            <span class="tb-sep"></span>
+
+            <div class="tb-group" role="group" aria-label="Devices">
+                <button id="cameraBtn" class="pt-icon-btn tb-device" data-tip="Camera">
+                    <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-camera"/></svg>
+                </button>
+                <button id="micBtn" class="pt-icon-btn tb-device" data-tip="Microphone">
+                    <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-mic"/></svg>
+                </button>
+                <button id="midiBtn" class="pt-icon-btn tb-device" data-tip="MIDI">
+                    <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-midi"/></svg>
+                </button>
+            </div>
+
+            <span class="tb-sep"></span>
+
+            <!-- Audio source, beat LED, BPM + confidence, tap tempo (src/ui/AudioPanel.js) -->
+            <div id="audioBar" class="tb-group tb-audio" role="group" aria-label="Audio and beat">
+                <button id="audioSourceBtn" class="tb-audio-src" aria-haspopup="dialog" data-tip="Audio source &amp; beat sync">
+                    <svg class="pt-i tb-audio-icon" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-wave"/></svg>
+                    <span class="tb-audio-name">No audio</span>
+                    <span class="tb-audio-meter" aria-hidden="true"><span class="tb-audio-meter-fill"></span></span>
+                </button>
+                <button id="audioPlayBtn" class="pt-icon-btn pt-icon-btn--sm tb-audio-play is-paused" data-tip="Play music" hidden>
+                    <svg class="pt-i i-play" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-play"/></svg>
+                    <svg class="pt-i i-pause" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-pause"/></svg>
+                </button>
+                <button id="bpmBtn" class="tb-bpm is-free" aria-haspopup="dialog" data-tip="Tempo · click for audio settings">
+                    <span id="beatLed" class="tb-beat-led is-free" aria-hidden="true"></span>
+                    <span class="tb-bpm-value">120</span>
+                    <span class="tb-bpm-unit">BPM</span>
+                    <span class="tb-conf" data-level="0" aria-hidden="true" hidden><i></i><i></i><i></i></span>
+                </button>
+                <button id="tapBtn" class="tb-tap" data-tip="Tap tempo — first tap sets the downbeat">Tap</button>
+            </div>
+
+            <div class="tb-spacer"></div>
+
+            <!-- Record / offline export / output window (src/output/OutputPanel.js) -->
+            <button id="outputBtn" class="pt-btn pt-btn--ghost tb-output" aria-haspopup="dialog" data-tip="Record, export and output window">
+                <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-output"/></svg>
+                <span class="tb-btn-label">Output</span>
+            </button>
+
+            <button id="paramsToggleBtn" class="pt-icon-btn tb-params" data-tip="Show parameters" data-kbd="P" aria-pressed="false" aria-controls="paramsPanel">
+                <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-sliders"/></svg>
+            </button>
+
+            <button id="addNodeBtn" class="pt-btn pt-btn--primary" data-tip="Search and add a node" data-kbd="Tab">
+                <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-plus"/></svg>
+                <span>Add node</span>
+                <kbd>Tab</kbd>
+            </button>
+            <button id="saveCloudBtn" class="pt-btn" data-tip="Save to cloud" data-kbd="⌘S">
+                <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-cloud"/></svg>
+                <span class="tb-btn-label">Save</span>
+            </button>
+
+            <span class="tb-sep"></span>
+
+            <!-- Help: tour, shortcuts, node reference (src/ui/help/HelpCenter.js) -->
+            <button id="helpBtn" class="pt-icon-btn" data-tip="Help" data-kbd="?" aria-haspopup="menu" aria-label="Help">
+                <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-help"/></svg>
+            </button>
+            <button id="accountBtn" class="tb-avatar" data-tip="Account">
+                <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-user"/></svg>
+            </button>
+        </header>
+
+        <!-- ============ Main ============ -->
+        <div class="pt-main">
+            <aside id="librarySidebar" class="pt-library" aria-label="Node library">
+                <div class="pt-library-inner">
+                    <div class="lib-header">
+                        <span class="pt-label">Library</span>
+                        <span id="libraryCount" class="lib-count"></span>
+                    </div>
+                    <div class="lib-search">
+                        <div class="pt-input-group">
+                            <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-search"/></svg>
+                            <input id="librarySearch" class="pt-input" type="search" placeholder="Search nodes" spellcheck="false" autocomplete="off">
+                            <kbd>/</kbd>
+                        </div>
+                    </div>
+                    <div id="libraryList" class="lib-list" aria-label="Node types"></div>
+                    <div class="lib-footer">
+                        <button id="newGlslNodeBtn" class="pt-btn pt-btn--outline">
+                            <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-code"/></svg>
+                            <span>New GLSL node</span>
+                        </button>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main editing area -->
+            <div id="container">
+                <canvas id="nodeCanvas" tabindex="-1"></canvas>
+                <video id="cameraVideo" autoplay playsinline muted></video>
+                <div id="emptyState" class="pt-empty">
+                    <div class="pt-empty-card">
+                        <div class="pt-empty-title">Start patching</div>
+                        <div class="pt-empty-sub">Press <kbd>Tab</kbd> to search, or drag a node from the library</div>
+                        <div class="pt-empty-actions">
+                            <button id="emptyDemosBtn" class="pt-btn pt-btn--primary pt-empty-action" type="button">
+                                <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-gallery"/></svg>
+                                <span>Start from a demo</span>
+                            </button>
+                            <button id="emptyTourBtn" class="pt-btn pt-empty-action" type="button">
+                                <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-flag"/></svg>
+                                <span>Take the tour</span>
+                            </button>
+                            <button id="emptyShortcutsBtn" class="pt-btn pt-btn--ghost pt-empty-action" type="button">
+                                <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-keyboard"/></svg>
+                                <span>Read the shortcuts</span>
+                                <kbd>?</kbd>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Parameters panel: every Param node of the patch (src/ui/ParamsPanel.js) -->
+            <aside id="paramsPanel" class="pt-params" aria-label="Parameters">
+                <div class="pt-params-inner">
+                    <div class="pp-header">
+                        <span class="pt-label">Parameters</span>
+                        <span id="paramsCount" class="lib-count"></span>
+                        <span class="pp-spacer"></span>
+                        <button id="paramsAddBtn" class="pt-icon-btn pt-icon-btn--sm" data-tip="Add a parameter" aria-label="Add a parameter">
+                            <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-plus"/></svg>
+                        </button>
+                    </div>
+                    <div id="paramsList" class="pp-list" aria-label="Parameters"></div>
+                </div>
+            </aside>
         </div>
+
+        <!-- ============ Status bar ============ -->
+        <footer id="statusbar" class="pt-statusbar">
+            <div class="sb-group">
+                <span id="sbNodes" class="sb-item"><strong>0</strong> nodes</span>
+                <span id="sbLinks" class="sb-item"><strong>0</strong> links</span>
+                <span class="sb-sep"></span>
+                <button id="sbZoom" class="sb-item" data-tip="Reset zoom">100%</button>
+            </div>
+            <div class="sb-activity">
+                <span id="sbActivity" class="sb-activity-msg">
+                    <svg class="pt-i" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-spark"/></svg>
+                    <span class="sb-activity-text"></span>
+                </span>
+            </div>
+            <div class="sb-group">
+                <button id="sbCompile" class="sb-item is-ok" data-tip="Show shader console"><span class="sb-led"></span><span class="sb-compile-text">Ready</span></button>
+                <button id="sbOutput" class="sb-item sb-output" data-tip="Output: recording / output window" hidden></button>
+                <span class="sb-sep"></span>
+                <span id="sbFps" class="sb-item">-- fps</span>
+                <span id="mcpStatus" class="sb-mcp" data-tip="MCP bridge: not connected">
+                    <span class="sb-led"></span>MCP<span class="sb-mcp-state">· connected</span>
+                </span>
+            </div>
+        </footer>
 
         <!-- Hidden file input -->
-        <input type="file" id="loadFileInput" accept=".json" style="display: none;">
-
-        <!-- Main editing area -->
-        <div id="container">
-            <canvas id="nodeCanvas"></canvas>
-            <video id="cameraVideo" autoplay playsinline style="display: none;"></video>
-        </div>
+        <input type="file" id="loadFileInput" accept=".json,application/json" hidden>
     </div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
-    <script type="module" src="main.js"></script>
+
+    <!-- Monaco (code editors) loads on demand: src/ui/monacoLoader.js -->
+    <script type="module" src="/main.js"></script>
 </body>
 </html>

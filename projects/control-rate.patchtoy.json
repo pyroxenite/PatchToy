@@ -1,0 +1,1094 @@
+{
+  "name": "Control Rate",
+  "description": "Two signal rates in one patch. Pixel-rate cables (circles) are GLSL evaluated per pixel; control-rate cables (diamonds, dashed) run once per frame in JavaScript, keep state and reach the shader as live uniforms. An LFO through a Lag tints the glowing cell edges, a Beat Divider steps a Counter through four palettes (Select + Lag glide), an Envelope Follower on the bass (or the beat) punches the zoom, and a Threshold -> Trigger -> Sample & Hold of a random value shifts the hue. Play music or the metronome to drive it.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T13:04:19.290Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 0,
+        "type": "Comment",
+        "x": 40,
+        "y": 30,
+        "data": {
+          "text": "# Control rate\nTwo kinds of cables. **Pixel rate** (circles, solid): GLSL, evaluated for every pixel, no memory. **Control rate** (diamonds, dashed): JavaScript, once per frame before rendering, can keep state; reaches the shader as a live uniform (never recompiles). Events are dotted with a bolt.\n- LFO -> Lag -> glow colour\n- Beat Divider -> Counter -> palette index (Select + Lag glide)\n- Envelope Follower on the bass -> zoom punch\n- Threshold -> Trigger -> Sample & Hold of a random value -> hue\nPlay music or the metronome (top bar) to drive the zoom.",
+          "width": 520,
+          "height": 230,
+          "color": "violet"
+        }
+      },
+      {
+        "id": 1,
+        "type": "Comment",
+        "x": 40,
+        "y": 290,
+        "data": {
+          "text": "# Control rate (CPU)\n- once per frame, in dependency order\n- Lag, Counter, Sample & Hold keep state\n- values show live on the nodes",
+          "width": 300,
+          "height": 110,
+          "color": "green"
+        }
+      },
+      {
+        "id": 2,
+        "type": "Comment",
+        "x": 1000,
+        "y": 290,
+        "data": {
+          "text": "# Pixel rate (GPU)\n- compiled to GLSL, per pixel\n- control values arrive as uniforms\n- math fed only by CPU values runs at control rate (diamonds)",
+          "width": 330,
+          "height": 110,
+          "color": "blue"
+        }
+      },
+      {
+        "id": 3,
+        "type": "Beat",
+        "x": 40,
+        "y": 430,
+        "data": {
+          "decay": 5,
+          "rate": 1,
+          "threshold": 0.5,
+          "clock": "stable",
+          "gate": "fade"
+        }
+      },
+      {
+        "id": 4,
+        "type": "Audio",
+        "x": 40,
+        "y": 640,
+        "data": {}
+      },
+      {
+        "id": 5,
+        "type": "Multiply",
+        "x": 250,
+        "y": 470,
+        "data": {
+          "b": 0.45
+        }
+      },
+      {
+        "id": 6,
+        "type": "Max",
+        "x": 330,
+        "y": 600,
+        "data": {
+          "a": 0,
+          "b": 1
+        }
+      },
+      {
+        "id": 7,
+        "type": "EnvelopeFollower",
+        "x": 500,
+        "y": 560,
+        "data": {
+          "in": 0,
+          "attack": 0.02,
+          "release": 0.35
+        }
+      },
+      {
+        "id": 8,
+        "type": "Remap",
+        "x": 740,
+        "y": 560,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 1,
+          "outMax": 0.72
+        }
+      },
+      {
+        "id": 9,
+        "type": "LFO",
+        "x": 40,
+        "y": 840,
+        "data": {
+          "rate": 0.09,
+          "phase": 0,
+          "width": 0.5,
+          "shape": "tri",
+          "unit": "hz"
+        }
+      },
+      {
+        "id": 10,
+        "type": "Lag",
+        "x": 260,
+        "y": 860,
+        "data": {
+          "in": 0,
+          "up": 1.2,
+          "down": 1.2
+        }
+      },
+      {
+        "id": 11,
+        "type": "Mix",
+        "x": 500,
+        "y": 860,
+        "data": {
+          "a": [
+            1,
+            0.42,
+            0.18
+          ],
+          "b": [
+            0.2,
+            0.55,
+            1
+          ],
+          "t": 0.5
+        }
+      },
+      {
+        "id": 12,
+        "type": "BeatDivider",
+        "x": 40,
+        "y": 1080,
+        "data": {
+          "every": 2,
+          "offset": 0,
+          "unsure": "hold"
+        }
+      },
+      {
+        "id": 13,
+        "type": "Counter",
+        "x": 260,
+        "y": 1080,
+        "data": {
+          "step": 1,
+          "length": 4,
+          "start": 0,
+          "mode": "wrap"
+        }
+      },
+      {
+        "id": 14,
+        "type": "SelectIndex",
+        "x": 500,
+        "y": 1080,
+        "data": {
+          "0": [
+            0,
+            0.33,
+            0.67
+          ],
+          "1": [
+            0.5,
+            0.2,
+            0.25
+          ],
+          "2": [
+            0.8,
+            0.9,
+            0.3
+          ],
+          "3": [
+            0,
+            0.1,
+            0.2
+          ],
+          "index": 0,
+          "overflow": "wrap",
+          "count": 4
+        }
+      },
+      {
+        "id": 15,
+        "type": "Lag",
+        "x": 740,
+        "y": 1100,
+        "data": {
+          "in": 0,
+          "up": 0.7,
+          "down": 0.7
+        }
+      },
+      {
+        "id": 16,
+        "type": "LFO",
+        "x": 40,
+        "y": 1350,
+        "data": {
+          "rate": 0.19,
+          "phase": 0.3,
+          "width": 0.5,
+          "shape": "sine",
+          "unit": "hz"
+        }
+      },
+      {
+        "id": 17,
+        "type": "Threshold",
+        "x": 260,
+        "y": 1350,
+        "data": {
+          "in": 0,
+          "high": 0.85,
+          "low": 0.25
+        }
+      },
+      {
+        "id": 18,
+        "type": "Trigger",
+        "x": 500,
+        "y": 1350,
+        "data": {
+          "in": 0,
+          "threshold": 0.5,
+          "edge": "rising"
+        }
+      },
+      {
+        "id": 19,
+        "type": "RandomValue",
+        "x": 260,
+        "y": 1520,
+        "data": {
+          "rate": 7,
+          "min": 0,
+          "max": 1,
+          "seed": 4,
+          "mode": "step"
+        }
+      },
+      {
+        "id": 20,
+        "type": "SampleHold",
+        "x": 740,
+        "y": 1400,
+        "data": {
+          "in": 0
+        }
+      },
+      {
+        "id": 21,
+        "type": "Lag",
+        "x": 960,
+        "y": 1400,
+        "data": {
+          "in": 0,
+          "up": 0.9,
+          "down": 0.9
+        }
+      },
+      {
+        "id": 22,
+        "type": "Time",
+        "x": 1000,
+        "y": 440,
+        "data": {}
+      },
+      {
+        "id": 23,
+        "type": "Multiply",
+        "x": 1200,
+        "y": 440,
+        "data": {
+          "b": 0.05
+        }
+      },
+      {
+        "id": 24,
+        "type": "Multiply",
+        "x": 1200,
+        "y": 520,
+        "data": {
+          "b": 1.6
+        }
+      },
+      {
+        "id": 25,
+        "type": "ScaleUV",
+        "x": 1000,
+        "y": 600,
+        "data": {
+          "scale": 2,
+          "amount": 1,
+          "uv": "pt_uv()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 26,
+        "type": "RotateUV",
+        "x": 1240,
+        "y": 600,
+        "data": {
+          "angle": 0.785,
+          "amount": 1,
+          "uv": "pt_uv()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 27,
+        "type": "Kaleidoscope",
+        "x": 1480,
+        "y": 600,
+        "data": {
+          "segments": 8,
+          "angle": 0,
+          "amount": 1,
+          "uv": "pt_uv()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 28,
+        "type": "Voronoi",
+        "x": 1720,
+        "y": 470,
+        "data": {
+          "scale": 4,
+          "jitter": 1,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 29,
+        "type": "FBM",
+        "x": 1720,
+        "y": 640,
+        "data": {
+          "scale": 2.5,
+          "octaves": 5,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 30,
+        "type": "Param",
+        "x": 1720,
+        "y": 360,
+        "data": {
+          "label": "Glow",
+          "kind": "float",
+          "value": 0.4,
+          "default": 0.4,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 0,
+          "description": ""
+        }
+      },
+      {
+        "id": 31,
+        "type": "Glow",
+        "x": 1960,
+        "y": 440,
+        "data": {
+          "d": 0.1,
+          "radius": 0.006,
+          "intensity": 1,
+          "falloff": 1.6,
+          "amount": 1
+        }
+      },
+      {
+        "id": 32,
+        "type": "PolarCoords",
+        "x": 1240,
+        "y": 800,
+        "data": {}
+      },
+      {
+        "id": 33,
+        "type": "Multiply",
+        "x": 1480,
+        "y": 790,
+        "data": {
+          "b": 130
+        }
+      },
+      {
+        "id": 34,
+        "type": "Multiply",
+        "x": 1960,
+        "y": 640,
+        "data": {
+          "b": 7
+        }
+      },
+      {
+        "id": 35,
+        "type": "Add",
+        "x": 2160,
+        "y": 700,
+        "data": {}
+      },
+      {
+        "id": 36,
+        "type": "Subtract",
+        "x": 2340,
+        "y": 700,
+        "data": {}
+      },
+      {
+        "id": 37,
+        "type": "Sin",
+        "x": 2500,
+        "y": 700,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 38,
+        "type": "Remap",
+        "x": 2620,
+        "y": 700,
+        "data": {
+          "x": 0.5,
+          "inMin": -1,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 1
+        }
+      },
+      {
+        "id": 39,
+        "type": "Pow",
+        "x": 2860,
+        "y": 720,
+        "data": {
+          "a": 1,
+          "b": 4
+        }
+      },
+      {
+        "id": 40,
+        "type": "Multiply",
+        "x": 1480,
+        "y": 900,
+        "data": {
+          "b": 0.9
+        }
+      },
+      {
+        "id": 41,
+        "type": "Add",
+        "x": 1720,
+        "y": 960,
+        "data": {}
+      },
+      {
+        "id": 42,
+        "type": "CosinePalette",
+        "x": 1960,
+        "y": 960,
+        "data": {}
+      },
+      {
+        "id": 43,
+        "type": "Smoothstep",
+        "x": 1720,
+        "y": 1120,
+        "data": {
+          "edge0": 1.1,
+          "edge1": 0,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 44,
+        "type": "Multiply",
+        "x": 3040,
+        "y": 860,
+        "data": {}
+      },
+      {
+        "id": 45,
+        "type": "Multiply",
+        "x": 2160,
+        "y": 560,
+        "data": {
+          "b": 1.9
+        }
+      },
+      {
+        "id": 46,
+        "type": "Multiply",
+        "x": 3220,
+        "y": 820,
+        "data": {}
+      },
+      {
+        "id": 47,
+        "type": "Multiply",
+        "x": 2160,
+        "y": 1120,
+        "data": {}
+      },
+      {
+        "id": 48,
+        "type": "Multiply",
+        "x": 3220,
+        "y": 1080,
+        "data": {}
+      },
+      {
+        "id": 49,
+        "type": "Multiply",
+        "x": 2340,
+        "y": 1120,
+        "data": {
+          "b": 0.6
+        }
+      },
+      {
+        "id": 50,
+        "type": "Add",
+        "x": 3400,
+        "y": 1000,
+        "data": {}
+      },
+      {
+        "id": 51,
+        "type": "Multiply",
+        "x": 3400,
+        "y": 860,
+        "data": {}
+      },
+      {
+        "id": 52,
+        "type": "Multiply",
+        "x": 2340,
+        "y": 460,
+        "data": {}
+      },
+      {
+        "id": 53,
+        "type": "Add",
+        "x": 3400,
+        "y": 600,
+        "data": {}
+      },
+      {
+        "id": 54,
+        "type": "TonemapACES",
+        "x": 3560,
+        "y": 520,
+        "data": {
+          "exposure": 1.35,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 55,
+        "type": "Saturation",
+        "x": 3560,
+        "y": 660,
+        "data": {
+          "saturation": 1.6,
+          "amount": 1,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 56,
+        "type": "Vignette",
+        "x": 3560,
+        "y": 800,
+        "data": {
+          "radius": 0.75,
+          "softness": 0.45,
+          "amount": 1,
+          "color": "vec3(1.0)",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 57,
+        "type": "Grain",
+        "x": 3560,
+        "y": 960,
+        "data": {
+          "intensity": 0.03,
+          "amount": 1,
+          "color": "vec3(1.0)",
+          "t": "u_time"
+        }
+      },
+      {
+        "id": 58,
+        "type": "Preview",
+        "x": 3800,
+        "y": 520,
+        "data": {},
+        "width": 520,
+        "height": 360,
+        "isBackground": true
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 1,
+        "toId": 6,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 10,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 11,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 12,
+        "fromOutput": 0,
+        "toId": 13,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 13,
+        "fromOutput": 0,
+        "toId": 14,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 14,
+        "fromOutput": 0,
+        "toId": 15,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 16,
+        "fromOutput": 0,
+        "toId": 17,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 18,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 24,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 23,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 27,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 27,
+        "fromOutput": 0,
+        "toId": 28,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 27,
+        "fromOutput": 0,
+        "toId": 29,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 28,
+        "fromOutput": 1,
+        "toId": 31,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 30,
+        "fromOutput": 0,
+        "toId": 31,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 32,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 2,
+        "toId": 33,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 34,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 33,
+        "fromOutput": 0,
+        "toId": 35,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 34,
+        "fromOutput": 0,
+        "toId": 35,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 35,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 24,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 36,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 37,
+        "fromOutput": 0,
+        "toId": 38,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 38,
+        "fromOutput": 0,
+        "toId": 39,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 2,
+        "toId": 40,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 40,
+        "fromOutput": 0,
+        "toId": 41,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 41,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 41,
+        "fromOutput": 0,
+        "toId": 42,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 42,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 2,
+        "toId": 43,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 39,
+        "fromOutput": 0,
+        "toId": 44,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 43,
+        "fromOutput": 0,
+        "toId": 44,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 44,
+        "fromOutput": 0,
+        "toId": 46,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 45,
+        "fromOutput": 0,
+        "toId": 46,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 42,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 46,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 47,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 47,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 47,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 42,
+        "fromOutput": 0,
+        "toId": 48,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 49,
+        "fromOutput": 0,
+        "toId": 48,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 11,
+        "fromOutput": 0,
+        "toId": 52,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 31,
+        "fromOutput": 0,
+        "toId": 52,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 51,
+        "fromOutput": 0,
+        "toId": 50,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 48,
+        "fromOutput": 0,
+        "toId": 50,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 50,
+        "fromOutput": 0,
+        "toId": 53,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 52,
+        "fromOutput": 0,
+        "toId": 53,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 53,
+        "fromOutput": 0,
+        "toId": 54,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 54,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 55,
+        "fromOutput": 0,
+        "toId": 56,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 0,
+        "toId": 57,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 57,
+        "fromOutput": 0,
+        "toId": 58,
+        "toInput": 0,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 59,
+    "panX": 38.29906542056075,
+    "panY": 219.6271028037383,
+    "zoom": 0.2925233644859813
+  },
+  "customNodes": {},
+  "editorStates": []
+}

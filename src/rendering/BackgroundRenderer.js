@@ -1,4 +1,5 @@
 import { ShaderPreview } from './ShaderPreview.js';
+import { createSharedCanvasPreview } from './SharedCanvasPreview.js';
 
 /**
  * BackgroundRenderer - Manages rendering a preview node's shader as the canvas background
@@ -26,6 +27,9 @@ export class BackgroundRenderer {
             z-index: -1;
             display: none;
         `;
+
+        // With a shared GL context the shader renders in that context (so it can sample
+        // Feedback render targets, which live there) and is copied onto this canvas.
 
         // Insert before the node canvas so it's behind
         this.nodeCanvas.parentElement.insertBefore(this.canvas, this.nodeCanvas);
@@ -62,10 +66,19 @@ export class BackgroundRenderer {
                 // Create or reinitialize the background shader preview
                 if (!this.shaderPreview) {
                     this.updateCanvasSize(); // Ensure size is correct
-                    this.shaderPreview = new ShaderPreview(this.canvas, this.videoElement, {
-                        offscreen: false,
-                        uniformRegistry: this.uniformRegistry
-                    });
+                    this.shaderPreview = this.sharedGL
+                        ? createSharedCanvasPreview({
+                            sharedGL: this.sharedGL,
+                            targetCanvas: this.canvas,
+                            videoElement: this.videoElement,
+                            uniformRegistry: this.uniformRegistry,
+                            isVisible: () => this.canvas.style.display !== 'none',
+                            governor: 'background' // dynamic resolution (QualityGovernor.js)
+                        })
+                        : new ShaderPreview(this.canvas, this.videoElement, {
+                            offscreen: false,
+                            uniformRegistry: this.uniformRegistry
+                        });
                     // Set graph reference so it can find video nodes
                     if (this.graph) {
                         this.shaderPreview.graph = this.graph;
@@ -123,7 +136,7 @@ export class BackgroundRenderer {
             this.canvas.parentElement.removeChild(this.canvas);
         }
         // Restore node canvas background
-        this.nodeCanvas.style.background = '#252525';
+        this.nodeCanvas.style.background = '';
         this.activePreviewNode = null;
     }
 }

@@ -1,5 +1,7 @@
 import { CodeEditor } from './CodeEditor.js';
 import { FloatingCodeEditor } from './FloatingCodeEditor.js';
+import { UIHelpers } from './UIHelpers.js';
+import { NodeDefinitions } from '../core/NodeDefinitions.js';
 
 export class NodeDialogs {
     static showCustomNodeDialog(onCreateNode) {
@@ -27,14 +29,14 @@ vec3 myFunction(vec2 uv, float time) {
                 const glslCode = code.trim();
 
                 if (!glslCode) {
-                    alert('Please provide GLSL code.');
+                    UIHelpers.notify('Write a GLSL function first.', 'warning');
                     return false; // Keep editor open
                 }
 
                 // Extract function name to use as node name
                 const funcMatch = glslCode.match(/(\w+)\s+(\w+)\s*\(/);
                 if (!funcMatch) {
-                    alert('Could not parse function name. Please ensure your code has a valid GLSL function.');
+                    UIHelpers.notify('Could not find a GLSL function. Use a signature like: vec3 myFunc(vec2 uv)', 'error', { title: 'Could not parse function' });
                     return false; // Keep editor open
                 }
 
@@ -74,10 +76,15 @@ vec3 myFunction(vec2 uv, float time) {
             nodeType: node.type, // Track the node type for deduplication
             position: editorState?.position,
             size: editorState?.size,
+            // The definition's GLSL now (undo / redo of a custom node update replaces it)
+            source: () => {
+                const def = NodeDefinitions[node.type];
+                return def && def.customGLSL ? def.customGLSL : null;
+            },
             onSave: (code) => {
                 const glslCode = code.trim();
                 if (!glslCode) {
-                    alert('Please provide GLSL code.');
+                    UIHelpers.notify('Write a GLSL function first.', 'warning');
                     return null;
                 }
 
@@ -98,7 +105,7 @@ vec3 myFunction(vec2 uv, float time) {
 
     static showGeneratedCode(shaderSource) {
         if (!shaderSource) {
-            alert('No shader code available');
+            UIHelpers.notify('No compiled shader yet — connect something to this preview first.', 'info');
             return;
         }
 
@@ -112,18 +119,27 @@ vec3 myFunction(vec2 uv, float time) {
 
     static showColorPicker(node, colorInput, nodeCanvas, onColorChange) {
         // Convert RGB (0-1) to hex
-        const r = Math.floor(node.data.r * 255).toString(16).padStart(2, '0');
-        const g = Math.floor(node.data.g * 255).toString(16).padStart(2, '0');
-        const b = Math.floor(node.data.b * 255).toString(16).padStart(2, '0');
+        // (clamped: HDR / out-of-range values from a file would make an invalid hex)
+        const hex = (v) => Math.floor(Math.max(0, Math.min(1, Number(v) || 0)) * 255).toString(16).padStart(2, '0');
+        const r = hex(node.data.r);
+        const g = hex(node.data.g);
+        const b = hex(node.data.b);
         colorInput.value = `#${r}${g}${b}`;
 
-        // Position the input at the color swatch location
+        // Position the (invisible) input over the node so the native picker opens next to it.
+        // Graph -> screen: screen = canvasRect + pan + graph * zoom
         const canvasRect = nodeCanvas.getBoundingClientRect();
-        const colorSwatchX = node.x + 10;
-        const colorSwatchY = node.y + 35;
+        const graph = node.graph || {};
+        const zoom = graph.zoom || 1;
+        const panX = graph.panX || 0;
+        const panY = graph.panY || 0;
+        const swatchX = node.x + 10;
+        const swatchY = node.y + (node.height ? Math.min(node.height - 8, 35) : 35);
+        const left = canvasRect.left + panX + swatchX * zoom;
+        const top = canvasRect.top + panY + swatchY * zoom;
 
-        colorInput.style.left = (canvasRect.left + colorSwatchX) + 'px';
-        colorInput.style.top = (canvasRect.top + colorSwatchY) + 'px';
+        colorInput.style.left = Math.max(0, Math.min(left, window.innerWidth - 2)) + 'px';
+        colorInput.style.top = Math.max(0, Math.min(top, window.innerHeight - 2)) + 'px';
 
         // Store current node for color change handler
         colorInput._currentNode = node;

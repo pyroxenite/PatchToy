@@ -1,0 +1,2449 @@
+{
+  "name": "Hyperbolic Boids",
+  "description": "3D boids flocking in hyperbolic space H3, simulated and ray-traced intrinsically. 256 swallows (up to 512) and two predators live on the hyperboloid in an rgba32f Feedback: neighbour distances acosh(-<p,q>), directions from the log map, velocities parallel-transported before averaging, geodesic steps with the exponential map. Rendered by geodesic ray casting: bird SDFs in each boid's normal coordinates with iridescent thin-film shading, screen-projected geodesic trails, the {4,3,5} honeycomb walked by Lorentz reflections, the ideal boundary, bloom, streaks, chromatic aberration, vignette and grain. Reacts to music (the flock breathes on the beat). Tweak it in the Parameters panel (P): Flock, Camera, Look, Colour, Post and Music.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T07:14:32.336Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 83,
+        "type": "Comment",
+        "x": 80,
+        "y": -298,
+        "data": {
+          "text": "# Hyperbolic Boids\nReynolds flocking in hyperbolic 3-space H3, simulated and ray-traced intrinsically.\n- Boids live on the hyperboloid <p,p> = -1 (Minkowski), velocities are tangent vectors (<p,v> = 0).\n- Neighbours: distance acosh(-<p,q>), direction from the log map, velocities parallel-transported to p before averaging.\n- Step: exponential map p' = cosh(s) p + sinh(s) v, renormalised every frame.\n- Rays are geodesics too: the {4,3,5} honeycomb shows five cubes around every edge, impossible in flat space.\n## Tweak it in the Parameters panel\nPress P (or the sliders button in the top bar): Flock, Camera, Look, Colour, Post and Music settings with pretty names; hover a name for what it does, double-click a slider to reset it.\nDouble-click a group box to open it, Esc to come back.",
+          "width": 460,
+          "height": 330,
+          "color": "orange"
+        }
+      },
+      {
+        "id": 85,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Boid sim\nOne rgba32f / nearest Feedback holds the whole state (526 x 16 texels): per boid position, velocity, up vector, wing phase / effort / panic / hue and a 12-step trail history; plus globals (clock, flock centre, orbit camera, camera folded into the honeycomb cell, attractor). dt = clamp(t - t_prev, 0, 0.1) comes from the stored clock.",
+          "width": 380,
+          "height": 190,
+          "color": "violet"
+        }
+      },
+      {
+        "id": 86,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Trails\nProjects every trail into screen space once per frame (after the sim, before the scene). Geodesics are straight in the camera's Klein model, so each history segment is an exact straight screen segment. Also writes a screen box per boid that the scene uses to cull candidates.",
+          "width": 360,
+          "height": 170,
+          "color": "blue"
+        }
+      },
+      {
+        "id": 87,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Scene\nPer pixel: cull boids by box, sphere-trace bird SDFs in each boid's normal coordinates along the geodesic ray, iridescent thin-film shading lit from an ideal point, halos, trails, honeycomb wires (Lorentz reflections between cells) and the ideal boundary. Rendered to a 1600x1000 target.",
+          "width": 380,
+          "height": 170,
+          "color": "pink"
+        }
+      },
+      {
+        "id": 88,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Bloom\nBright pass of the scene at 320x200 and 96x60, blurred and added back, plus a horizontal anamorphic streak.",
+          "width": 320,
+          "height": 110,
+          "color": "orange"
+        }
+      },
+      {
+        "id": 89,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Music\nAudio level gates everything: with the audio off or silent, drive = 0 and the piece looks exactly as before. drive = music x smoothstep(0.02, 0.12, level).\n- Beat: the flock breathes - separation swells up to +60% on each beat (BeatEnvelope ad), and glow flares up to +50%.\n- Kick: spines, predator eyes, halos, trails and lattice vertices flash (u_kick x drive, inside the scene).\n- Bass: trails brighten up to +60% and the flock speeds up to +20%.\nBeat-phase couplings (separation swell, glow flare) are also multiplied by the beat tracker's confidence (Beat.confidence = u_beatConfidence: 0 with the audio off, ~1 once the beat locks, 1 with the metronome) and run on the stable beat clock with its certainty gate (Beat.gate / BeatEnvelope gate: fade, u_beatTrust): after a track change the clock holds the old tempo, then glides to the new one without jumps, and these couplings fade out until the new beat is trusted. Level and band couplings (kick flashes, bass trails and speed) are not.",
+          "width": 380,
+          "height": 200,
+          "color": "green"
+        }
+      },
+      {
+        "id": 90,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Post\nChromatic aberration on the scene target, bloom added, vignette and film grain.",
+          "width": 300,
+          "height": 100,
+          "color": "gray"
+        }
+      },
+      {
+        "id": 0,
+        "type": "Time",
+        "x": 358,
+        "y": 332,
+        "data": {}
+      },
+      {
+        "id": 1,
+        "type": "CenteredUV",
+        "x": 80,
+        "y": 256,
+        "data": {}
+      },
+      {
+        "id": 2,
+        "type": "Param",
+        "x": 80,
+        "y": 584,
+        "data": {
+          "label": "Music reactivity",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Music",
+          "order": 26,
+          "description": "0 = ignore the music. The flock breathes on the beat, flashes on the kick, speeds up on the bass."
+        }
+      },
+      {
+        "id": 3,
+        "type": "Audio",
+        "x": 80,
+        "y": 265,
+        "data": {}
+      },
+      {
+        "id": 4,
+        "type": "Smoothstep",
+        "x": 320,
+        "y": 105,
+        "data": {
+          "edge0": 0.02,
+          "edge1": 0.12,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 5,
+        "type": "Multiply",
+        "x": 560,
+        "y": 272,
+        "data": {}
+      },
+      {
+        "id": 6,
+        "type": "BeatEnvelope",
+        "x": 320,
+        "y": 243,
+        "data": {
+          "k": 5,
+          "shape": "ad",
+          "phase": "u_beatPhase",
+          "gate": "fade"
+        }
+      },
+      {
+        "id": 7,
+        "type": "Multiply",
+        "x": 698,
+        "y": 356,
+        "data": {}
+      },
+      {
+        "id": 8,
+        "type": "Mix",
+        "x": 836,
+        "y": 356,
+        "data": {
+          "a": 1,
+          "b": 1.6,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 9,
+        "type": "Multiply",
+        "x": 1076,
+        "y": 356,
+        "data": {}
+      },
+      {
+        "id": 10,
+        "type": "Mix",
+        "x": 836,
+        "y": 494,
+        "data": {
+          "a": 1,
+          "b": 1.5,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 11,
+        "type": "Multiply",
+        "x": 1076,
+        "y": 440,
+        "data": {}
+      },
+      {
+        "id": 12,
+        "type": "Multiply",
+        "x": 698,
+        "y": 272,
+        "data": {}
+      },
+      {
+        "id": 13,
+        "type": "Mix",
+        "x": 836,
+        "y": 80,
+        "data": {
+          "a": 1,
+          "b": 1.6,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 14,
+        "type": "Multiply",
+        "x": 1076,
+        "y": 188,
+        "data": {}
+      },
+      {
+        "id": 15,
+        "type": "Mix",
+        "x": 836,
+        "y": 218,
+        "data": {
+          "a": 1,
+          "b": 1.2,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 16,
+        "type": "Multiply",
+        "x": 1076,
+        "y": 272,
+        "data": {}
+      },
+      {
+        "id": 17,
+        "type": "Param",
+        "x": 358,
+        "y": 80,
+        "data": {
+          "label": "Boids",
+          "kind": "float",
+          "value": 256,
+          "default": 256,
+          "min": 16,
+          "max": 512,
+          "step": 1,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 0,
+          "description": "Number of boids (up to 512)."
+        }
+      },
+      {
+        "id": 18,
+        "type": "Param",
+        "x": 80,
+        "y": 710,
+        "data": {
+          "label": "Separation",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 2,
+          "description": "Weight of steering away from close neighbours."
+        }
+      },
+      {
+        "id": 19,
+        "type": "Param",
+        "x": 358,
+        "y": 709,
+        "data": {
+          "label": "Alignment",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 3,
+          "description": "Weight of matching the neighbours' heading."
+        }
+      },
+      {
+        "id": 20,
+        "type": "Param",
+        "x": 358,
+        "y": 835,
+        "data": {
+          "label": "Cohesion",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 4,
+          "description": "Weight of steering toward the neighbours' centre."
+        }
+      },
+      {
+        "id": 21,
+        "type": "Param",
+        "x": 358,
+        "y": 961,
+        "data": {
+          "label": "Perception",
+          "kind": "float",
+          "value": 0.35,
+          "default": 0.35,
+          "min": 0.05,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 5,
+          "description": "Neighbour radius (hyperbolic distance)."
+        }
+      },
+      {
+        "id": 22,
+        "type": "Param",
+        "x": 358,
+        "y": 1087,
+        "data": {
+          "label": "Spacing",
+          "kind": "float",
+          "value": 0.2,
+          "default": 0.2,
+          "min": 0.02,
+          "max": 0.6,
+          "step": 0.005,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 6,
+          "description": "Separation radius: how close boids may get."
+        }
+      },
+      {
+        "id": 23,
+        "type": "Param",
+        "x": 80,
+        "y": 836,
+        "data": {
+          "label": "Speed",
+          "kind": "float",
+          "value": 0.4,
+          "default": 0.4,
+          "min": 0,
+          "max": 1.5,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 7,
+          "description": "Flight speed (geodesic units per second)."
+        }
+      },
+      {
+        "id": 24,
+        "type": "Param",
+        "x": 358,
+        "y": 1213,
+        "data": {
+          "label": "Containment",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 8,
+          "description": "Pull toward the slowly wandering attractor."
+        }
+      },
+      {
+        "id": 25,
+        "type": "Param",
+        "x": 358,
+        "y": 206,
+        "data": {
+          "label": "Predators",
+          "kind": "float",
+          "value": 2,
+          "default": 2,
+          "min": 0,
+          "max": 2,
+          "step": 1,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 1,
+          "description": "Hunting predators (0 to 2)."
+        }
+      },
+      {
+        "id": 26,
+        "type": "Param",
+        "x": 358,
+        "y": 1339,
+        "data": {
+          "label": "Trail length",
+          "kind": "float",
+          "value": 1.4,
+          "default": 1.4,
+          "min": 0.2,
+          "max": 4,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flock",
+          "order": 9,
+          "description": "Seconds of position history in each trail."
+        }
+      },
+      {
+        "id": 27,
+        "type": "Param",
+        "x": 358,
+        "y": 1465,
+        "data": {
+          "label": "Camera speed",
+          "kind": "float",
+          "value": 0.06,
+          "default": 0.06,
+          "min": 0,
+          "max": 0.3,
+          "step": 0.001,
+          "scale": "linear",
+          "section": "Camera",
+          "order": 10,
+          "description": "Orbit speed of the camera around the flock."
+        }
+      },
+      {
+        "id": 28,
+        "type": "Param",
+        "x": 358,
+        "y": 1591,
+        "data": {
+          "label": "Camera distance",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0.3,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Camera",
+          "order": 11,
+          "description": "Scales the camera distance from the flock."
+        }
+      },
+      {
+        "id": 29,
+        "type": "Param",
+        "x": 696,
+        "y": 348,
+        "data": {
+          "label": "Boid size",
+          "kind": "float",
+          "value": 0.085,
+          "default": 0.085,
+          "min": 0.03,
+          "max": 0.2,
+          "step": 0.001,
+          "scale": "linear",
+          "section": "Look",
+          "order": 12,
+          "description": "Size of each bird."
+        }
+      },
+      {
+        "id": 30,
+        "type": "Param",
+        "x": 696,
+        "y": 222,
+        "data": {
+          "label": "Trail width",
+          "kind": "float",
+          "value": 0.3,
+          "default": 0.3,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 13,
+          "description": "Width of the screen-space trails."
+        }
+      },
+      {
+        "id": 31,
+        "type": "Param",
+        "x": 80,
+        "y": 962,
+        "data": {
+          "label": "Glow",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 14,
+          "description": "Body glow and halos."
+        }
+      },
+      {
+        "id": 32,
+        "type": "Param",
+        "x": 80,
+        "y": 1088,
+        "data": {
+          "label": "Trail glow",
+          "kind": "float",
+          "value": 0.85,
+          "default": 0.85,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 15,
+          "description": "Brightness of the trails."
+        }
+      },
+      {
+        "id": 33,
+        "type": "Param",
+        "x": 696,
+        "y": 474,
+        "data": {
+          "label": "Fog",
+          "kind": "float",
+          "value": 0.14,
+          "default": 0.14,
+          "min": 0,
+          "max": 0.5,
+          "step": 0.005,
+          "scale": "linear",
+          "section": "Look",
+          "order": 16,
+          "description": "Hyperbolic depth fog."
+        }
+      },
+      {
+        "id": 34,
+        "type": "Param",
+        "x": 1034,
+        "y": 568,
+        "data": {
+          "label": "Lattice",
+          "kind": "float",
+          "value": 1.3,
+          "default": 1.3,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 17,
+          "description": "Brightness of the {4,3,5} honeycomb wireframe (0 = off)."
+        }
+      },
+      {
+        "id": 35,
+        "type": "Param",
+        "x": 1372,
+        "y": 431,
+        "data": {
+          "label": "Bloom",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 23,
+          "description": "Tight bloom level."
+        }
+      },
+      {
+        "id": 36,
+        "type": "Param",
+        "x": 1372,
+        "y": 557,
+        "data": {
+          "label": "Bloom wide",
+          "kind": "float",
+          "value": 1.4,
+          "default": 1.4,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 24,
+          "description": "Wide bloom level."
+        }
+      },
+      {
+        "id": 37,
+        "type": "Param",
+        "x": 1372,
+        "y": 683,
+        "data": {
+          "label": "Streak",
+          "kind": "float",
+          "value": 0.5,
+          "default": 0.5,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 25,
+          "description": "Horizontal anamorphic streak."
+        }
+      },
+      {
+        "id": 38,
+        "type": "Param",
+        "x": 696,
+        "y": 600,
+        "data": {
+          "label": "Flock colour A",
+          "kind": "color",
+          "value": [
+            0.15,
+            0.85,
+            1
+          ],
+          "default": [
+            0.15,
+            0.85,
+            1
+          ],
+          "alpha": false,
+          "section": "Colour",
+          "order": 18,
+          "description": "First flock hue."
+        }
+      },
+      {
+        "id": 39,
+        "type": "Param",
+        "x": 696,
+        "y": 732,
+        "data": {
+          "label": "Flock colour B",
+          "kind": "color",
+          "value": [
+            0.85,
+            0.3,
+            1
+          ],
+          "default": [
+            0.85,
+            0.3,
+            1
+          ],
+          "alpha": false,
+          "section": "Colour",
+          "order": 19,
+          "description": "Second flock hue."
+        }
+      },
+      {
+        "id": 40,
+        "type": "Param",
+        "x": 696,
+        "y": 864,
+        "data": {
+          "label": "Flock colour C",
+          "kind": "color",
+          "value": [
+            1,
+            0.75,
+            0.35
+          ],
+          "default": [
+            1,
+            0.75,
+            0.35
+          ],
+          "alpha": false,
+          "section": "Colour",
+          "order": 20,
+          "description": "Third flock hue."
+        }
+      },
+      {
+        "id": 41,
+        "type": "Param",
+        "x": 696,
+        "y": 1443,
+        "data": {
+          "label": "Predator colour",
+          "kind": "color",
+          "value": [
+            1,
+            0.28,
+            0.08
+          ],
+          "default": [
+            1,
+            0.28,
+            0.08
+          ],
+          "alpha": false,
+          "section": "Colour",
+          "order": 21,
+          "description": "Colour of the predators."
+        }
+      },
+      {
+        "id": 42,
+        "type": "Param",
+        "x": 1034,
+        "y": 694,
+        "data": {
+          "label": "Lattice colour",
+          "kind": "color",
+          "value": [
+            0.3,
+            0.42,
+            1
+          ],
+          "default": [
+            0.3,
+            0.42,
+            1
+          ],
+          "alpha": false,
+          "section": "Colour",
+          "order": 22,
+          "description": "Colour of the honeycomb wireframe."
+        }
+      },
+      {
+        "id": 43,
+        "type": "BoidSim",
+        "x": 320,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 44,
+        "type": "Feedback",
+        "x": 80,
+        "y": 223,
+        "data": {
+          "width": 526,
+          "height": 16,
+          "format": "rgba32f",
+          "filter": "nearest"
+        }
+      },
+      {
+        "id": 45,
+        "type": "BoidProject",
+        "x": 320,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 46,
+        "type": "Feedback",
+        "x": 80,
+        "y": 350,
+        "data": {
+          "width": 514,
+          "height": 11,
+          "format": "rgba32f",
+          "filter": "nearest"
+        }
+      },
+      {
+        "id": 47,
+        "type": "BoidTiles",
+        "x": 320,
+        "y": 262,
+        "data": {}
+      },
+      {
+        "id": 48,
+        "type": "Feedback",
+        "x": 80,
+        "y": 444,
+        "data": {
+          "width": 960,
+          "height": 50,
+          "format": "rgba32f",
+          "filter": "nearest"
+        }
+      },
+      {
+        "id": 49,
+        "type": "BoidTrails",
+        "x": 320,
+        "y": 400,
+        "data": {}
+      },
+      {
+        "id": 50,
+        "type": "Feedback",
+        "x": 320,
+        "y": 714,
+        "data": {
+          "width": 800,
+          "height": 500,
+          "format": "rgba16f",
+          "filter": "linear"
+        }
+      },
+      {
+        "id": 51,
+        "type": "HyperbolicBoids",
+        "x": 320,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 52,
+        "type": "TonemapACES",
+        "x": 560,
+        "y": 267,
+        "data": {
+          "exposure": 1.1,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 53,
+        "type": "Saturation",
+        "x": 800,
+        "y": 267,
+        "data": {
+          "amount": 1.12,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 54,
+        "type": "Vec3ToVec4",
+        "x": 1040,
+        "y": 220,
+        "data": {}
+      },
+      {
+        "id": 55,
+        "type": "Feedback",
+        "x": 1040,
+        "y": 336,
+        "data": {
+          "width": 1600,
+          "height": 1000,
+          "format": "rgba8",
+          "filter": "linear"
+        }
+      },
+      {
+        "id": 56,
+        "type": "Grayscale",
+        "x": 80,
+        "y": 89,
+        "data": {}
+      },
+      {
+        "id": 57,
+        "type": "Smoothstep",
+        "x": 320,
+        "y": 80,
+        "data": {
+          "edge0": 0.5,
+          "edge1": 1.5,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 58,
+        "type": "Multiply",
+        "x": 560,
+        "y": 167,
+        "data": {}
+      },
+      {
+        "id": 59,
+        "type": "Multiply",
+        "x": 754,
+        "y": 256,
+        "data": {}
+      },
+      {
+        "id": 60,
+        "type": "Float",
+        "x": 560,
+        "y": 251,
+        "data": {
+          "value": 0.5,
+          "useUniform": false
+        }
+      },
+      {
+        "id": 61,
+        "type": "Vec3ToVec4",
+        "x": 892,
+        "y": 282,
+        "data": {}
+      },
+      {
+        "id": 62,
+        "type": "Feedback",
+        "x": 80,
+        "y": 299,
+        "data": {
+          "width": 320,
+          "height": 200,
+          "format": "rgba16f",
+          "filter": "linear"
+        }
+      },
+      {
+        "id": 63,
+        "type": "Feedback",
+        "x": 80,
+        "y": 487,
+        "data": {
+          "width": 96,
+          "height": 60,
+          "format": "rgba16f",
+          "filter": "linear"
+        }
+      },
+      {
+        "id": 64,
+        "type": "ChromaticAberration",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "amount": 0.0025,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 65,
+        "type": "BoidBloomSample",
+        "x": 320,
+        "y": 452,
+        "data": {}
+      },
+      {
+        "id": 66,
+        "type": "BoidBloomSample",
+        "x": 320,
+        "y": 568,
+        "data": {}
+      },
+      {
+        "id": 67,
+        "type": "Float",
+        "x": 80,
+        "y": 393,
+        "data": {
+          "value": 1.5,
+          "useUniform": false
+        }
+      },
+      {
+        "id": 68,
+        "type": "Float",
+        "x": 80,
+        "y": 581,
+        "data": {
+          "value": 1.2,
+          "useUniform": false
+        }
+      },
+      {
+        "id": 69,
+        "type": "Multiply",
+        "x": 560,
+        "y": 429,
+        "data": {}
+      },
+      {
+        "id": 70,
+        "type": "Multiply",
+        "x": 560,
+        "y": 513,
+        "data": {}
+      },
+      {
+        "id": 71,
+        "type": "BoidStreak",
+        "x": 320,
+        "y": 218,
+        "data": {}
+      },
+      {
+        "id": 72,
+        "type": "Float",
+        "x": 80,
+        "y": 205,
+        "data": {
+          "value": 0.3,
+          "useUniform": false
+        }
+      },
+      {
+        "id": 73,
+        "type": "Color",
+        "x": 320,
+        "y": 334,
+        "data": {
+          "r": 0.45,
+          "g": 0.55,
+          "b": 1
+        }
+      },
+      {
+        "id": 74,
+        "type": "Multiply",
+        "x": 560,
+        "y": 345,
+        "data": {}
+      },
+      {
+        "id": 75,
+        "type": "Multiply",
+        "x": 754,
+        "y": 340,
+        "data": {}
+      },
+      {
+        "id": 76,
+        "type": "Add",
+        "x": 754,
+        "y": 424,
+        "data": {}
+      },
+      {
+        "id": 77,
+        "type": "Add",
+        "x": 892,
+        "y": 398,
+        "data": {}
+      },
+      {
+        "id": 78,
+        "type": "Add",
+        "x": 320,
+        "y": 118,
+        "data": {}
+      },
+      {
+        "id": 79,
+        "type": "Vignette",
+        "x": 458,
+        "y": 80,
+        "data": {
+          "radius": 0.95,
+          "softness": 0.6,
+          "color": "vec3(1.0)",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 80,
+        "type": "Grain",
+        "x": 698,
+        "y": 91,
+        "data": {
+          "amount": 0.03,
+          "color": "vec3(1.0)",
+          "t": "u_time"
+        }
+      },
+      {
+        "id": 81,
+        "type": "Vec3ToVec4",
+        "x": 938,
+        "y": 102,
+        "data": {}
+      },
+      {
+        "id": 82,
+        "type": "Preview",
+        "x": 2386,
+        "y": 765,
+        "data": {},
+        "width": 300,
+        "height": 219.5,
+        "isBackground": false
+      },
+      {
+        "id": 91,
+        "type": "Beat",
+        "x": 320,
+        "y": 381,
+        "data": {
+          "decay": 6,
+          "rate": 1,
+          "threshold": 0.5,
+          "clock": "stable",
+          "gate": "fade"
+        }
+      },
+      {
+        "id": 92,
+        "type": "Multiply",
+        "x": 560,
+        "y": 356,
+        "data": {}
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 4,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 13,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 92,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 10,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 31,
+        "fromOutput": 0,
+        "toId": 11,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 11,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 11,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 9,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 12,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 1,
+        "toId": 12,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 12,
+        "fromOutput": 0,
+        "toId": 13,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 0,
+        "toId": 14,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 13,
+        "fromOutput": 0,
+        "toId": 14,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 14,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 10,
+        "swizzle": null
+      },
+      {
+        "fromId": 12,
+        "fromOutput": 0,
+        "toId": 15,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 23,
+        "fromOutput": 0,
+        "toId": 16,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 16,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 16,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 8,
+        "swizzle": null
+      },
+      {
+        "fromId": 43,
+        "fromOutput": 0,
+        "toId": 44,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 44,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 24,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 9,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 10,
+        "swizzle": null
+      },
+      {
+        "fromId": 27,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 11,
+        "swizzle": null
+      },
+      {
+        "fromId": 28,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 12,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 13,
+        "swizzle": null
+      },
+      {
+        "fromId": 45,
+        "fromOutput": 0,
+        "toId": 46,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 44,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 30,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 47,
+        "fromOutput": 0,
+        "toId": 48,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 46,
+        "fromOutput": 0,
+        "toId": 47,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 47,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 47,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 48,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 49,
+        "fromOutput": 0,
+        "toId": 50,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 44,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 46,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 48,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 33,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 38,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 39,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 8,
+        "swizzle": null
+      },
+      {
+        "fromId": 40,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 9,
+        "swizzle": null
+      },
+      {
+        "fromId": 41,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 10,
+        "swizzle": null
+      },
+      {
+        "fromId": 50,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 44,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 46,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 8,
+        "swizzle": null
+      },
+      {
+        "fromId": 33,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 11,
+        "swizzle": null
+      },
+      {
+        "fromId": 34,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 12,
+        "swizzle": null
+      },
+      {
+        "fromId": 38,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 14,
+        "swizzle": null
+      },
+      {
+        "fromId": 39,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 15,
+        "swizzle": null
+      },
+      {
+        "fromId": 40,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 16,
+        "swizzle": null
+      },
+      {
+        "fromId": 41,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 17,
+        "swizzle": null
+      },
+      {
+        "fromId": 42,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 18,
+        "swizzle": null
+      },
+      {
+        "fromId": 51,
+        "fromOutput": 0,
+        "toId": 52,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 52,
+        "fromOutput": 0,
+        "toId": 53,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 53,
+        "fromOutput": 0,
+        "toId": 54,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 54,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 51,
+        "fromOutput": 0,
+        "toId": 56,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 1,
+        "toId": 57,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 51,
+        "fromOutput": 0,
+        "toId": 58,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 57,
+        "fromOutput": 0,
+        "toId": 58,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 58,
+        "fromOutput": 0,
+        "toId": 59,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 60,
+        "fromOutput": 0,
+        "toId": 59,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 59,
+        "fromOutput": 0,
+        "toId": 61,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 61,
+        "fromOutput": 0,
+        "toId": 62,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 61,
+        "fromOutput": 0,
+        "toId": 63,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 55,
+        "fromOutput": 0,
+        "toId": 64,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 62,
+        "fromOutput": 0,
+        "toId": 65,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 63,
+        "fromOutput": 0,
+        "toId": 66,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 67,
+        "fromOutput": 0,
+        "toId": 65,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 68,
+        "fromOutput": 0,
+        "toId": 66,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 65,
+        "fromOutput": 0,
+        "toId": 69,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 35,
+        "fromOutput": 0,
+        "toId": 69,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 66,
+        "fromOutput": 0,
+        "toId": 70,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 36,
+        "fromOutput": 0,
+        "toId": 70,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 62,
+        "fromOutput": 0,
+        "toId": 71,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 72,
+        "fromOutput": 0,
+        "toId": 71,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 71,
+        "fromOutput": 0,
+        "toId": 74,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 73,
+        "fromOutput": 0,
+        "toId": 74,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 74,
+        "fromOutput": 0,
+        "toId": 75,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 37,
+        "fromOutput": 0,
+        "toId": 75,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 69,
+        "fromOutput": 0,
+        "toId": 76,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 70,
+        "fromOutput": 0,
+        "toId": 76,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 76,
+        "fromOutput": 0,
+        "toId": 77,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 75,
+        "fromOutput": 0,
+        "toId": 77,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 64,
+        "fromOutput": 0,
+        "toId": 78,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 77,
+        "fromOutput": 0,
+        "toId": 78,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 78,
+        "fromOutput": 0,
+        "toId": 79,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 79,
+        "fromOutput": 0,
+        "toId": 80,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 80,
+        "fromOutput": 0,
+        "toId": 81,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 81,
+        "fromOutput": 0,
+        "toId": 82,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 92,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 91,
+        "fromOutput": 6,
+        "toId": 92,
+        "toInput": 1,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 93,
+    "panX": 101.01677681748858,
+    "panY": 176.6558210472801,
+    "zoom": 0.35790543975597355,
+    "groups": [
+      {
+        "id": "g2",
+        "name": "Boid sim",
+        "parentId": null,
+        "nodeIds": [
+          43,
+          44,
+          85
+        ],
+        "x": 696,
+        "y": 1003,
+        "color": "custom"
+      },
+      {
+        "id": "g3",
+        "name": "Trails",
+        "parentId": null,
+        "nodeIds": [
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          86
+        ],
+        "x": 1034,
+        "y": 833,
+        "color": "logic"
+      },
+      {
+        "id": "g4",
+        "name": "Scene",
+        "parentId": null,
+        "nodeIds": [
+          1,
+          51,
+          52,
+          53,
+          54,
+          55,
+          87
+        ],
+        "x": 1372,
+        "y": 816,
+        "color": "sdf3d"
+      },
+      {
+        "id": "g5",
+        "name": "Bloom",
+        "parentId": null,
+        "nodeIds": [
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          88
+        ],
+        "x": 1710,
+        "y": 781,
+        "color": "effect"
+      },
+      {
+        "id": "g6",
+        "name": "Music",
+        "parentId": null,
+        "nodeIds": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          89,
+          91,
+          92
+        ],
+        "x": 358,
+        "y": 445,
+        "color": "source"
+      },
+      {
+        "id": "g7",
+        "name": "Post",
+        "parentId": null,
+        "nodeIds": [
+          64,
+          78,
+          79,
+          80,
+          81,
+          90
+        ],
+        "x": 2048,
+        "y": 803,
+        "color": "effect"
+      }
+    ]
+  },
+  "customNodes": {
+    "HyperbolicBoids": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "uv",
+          "type": "vec2",
+          "paramName": "uv"
+        },
+        {
+          "name": "time",
+          "type": "float",
+          "paramName": "time"
+        },
+        {
+          "name": "state",
+          "type": "sampler2D",
+          "paramName": "state"
+        },
+        {
+          "name": "proj",
+          "type": "sampler2D",
+          "paramName": "proj"
+        },
+        {
+          "name": "tiles",
+          "type": "sampler2D",
+          "paramName": "tiles"
+        },
+        {
+          "name": "trailTex",
+          "type": "sampler2D",
+          "paramName": "trailTex"
+        },
+        {
+          "name": "count",
+          "type": "float",
+          "paramName": "count"
+        },
+        {
+          "name": "predators",
+          "type": "float",
+          "paramName": "predators"
+        },
+        {
+          "name": "boidSize",
+          "type": "float",
+          "paramName": "boidSize"
+        },
+        {
+          "name": "glow",
+          "type": "float",
+          "paramName": "glow"
+        },
+        {
+          "name": "trailGlow",
+          "type": "float",
+          "paramName": "trailGlow"
+        },
+        {
+          "name": "fog",
+          "type": "float",
+          "paramName": "fog"
+        },
+        {
+          "name": "lattice",
+          "type": "float",
+          "paramName": "lattice"
+        },
+        {
+          "name": "music",
+          "type": "float",
+          "paramName": "music"
+        },
+        {
+          "name": "colorA",
+          "type": "vec3",
+          "paramName": "colorA"
+        },
+        {
+          "name": "colorB",
+          "type": "vec3",
+          "paramName": "colorB"
+        },
+        {
+          "name": "colorC",
+          "type": "vec3",
+          "paramName": "colorC"
+        },
+        {
+          "name": "predatorColor",
+          "type": "vec3",
+          "paramName": "predatorColor"
+        },
+        {
+          "name": "latticeColor",
+          "type": "vec3",
+          "paramName": "latticeColor"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "// @node hyperbolicBoids\n// @title Hyperbolic Boids\n// @category custom\n// @description Renders the H3 flock: rays are geodesics gamma(s) = cosh(s) p + sinh(s) v from the sim's orbit camera. Each pixel culls boids with its screen tile's bitmasks and the projected screen boxes, then sphere-traces the candidates' bird SDFs in their own normal coordinates (log map at the boid, frame = heading / banked up / side). Iridescent thin-film shading lit from an ideal point, compact hyperbolic halos, the trails from the Boid Trails canvas (dimmed behind birds), the {4,3,5} honeycomb (walked by Lorentz reflections from the camera folded into the base cell) as faint wires with vertex sparks, fog by hyperbolic distance, and the ideal boundary (stars, nebula, the light's sun) at the end of every ray. music = level-gated drive: kicks flash the spines, eyes, halos, trails and lattice vertices. Returns HDR color.\n// ---- H3 helpers, hyperboloid model: <a,b> = a.x b.x + a.y b.y + a.z b.z - a.w b.w, <p,p> = -1 ----\nfloat br_dot(vec4 a, vec4 b) {\n    return dot(a.xyz, b.xyz) - a.w * b.w;\n}\n\n// Back onto the upper sheet of the hyperboloid\nvec4 br_toH(vec4 p) {\n    return p / sqrt(max(-br_dot(p, p), 1e-12));\n}\n\n// Tangent projection at p\nvec4 br_tan(vec4 v, vec4 p) {\n    return v + br_dot(v, p) * p;\n}\n\nvec4 br_unit(vec4 v) {\n    return v * inversesqrt(max(br_dot(v, v), 1e-14));\n}\n\nfloat br_acosh(float c) {\n    c = max(c, 1.0);\n    return log(c + sqrt(c * c - 1.0));\n}\n\nfloat br_asinh(float x) {\n    return log(x + sqrt(x * x + 1.0));\n}\n\n// Log map: tangent vector at p pointing to q, length = d(p, q)\nvec4 br_log(vec4 p, vec4 q) {\n    float c = max(-br_dot(p, q), 1.0);\n    float sh = sqrt(c * c - 1.0);\n    if (sh < 1e-7) return vec4(0.0);\n    return (q - c * p) * (log(c + sh) / sh);\n}\n\n// Exponential map: walk the geodesic from p with initial velocity v for |v|\nvec4 br_exp(vec4 p, vec4 v) {\n    float n = sqrt(max(br_dot(v, v), 0.0));\n    if (n < 1e-8) return p;\n    return cosh(n) * p + (sinh(n) / n) * v;\n}\n\n// Parallel transport of w (tangent at q) along the geodesic q -> p\nvec4 br_transport(vec4 w, vec4 q, vec4 p) {\n    return w + br_dot(p, w) / (1.0 - br_dot(q, p)) * (q + p);\n}\n\n// Lorentz-orthogonal complement of three vectors (generalized cross product, index lowered)\nvec4 br_cross4(vec4 a, vec4 b, vec4 c) {\n    float x = dot(a.yzw, cross(b.yzw, c.yzw));\n    float y = -dot(a.xzw, cross(b.xzw, c.xzw));\n    float z = dot(a.xyw, cross(b.xyw, c.xyw));\n    float w = -dot(a.xyz, cross(b.xyz, c.xyz));\n    return vec4(x, y, z, -w);\n}\n\nvec3 br_hash3(uvec3 v) {\n    v = v * 1664525u + 1013904223u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    v ^= v >> 16u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    return vec3(v) * (1.0 / 4294967296.0);\n}\n\n// Outward unit normal of face k of the {4,3,5} base cell (Klein cube |x_j| <= A)\nvec4 br_face(int k) {\n    const float A = 0.48586827;\n    int j = k / 2;\n    float s = (k - j * 2 == 0) ? 1.0 : -1.0;\n    vec3 e = j == 0 ? vec3(1.0, 0.0, 0.0) : (j == 1 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0));\n    return vec4(e * s, A) * 1.1441228;   // 1 / sqrt(1 - A^2)\n}\n\n// Three-colour cyclic palette\nvec3 br_pal(float t, vec3 a, vec3 b, vec3 c) {\n    t = fract(t) * 3.0;\n    if (t < 1.0) return mix(a, b, smoothstep(0.0, 1.0, t));\n    if (t < 2.0) return mix(b, c, smoothstep(1.0, 2.0, t));\n    return mix(c, a, smoothstep(2.0, 3.0, t));\n}\n\n\n// Bird SDF in body units (x forward, y up, z side). part: 0 body, 1 wing, 2 tail, 3 head\nfloat br_ellipsoid(vec3 p, vec3 r) {\n    float k0 = length(p / r);\n    float k1 = length(p / (r * r));\n    return k0 * (k0 - 1.0) / max(k1, 1e-6);\n}\n\nfloat br_roundCone(vec3 p, vec3 a, vec3 b, float r1, float r2) {\n    vec3 ba = b - a;\n    float l2 = dot(ba, ba);\n    float rr = r1 - r2;\n    float a2 = l2 - rr * rr;\n    float il2 = 1.0 / l2;\n    vec3 pa = p - a;\n    float y = dot(pa, ba);\n    float z = y - l2;\n    vec3 xv = pa * l2 - ba * y;\n    float x2 = dot(xv, xv);\n    float y2 = y * y * l2;\n    float z2 = z * z * l2;\n    float k = sign(rr) * rr * rr * x2;\n    if (sign(z) * a2 * z2 > k) return sqrt(x2 + z2) * il2 - r2;\n    if (sign(y) * a2 * y2 < k) return sqrt(x2 + y2) * il2 - r1;\n    return (sqrt(x2 * a2 * il2) + y * rr) * il2 - r1;\n}\n\nfloat br_smin(float a, float b, float k, out float h) {\n    h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);\n    return mix(b, a, h) - k * h * (1.0 - h);\n}\n\nfloat br_bird(vec3 p, float phase, float amp, float span, out float part) {\n    float h;\n    float body = br_roundCone(p, vec3(-0.30, 0.0, 0.0), vec3(0.17, 0.012, 0.0), 0.026, 0.07);\n    float head = length(p - vec3(0.25, 0.028, 0.0)) - 0.056;\n    float d = br_smin(body, head, 0.05, h);\n    part = h > 0.5 ? 0.0 : 3.0;\n    // wings (mirrored): arm + hand, rotated about the body axis by the flap angle; the hand lags\n    float fl = amp * sin(phase);\n    vec3 q = vec3(p.x - 0.04, p.y - 0.02, abs(p.z) - 0.025);\n    float c = cos(fl), s = sin(fl);\n    q = vec3(q.x, c * q.y - s * q.z, s * q.y + c * q.z);\n    q.x += 0.3 * q.z;\n    float arm = br_ellipsoid(q - vec3(-0.01, 0.0, 0.15 * span), vec3(0.125, 0.016, 0.17 * span));\n    vec3 k = q - vec3(-0.03, 0.0, 0.3 * span);\n    float fl2 = 0.6 * amp * sin(phase - 1.0);\n    k = vec3(k.x, cos(fl2) * k.y - sin(fl2) * k.z, sin(fl2) * k.y + cos(fl2) * k.z);\n    k.x += 0.35 * k.z;\n    float hand = br_ellipsoid(k - vec3(-0.02, 0.0, 0.13 * span), vec3(0.075, 0.011, 0.17 * span));\n    float wing = br_smin(arm, hand, 0.03, h);\n    float dw = br_smin(wing, d, 0.04, h);\n    if (h > 0.5) part = 1.0;\n    d = dw;\n    // forked tail\n    vec3 t = p - vec3(-0.30, 0.0, 0.0);\n    vec2 tz = vec2(t.x, abs(t.z));\n    tz = vec2(0.955 * tz.x + 0.296 * tz.y, -0.296 * tz.x + 0.955 * tz.y);\n    float tail = br_ellipsoid(vec3(tz.x + 0.13, t.y, tz.y), vec3(0.15, 0.009, 0.03));\n    float dt = br_smin(tail, d, 0.035, h);\n    if (h > 0.5) part = 2.0;\n    return dt;\n}\n\n// Sky: the ideal boundary point of the geodesic (p, v) is the null vector p + v\nvec3 br_sky(vec4 p, vec4 v, vec3 a, vec3 b, vec3 sunDir, vec3 sunCol) {\n    vec4 e = p + v;\n    vec3 xi = e.xyz / max(e.w, 1e-6);\n    vec3 col = vec3(0.004, 0.006, 0.016) + vec3(0.006, 0.010, 0.022) * (1.0 - abs(xi.y));\n    float nb = sin(xi.x * 3.1 + sin(xi.z * 4.3 + xi.y * 2.0)) * sin(xi.z * 2.7 - xi.y * 3.3 + sin(xi.x * 5.1));\n    float nb2 = sin(xi.x * 7.3 - xi.z * 6.1 + xi.y * 4.0 + nb * 2.0) * 0.5 + 0.5;\n    float band = exp(-abs(dot(xi, normalize(vec3(0.3, 1.0, -0.2)))) * 3.5);\n    col += mix(a, b, 0.5 + 0.5 * nb) * 0.03 * smoothstep(-0.2, 1.0, nb) * (0.4 + 0.6 * nb2) * band;\n    vec3 sp = xi * 160.0;\n    vec3 h = br_hash3(uvec3(ivec3(floor(sp)) + 4096));\n    vec3 f = fract(sp) - 0.5 - (h - 0.5) * 0.6;\n    col += mix(vec3(0.6, 0.75, 1.0), vec3(1.0, 0.85, 0.7), h.z) * step(0.94, h.x) * exp(-dot(f, f) * 60.0) * (0.2 + 0.8 * h.y * h.y) * (0.6 + 0.6 * band);\n    float sd = max(dot(xi, sunDir), 0.0);\n    col += sunCol * (0.6 * pow(sd, 900.0) + 0.05 * pow(sd, 40.0) + 0.012 * pow(sd, 6.0));\n    return col;\n}\n\nvec3 hyperbolicBoids(vec2 uv, float time, sampler2D state, sampler2D proj, sampler2D tiles, sampler2D trailTex, float count, float predators, float boidSize, float glow, float trailGlow, float fog, float lattice, float music, vec3 colorA, vec3 colorB, vec3 colorC, vec3 predatorColor, vec3 latticeColor) {\n    // cameras: world frame and the same frame folded into the honeycomb's base cell\n    vec4 P = texelFetch(state, ivec2(514 + 3, 0), 0);\n    vec4 R = texelFetch(state, ivec2(514 + 4, 0), 0);\n    vec4 U = texelFetch(state, ivec2(514 + 5, 0), 0);\n    vec4 F = texelFetch(state, ivec2(514 + 6, 0), 0);\n    vec4 Pl = texelFetch(state, ivec2(514 + 7, 0), 0);\n    vec4 Rl = texelFetch(state, ivec2(514 + 8, 0), 0);\n    vec4 Ul = texelFetch(state, ivec2(514 + 9, 0), 0);\n    vec4 Fl = texelFetch(state, ivec2(514 + 10, 0), 0);\n    vec4 g0 = texelFetch(state, ivec2(514, 0), 0);\n    if (!(P.w >= 1.0)) return vec3(0.0);\n    float wl = sqrt(dot(uv, uv) + 1.7 * 1.7);\n    vec4 v = (uv.x * R + uv.y * U + 1.7 * F) / wl;\n    vec4 vl = (uv.x * Rl + uv.y * Ul + 1.7 * Fl) / wl;\n    float pxs = 2.0 / u_resolution.y;            // pixel size in screen units\n    float pixA = pxs / wl;                        // ... as an angle\n    float kick = music * u_kick;                // music drive (0 when silent) x kick envelope\n\n    vec3 sunDir = normalize(vec3(0.35, 0.8, 0.5));\n    vec4 xiSun = vec4(sunDir, 1.0);\n    vec3 sunCol = mix(colorC, vec3(1.0, 0.95, 0.85), 0.6);\n\n    int n = clamp(int(count + 0.5), 0, 512);\n    int np = clamp(int(predators + 0.5), 0, 2);\n\n    // ---- cull: screen boxes from the projection pass; halos; body bounding balls\n    int bIdx[6];\n    float bL[6];\n    float bS1[6];\n    float bS2[6];\n    int nb = 0;\n    vec3 halo = vec3(0.0);\n    // tile of this pixel (uv-space grid, same for every render target): two 24-bit masks per word,\n    // bodies / halos in texels 0..5, trails in 6..11\n    ivec2 tile = ivec2(clamp(floor((uv + vec2(1.6, 1.0)) / vec2(3.2, 2.0) * vec2(80.0, 50.0)), vec2(0.0), vec2(80.0 - 1.0, 50.0 - 1.0)));\n    int nw = (n + 95) / 96;\n    for (int t = 0; t < 6; t++) {\n        if (t >= nw && !(t == 5 && np > 0)) continue;\n        vec4 wv = texelFetch(tiles, ivec2(tile.x * 12 + t, tile.y), 0);\n        for (int ch = 0; ch < 4; ch++) {\n            uint bits = uint(wv[ch]);\n            while (bits != 0u) {\n                int i = (t * 4 + ch) * 24 + int(log2(float(bits & (~bits + 1u))) + 0.5);   // lowest set bit\n                bits &= bits - 1u;\n                vec4 bb = texelFetch(proj, ivec2(i, 10), 0);\n                if (uv.x < bb.x || uv.y < bb.y || uv.x > bb.z || uv.y > bb.w) continue;\n                vec4 c = texelFetch(state, ivec2(i, 0), 0);\n                vec4 inf = texelFetch(proj, ivec2(i, 8), 0);\n                float L = inf.w;\n                float A = -br_dot(P, c);\n                float B = -br_dot(v, c);\n                float ts = -B / A;\n                float fc = ts <= 0.0 ? A : sqrt(max(A * A - B * B, 1.0));   // cosh of the closest approach\n                float sh2 = max(fc * fc - 1.0, 0.0);\n                float Hr = sinh(L * 1.5);\n                float hl = max(1.0 - sh2 / (Hr * Hr), 0.0);\n                if (hl > 0.0) {\n                    float sc = atanh(clamp(ts, 0.0, 0.999));\n                    vec3 hc = inf.y > 0.5 ? predatorColor * 3.0 : br_pal(inf.x, colorA, colorB, colorC) * (1.0 + 1.5 * inf.z);\n                    halo += hc * hl * hl * hl * exp(-sc * fog) * (0.15 + 0.85 * smoothstep(0.6, 2.5, sc));\n                }\n                float Rb = 0.72 * L;\n                float C = cosh(Rb);\n                float disc = C * C - (A * A - B * B);\n                if (disc > 0.0) {\n                    float sq = sqrt(disc);\n                    float s1 = max(log(max((C - sq) / (A + B), 1e-6)), 0.0);\n                    float s2 = log(max((C + sq) / (A + B), 1e-6));\n                    if (s2 > 0.0) {\n                        int slot = nb;\n                        if (nb == 6) {\n                            // full: replace the farthest candidate if this one is nearer\n                            float far = -1.0;\n                            for (int j = 0; j < 6; j++) if (bS1[j] > far) { far = bS1[j]; slot = j; }\n                            if (s1 >= far) slot = -1;\n                        } else {\n                            nb++;\n                        }\n                        if (slot >= 0) { bIdx[slot] = i; bL[slot] = L; bS1[slot] = s1; bS2[slot] = s2; }\n                    }\n                }\n            }\n        }\n    }\n    // ---- sphere-trace each candidate bird inside its bounding ball, in the bird's normal coordinates\n    // (log map at the boid; frame heading / up / side). The nearest hit or near miss (silhouette AA) wins.\n    float sHit = -1.0;\n    float cover = 0.0;\n    int hi = 0;\n    float hL = 1.0;\n    vec4 hP4 = vec4(0.0);\n    vec4 hV4 = vec4(0.0);\n    vec4 hM = vec4(0.0);\n    float sNear = 1e9;\n    for (int j = 0; j < 6; j++) {\n        if (j >= nb) break;\n        if (bS1[j] > sNear) continue;\n        int i = bIdx[j];\n        float L = bL[j];\n        vec4 c = texelFetch(state, ivec2(i, 0), 0);\n        vec4 f = br_unit(texelFetch(state, ivec2(i, 1), 0));\n        vec4 u = texelFetch(state, ivec2(i, 2), 0);\n        vec4 sd = br_unit(br_cross4(c, f, u));\n        vec4 P4 = vec4(-br_dot(P, c), br_dot(P, f), br_dot(P, u), br_dot(P, sd));\n        vec4 V4 = vec4(-br_dot(v, c), br_dot(v, f), br_dot(v, u), br_dot(v, sd));\n        vec4 m = texelFetch(state, ivec2(i, 3), 0);\n        bool pr = i >= 512;\n        vec4 bm = vec4(m.x, mix(0.12, 0.85, m.y) * (pr ? 0.7 : 1.0), pr ? 1.35 : 1.0, 0.0);\n        float s = bS1[j];\n        float best = 1e9;\n        float sb = s;\n        for (int it = 0; it < 40; it++) {\n            float e = exp(s);\n            vec4 Lc = (0.5 * (e + 1.0 / e)) * P4 + (0.5 * (e - 1.0 / e)) * V4;\n            float r = length(Lc.yzw);\n            vec3 X = Lc.yzw * (r > 1e-6 ? br_asinh(r) / r : 1.0) / L;\n            float pt;\n            float d = br_bird(X, bm.x, bm.y, bm.z, pt) * L;\n            float fp = sinh(max(s, 1e-3)) * pixA;          // pixel footprint at this distance\n            float ratio = d / fp;\n            if (ratio < best) { best = ratio; sb = s; }\n            if (ratio < 0.3) break;\n            s += max(d * 0.9, 0.2 * fp);\n            if (s > bS2[j]) break;\n        }\n        // a full hit always beats a near miss (near misses only anti-alias against the background)\n        float cv = best < 0.3 ? 1.0 : 1.0 - smoothstep(0.3, 1.2, best);\n        if (best < 1.2 && (cv > cover || (cv == cover && sb < sNear))) {\n            sNear = cv == 1.0 ? sb : 1e9;\n            sHit = sb;\n            cover = cv;\n            hi = i;\n            hL = L;\n            hP4 = P4;\n            hV4 = V4;\n            hM = bm;\n        }\n    }\n\n    vec3 col;\n    vec3 body = vec3(0.0);\n    if (sHit >= 0.0) {\n        float e = exp(sHit);\n        float ch = 0.5 * (e + 1.0 / e);\n        float sh = 0.5 * (e - 1.0 / e);\n        vec4 q = ch * P + sh * v;\n        vec4 V = sh * P + ch * v;\n        int i = hi;\n        float L = hL;\n        vec4 c = texelFetch(state, ivec2(i, 0), 0);\n        vec4 f = br_unit(texelFetch(state, ivec2(i, 1), 0));\n        vec4 u = texelFetch(state, ivec2(i, 2), 0);\n        vec4 sd = br_unit(br_cross4(c, f, u));\n        vec4 Lc = ch * hP4 + sh * hV4;\n        float r = length(Lc.yzw);\n        vec3 X = Lc.yzw * (r > 1e-6 ? br_asinh(r) / r : 1.0) / L;\n        vec4 bm = hM;\n        float part;\n        br_bird(X, bm.x, bm.y, bm.z, part);\n        // normal: tetrahedral gradient in the bird frame, mapped to the tangent space at the hit\n        const vec2 kk = vec2(1.0, -1.0);\n        float hh = 0.004;\n        float pd;\n        vec3 g = kk.xyy * br_bird(X + kk.xyy * hh, bm.x, bm.y, bm.z, pd)\n               + kk.yyx * br_bird(X + kk.yyx * hh, bm.x, bm.y, bm.z, pd)\n               + kk.yxy * br_bird(X + kk.yxy * hh, bm.x, bm.y, bm.z, pd)\n               + kk.xxx * br_bird(X + kk.xxx * hh, bm.x, bm.y, bm.z, pd);\n        vec4 N = br_unit(br_tan(g.x * f + g.y * u + g.z * sd, q));\n        float NdV = clamp(-br_dot(N, V), 0.0, 1.0);\n        vec4 Ls = br_unit(br_tan(xiSun, q));            // towards the ideal light point\n        float dif = max(br_dot(N, Ls), 0.0);\n        vec4 Hh = br_unit(Ls - V);\n        float spec = pow(max(br_dot(N, Hh), 0.0), 60.0);\n        vec4 Rf = V - 2.0 * br_dot(V, N) * N;\n        vec3 env = br_sky(q, Rf, colorA, colorB, sunDir, sunCol);\n        float fres = 0.04 + 0.96 * pow(1.0 - NdV, 5.0);\n        vec4 inf = texelFetch(proj, ivec2(i, 8), 0);\n        if (inf.y > 0.5) {\n            // predator: dark lacquer with an ember rim and burning eyes\n            float eye = smoothstep(0.03, 0.0, length(vec2(X.x - 0.37, abs(X.z) - 0.035)) - 0.012 + abs(X.y - 0.05) * 0.5);\n            body = predatorColor * (0.04 + 0.2 * dif) + predatorColor * pow(1.0 - NdV, 2.0) * 3.0 * glow;\n            body += predatorColor * (part == 1.0 ? smoothstep(0.25, 0.6, abs(X.z)) : 0.25) * 1.2 * glow;\n            body += env * (0.15 + 1.2 * fres) + vec3(1.0, 0.9, 0.8) * spec * 0.6;\n            body += mix(predatorColor, vec3(1.0, 0.9, 0.5), 0.5) * eye * 6.0 * glow * (1.0 + kick);\n        } else {\n            // boid: thin-film iridescence (hue shifts with the viewing angle), emissive spine\n            float hue = inf.x;\n            float panic = inf.z;\n            vec3 film = br_pal(hue + 0.55 * (1.0 - NdV) + 0.07 * part + 0.1 * X.x, colorA, colorB, colorC);\n            vec3 base = br_pal(hue, colorA, colorB, colorC);\n            float spine = part == 1.0 ? smoothstep(0.2, 0.55, abs(X.z)) * 0.6 : (part == 2.0 ? 0.5 : 1.0);\n            float fill = max(-br_dot(N, Ls), 0.0);            // cool fill from the antipodal side\n            body = film * (0.08 + 0.45 * dif) + colorA * film * fill * 0.18 + film * pow(1.0 - NdV, 2.0) * 0.9;\n            body += env * (0.05 + 0.6 * fres) + vec3(1.0, 0.97, 0.9) * spec * 0.6;\n            body += base * spine * (0.25 + 0.9 * panic) * glow * (1.0 + 0.8 * kick);\n        }\n        body *= cover;\n    }\n\n    // ---- honeycomb walk: Klein cube cells, rays reflected into the neighbour cell at each face\n    const float A = 0.48586827;\n    float Dstop = sHit >= 0.0 && cover > 0.6 ? sHit : 9.0;\n    vec4 hp = Pl;\n    vec4 hv = vl;\n    float D = 0.0;\n    vec3 wire = vec3(0.0);\n    if (lattice > 0.0) {\n        for (int it = 0; it < 18; it++) {\n            float tExit = 0.99999;\n            int ef = 0;\n            for (int k = 0; k < 6; k++) {\n                vec4 fn = br_face(k);\n                float vn = br_dot(hv, fn);\n                if (vn > 1e-7) {\n                    float t = max(-br_dot(hp, fn) / vn, 0.0);\n                    if (t < tExit) { tExit = t; ef = k; }\n                }\n            }\n            float seg = atanh(tExit);\n            if (D + seg > Dstop) break;\n            float chx = inversesqrt(max(1.0 - tExit * tExit, 1e-9));\n            vec4 pn = (hp + tExit * hv) * chx;\n            vec4 vn = (tExit * hp + hv) * chx;\n            D += seg;\n            vec3 ak = abs(pn.xyz / pn.w);\n            int ej = ef / 2;\n            vec2 o = ej == 0 ? ak.yz : (ej == 1 ? ak.xz : ak.xy);\n            float m1 = max(o.x, o.y);\n            float m2 = min(o.x, o.y);\n            // wire width ~ constant hyperbolic width on the face; fade to coverage when sub-pixel\n            float fpk = pixA * sinh(D) * 0.75;\n            float band = max(0.003, fpk);\n            float wv = smoothstep(A - band * 1.6, A - band * 0.3, m1) * (0.003 / band);\n            float vx = smoothstep(A - band * 5.0, A - band * 0.5, m2) * smoothstep(A - band * 3.0, A, m1) * min(1.0, 0.008 / band);\n            float fw = exp(-D * (fog * 1.5 + 0.3));\n            if (fw < 0.015) break;\n            wire += latticeColor * (wv * 0.22 + vx * 0.7 * (1.0 + kick)) * fw * smoothstep(0.05, 0.4, D);\n            vec4 fn = br_face(ef);\n            hp = br_toH(pn - 2.0 * br_dot(pn, fn) * fn);\n            hv = br_unit(br_tan(vn - 2.0 * br_dot(vn, fn) * fn, hp));\n        }\n    }\n    wire *= lattice;\n\n    vec3 fogCol = vec3(0.006, 0.009, 0.022) + mix(colorA, colorB, 0.4) * 0.012;\n    if (sHit >= 0.0) {\n        float T = exp(-sHit * fog);\n        vec3 bg = br_sky(P, v, colorA, colorB, sunDir, sunCol) * exp(-9.0 * fog) + fogCol * (1.0 - exp(-9.0 * fog));\n        col = mix(bg, body * T + fogCol * (1.0 - T), cover) + wire;\n    } else {\n        float T = exp(-9.0 * fog);\n        col = br_sky(P, v, colorA, colorB, sunDir, sunCol) * (0.25 + 0.75 * T) + fogCol * (1.0 - T) + wire;\n    }\n\n    // ---- trails: drawn at half resolution by the Boid Trails pass; rgb = light, a = depth of the trail\n    vec4 tr = texture(trailTex, gl_FragCoord.xy / u_resolution);\n    vec3 trails = tr.rgb * ((sHit >= 0.0 && tr.a > sHit + 0.03) ? 1.0 - 0.9 * cover : 1.0);\n    col += trails * trailGlow * 0.55 * (1.0 + 0.5 * kick);\n    col += halo * glow * 0.035 * (1.0 + kick);\n    return col;\n}\n"
+    },
+    "BoidStreak": {
+      "category": "effect",
+      "inputs": [
+        {
+          "name": "tex",
+          "type": "sampler2D",
+          "paramName": "tex"
+        },
+        {
+          "name": "width",
+          "type": "float",
+          "paramName": "width"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "// @node boidStreak\n// @title Anamorphic Streak\n// @category effect\n// @description Wide horizontal lens streak of a bright-pass texture (blur along x only, width in UV units) at the current pixel.\nvec3 boidStreak(sampler2D tex, float width) {\n    vec2 uv = gl_FragCoord.xy / u_resolution;\n    vec3 acc = vec3(0.0);\n    float wsum = 0.0;\n    for (int i = -16; i <= 16; i++) {\n        float x = float(i) / 16.0;\n        float wt = exp(-x * x * 4.0);\n        acc += texture(tex, uv + vec2(x * width, 0.0)).rgb * wt;\n        wsum += wt;\n    }\n    return acc / wsum;\n}\n"
+    },
+    "BoidSim": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "state",
+          "type": "sampler2D",
+          "paramName": "state"
+        },
+        {
+          "name": "time",
+          "type": "float",
+          "paramName": "time"
+        },
+        {
+          "name": "count",
+          "type": "float",
+          "paramName": "count"
+        },
+        {
+          "name": "separation",
+          "type": "float",
+          "paramName": "separation"
+        },
+        {
+          "name": "alignment",
+          "type": "float",
+          "paramName": "alignment"
+        },
+        {
+          "name": "cohesion",
+          "type": "float",
+          "paramName": "cohesion"
+        },
+        {
+          "name": "perception",
+          "type": "float",
+          "paramName": "perception"
+        },
+        {
+          "name": "spacing",
+          "type": "float",
+          "paramName": "spacing"
+        },
+        {
+          "name": "speed",
+          "type": "float",
+          "paramName": "speed"
+        },
+        {
+          "name": "containment",
+          "type": "float",
+          "paramName": "containment"
+        },
+        {
+          "name": "predators",
+          "type": "float",
+          "paramName": "predators"
+        },
+        {
+          "name": "camSpeed",
+          "type": "float",
+          "paramName": "camSpeed"
+        },
+        {
+          "name": "camDistance",
+          "type": "float",
+          "paramName": "camDistance"
+        },
+        {
+          "name": "trailLength",
+          "type": "float",
+          "paramName": "trailLength"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec4"
+        }
+      ],
+      "customGLSL": "    // @node boidSim\n// @title Hyperbolic Boids Sim\n// @category custom\n// @description Boid flocking in H3 for an 526x16 rgba32f / nearest Feedback (wire its out back into state). Columns 0..511 are boids, 512..513 predators, 514.. globals. Rows: 0 position p on the hyperboloid <p,p> = -1 | 1 velocity v (tangent, <p,v> = 0) | 2 up vector (banking) | 3 (wing phase, flap effort, panic, hue) | 4..15 trail history. Steering is intrinsic: neighbour distance acosh(-<p,q>), directions from the log map, neighbour velocities parallel-transported to p before averaging; geodesic steps with the exponential map. Globals: clock (shift phase, time, simT, tick), smoothed flock centre, orbit state, camera frame (world and folded into the {4,3,5} base cell), wandering attractor.\n// ---- H3 helpers, hyperboloid model: <a,b> = a.x b.x + a.y b.y + a.z b.z - a.w b.w, <p,p> = -1 ----\nfloat bs_dot(vec4 a, vec4 b) {\n    return dot(a.xyz, b.xyz) - a.w * b.w;\n}\n\n// Back onto the upper sheet of the hyperboloid\nvec4 bs_toH(vec4 p) {\n    return p / sqrt(max(-bs_dot(p, p), 1e-12));\n}\n\n// Tangent projection at p\nvec4 bs_tan(vec4 v, vec4 p) {\n    return v + bs_dot(v, p) * p;\n}\n\nvec4 bs_unit(vec4 v) {\n    return v * inversesqrt(max(bs_dot(v, v), 1e-14));\n}\n\nfloat bs_acosh(float c) {\n    c = max(c, 1.0);\n    return log(c + sqrt(c * c - 1.0));\n}\n\nfloat bs_asinh(float x) {\n    return log(x + sqrt(x * x + 1.0));\n}\n\n// Log map: tangent vector at p pointing to q, length = d(p, q)\nvec4 bs_log(vec4 p, vec4 q) {\n    float c = max(-bs_dot(p, q), 1.0);\n    float sh = sqrt(c * c - 1.0);\n    if (sh < 1e-7) return vec4(0.0);\n    return (q - c * p) * (log(c + sh) / sh);\n}\n\n// Exponential map: walk the geodesic from p with initial velocity v for |v|\nvec4 bs_exp(vec4 p, vec4 v) {\n    float n = sqrt(max(bs_dot(v, v), 0.0));\n    if (n < 1e-8) return p;\n    return cosh(n) * p + (sinh(n) / n) * v;\n}\n\n// Parallel transport of w (tangent at q) along the geodesic q -> p\nvec4 bs_transport(vec4 w, vec4 q, vec4 p) {\n    return w + bs_dot(p, w) / (1.0 - bs_dot(q, p)) * (q + p);\n}\n\n// Lorentz-orthogonal complement of three vectors (generalized cross product, index lowered)\nvec4 bs_cross4(vec4 a, vec4 b, vec4 c) {\n    float x = dot(a.yzw, cross(b.yzw, c.yzw));\n    float y = -dot(a.xzw, cross(b.xzw, c.xzw));\n    float z = dot(a.xyw, cross(b.xyw, c.xyw));\n    float w = -dot(a.xyz, cross(b.xyz, c.xyz));\n    return vec4(x, y, z, -w);\n}\n\nvec3 bs_hash3(uvec3 v) {\n    v = v * 1664525u + 1013904223u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    v ^= v >> 16u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    return vec3(v) * (1.0 / 4294967296.0);\n}\n\n// Outward unit normal of face k of the {4,3,5} base cell (Klein cube |x_j| <= A)\nvec4 bs_face(int k) {\n    const float A = 0.48586827;\n    int j = k / 2;\n    float s = (k - j * 2 == 0) ? 1.0 : -1.0;\n    vec3 e = j == 0 ? vec3(1.0, 0.0, 0.0) : (j == 1 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0));\n    return vec4(e * s, A) * 1.1441228;   // 1 / sqrt(1 - A^2)\n}\n\n// Three-colour cyclic palette\nvec3 bs_pal(float t, vec3 a, vec3 b, vec3 c) {\n    t = fract(t) * 3.0;\n    if (t < 1.0) return mix(a, b, smoothstep(0.0, 1.0, t));\n    if (t < 2.0) return mix(b, c, smoothstep(1.0, 2.0, t));\n    return mix(c, a, smoothstep(2.0, 3.0, t));\n}\n\n\n// Deterministic seed: boids in a ball of radius ~0.9, predators farther out\nvoid bs_seed(int i, float sig0, out vec4 p, out vec4 v, out vec4 u, out vec4 m) {\n    vec3 h = bs_hash3(uvec3(uint(i), 11u, 5u));\n    vec3 h2 = bs_hash3(uvec3(uint(i), 23u, 9u));\n    bool pred = i >= 512;\n    float r = pred ? 1.6 : 0.95 * pow(h.x, 0.333);\n    float z = 2.0 * h.y - 1.0;\n    float a = 6.2831853 * h.z;\n    vec3 dir = vec3(sqrt(max(1.0 - z * z, 0.0)) * vec2(cos(a), sin(a)), z).xzy;\n    p = vec4(sinh(r) * dir, cosh(r));\n    // random heading, biased a little towards +x so the flock forms in a few seconds\n    float z2 = 2.0 * h2.x - 1.0;\n    float a2 = 6.2831853 * h2.y;\n    vec3 hd = normalize(vec3(sqrt(max(1.0 - z2 * z2, 0.0)) * vec2(cos(a2), sin(a2)), z2) + vec3(0.6, 0.0, 0.2));\n    vec4 o = vec4(0.0, 0.0, 0.0, 1.0);\n    vec4 f = bs_unit(bs_tan(bs_transport(vec4(hd, 0.0), o, p), p));\n    v = f * sig0;\n    vec4 up = bs_tan(bs_transport(vec4(0.0, 1.0, 0.0, 0.0), o, p), p);\n    up = bs_unit(up - bs_dot(up, f) * f);\n    u = up;\n    m = vec4(6.2831853 * h2.z, 0.5, pred ? 13.0 * float(i - 512) : 0.0, fract(h.x * 7.31 + h.y * 3.17 + float(i) * 0.618034));\n}\n\nbool bs_valid(vec4 p, vec4 v) {\n    float c = bs_dot(p, p) + 1.0;\n    float s = bs_dot(v, v);\n    return p.w >= 1.0 && p.w < 1e4 && abs(c) < 0.05 && s > 1e-10 && s < 100.0;\n}\n\n// Attractor: a slowly wandering point within ~0.8 of the origin (soft containment pulls towards it)\nvec4 bs_attractor(float t) {\n    float r = 0.45 + 0.25 * sin(t * 0.041);\n    float th = t * 0.063 + 0.9 * sin(t * 0.023);\n    float ph = 0.45 * sin(t * 0.051 + 1.3);\n    vec3 d = vec3(cos(ph) * cos(th), sin(ph), cos(ph) * sin(th));\n    return vec4(sinh(r) * d, cosh(r));\n}\n\n// Orbit camera around the smoothed flock centre c at distance D, azimuth th, elevation ph\nvoid bs_orbitCam(vec4 c, float th, float ph, float D, out vec4 P, out vec4 R, out vec4 U, out vec4 F) {\n    // world axes transported from the origin to c\n    float k = 1.0 / (1.0 + c.w);\n    vec4 oc = vec4(c.xyz, c.w + 1.0);\n    vec4 Ex = vec4(1.0, 0.0, 0.0, 0.0) + c.x * k * oc;\n    vec4 Ey = vec4(0.0, 1.0, 0.0, 0.0) + c.y * k * oc;\n    vec4 Ez = vec4(0.0, 0.0, 1.0, 0.0) + c.z * k * oc;\n    vec4 hor = cos(th) * Ex + sin(th) * Ez;\n    vec4 dir = cos(ph) * hor + sin(ph) * Ey;\n    P = cosh(D) * c + sinh(D) * dir;\n    F = -(sinh(D) * c + cosh(D) * dir);     // back along the geodesic, towards c\n    U = -sin(ph) * hor + cos(ph) * Ey;        // orthogonal to the plane (c, dir): unchanged by transport\n    R = sin(th) * Ex - cos(th) * Ez;\n    // tidy up (fp32)\n    P = bs_toH(P);\n    F = bs_unit(bs_tan(F, P));\n    U = bs_tan(U, P); U = bs_unit(U - bs_dot(U, F) * F);\n    R = bs_tan(R, P); R = bs_unit(R - bs_dot(R, F) * F - bs_dot(R, U) * U);\n}\n\nvec4 bs_globals(int idx, sampler2D state, float time, float dt, float dH, float simT, float tick, bool init, int n, float camSpeed, float camDistance) {\n    if (idx == 0) return vec4(fract(simT / dH), time, simT, tick);\n    if (idx == 11) return bs_attractor(time);\n    // flock centre (Lorentzian centroid) and spread: mean cosh(d) = |sum p|_L / n\n    vec4 S = vec4(0.0);\n    for (int j = 0; j < 512; j++) {\n        if (j >= n) break;\n        S += texelFetch(state, ivec2(j, 0), 0);\n    }\n    float nl = sqrt(max(-bs_dot(S, S), 1e-12));\n    vec4 ct = n > 0 ? S / nl : vec4(0.0, 0.0, 0.0, 1.0);\n    float spread = n > 0 ? bs_acosh(nl / float(n)) : 0.5;\n    vec4 cPrev = texelFetch(state, ivec2(514 + 1, 0), 0);\n    vec4 g2 = texelFetch(state, ivec2(514 + 2, 0), 0);\n    bool ok = !init && cPrev.w >= 1.0 && cPrev.w < 1e3 && g2.y > 0.0 && g2.y < 10.0;\n    vec4 c = ok ? bs_toH(bs_exp(cPrev, bs_log(cPrev, ct) * (1.0 - exp(-dt / 1.1)))) : ct;\n    float th = ok ? mod(g2.x + camSpeed * dt, 6.2831853) : 2.4;\n    float sp = ok ? mix(g2.z, spread, 1.0 - exp(-dt / 2.0)) : spread;\n    float Dt = clamp(camDistance * bs_asinh(2.8 * sinh(1.15 * sp + 0.2)), 0.45, 3.5);\n    Dt *= 0.78 + 0.3 * (0.5 + 0.5 * sin(time * 0.043 + 1.1));     // slow push-in / pull-out\n    float D = ok ? mix(g2.y, Dt, 1.0 - exp(-dt / 2.5)) : Dt;\n    if (idx == 1) return c;\n    if (idx == 2) return vec4(th, D, sp, 1.0);\n    float ph = 0.3 + 0.24 * sin(time * 0.037 + 0.6);\n    vec4 P, R, U, F;\n    bs_orbitCam(c, th, ph, D, P, R, U, F);\n    if (idx < 7) return idx == 3 ? P : (idx == 4 ? R : (idx == 5 ? U : F));\n    // fold the camera into the base cell of the {4,3,5} honeycomb (Lorentz reflections in its faces)\n    for (int it = 0; it < 32; it++) {\n        bool moved = false;\n        for (int k = 0; k < 6; k++) {\n            vec4 fn = bs_face(k);\n            float d = bs_dot(P, fn);\n            if (d > 1e-6) {\n                P -= 2.0 * d * fn;\n                R -= 2.0 * bs_dot(R, fn) * fn;\n                U -= 2.0 * bs_dot(U, fn) * fn;\n                F -= 2.0 * bs_dot(F, fn) * fn;\n                moved = true;\n            }\n        }\n        if (!moved) break;\n    }\n    P = bs_toH(P);\n    if (idx == 7) return P;\n    if (idx == 8) return bs_tan(R, P);\n    if (idx == 9) return bs_tan(U, P);\n    return bs_tan(F, P);\n}\n\nvec4 boidSim(sampler2D state, float time, float count, float separation, float alignment, float cohesion, float perception, float spacing, float speed, float containment, float predators, float camSpeed, float camDistance, float trailLength) {\n    ivec2 px = ivec2(gl_FragCoord.xy);\n    int i = px.x;\n    int row = px.y;\n    vec4 g0 = texelFetch(state, ivec2(514, 0), 0);\n    vec4 g2 = texelFetch(state, ivec2(514 + 2, 0), 0);\n    // zeroed buffer, clock moved backwards or broken globals: reseed everything\n    bool init = g2.w != 1.0 || !(g0.y > 0.0) || time < g0.y - 1.0 || !(g0.z >= 0.0 && g0.z < 1e6);\n    float dt = init ? 0.0 : clamp(time - g0.y, 0.0, 0.1);\n    float dH = max(trailLength, 0.1) / 12.0;\n    float simT = init ? 0.0 : mod(g0.z + dt, dH * 1000.0);\n    float tick = floor(simT / dH);\n    bool shift = init || tick != g0.w;\n    int n = clamp(int(count + 0.5), 0, 512);\n    int np = clamp(int(predators + 0.5), 0, 2);\n    float sig0 = max(speed, 0.02);\n\n    if (i >= 514) {\n        if (row != 0) return vec4(0.0);\n        return bs_globals(i - 514, state, time, dt, dH, simT, tick, init, n, camSpeed, camDistance);\n    }\n\n    vec4 p = texelFetch(state, ivec2(i, 0), 0);\n    vec4 v = texelFetch(state, ivec2(i, 1), 0);\n    bool bad = init || !bs_valid(p, v);\n    vec4 sp0, sv0, su0, sm0;\n    if (bad) bs_seed(i, sig0, sp0, sv0, su0, sm0);\n\n    // trail history: a shift register of past positions, one step every trailLength / K seconds\n    if (row >= 4) {\n        if (bad) return sp0;\n        if (!shift) return texelFetch(state, px, 0);\n        return row == 4 ? p : texelFetch(state, ivec2(i, row - 1), 0);\n    }\n    if (bad) return row == 0 ? sp0 : (row == 1 ? sv0 : (row == 2 ? su0 : sm0));\n\n    vec4 u = texelFetch(state, ivec2(i, 2), 0);\n    vec4 m = texelFetch(state, ivec2(i, 3), 0);\n    bool pred = i >= 512;\n    bool alive = pred ? (i - 512) < np : i < n;\n    vec3 hi = bs_hash3(uvec3(uint(i), 41u, 3u));\n\n    float spd = sqrt(max(bs_dot(v, v), 1e-12));\n    vec4 f = v / spd;\n    vec4 acc = vec4(0.0);\n    float threat = 0.0;\n    float amax = sig0 * 3.0;\n    float sigT = sig0 * (0.9 + 0.2 * hi.x);\n\n    // soft containment towards the wandering attractor\n    vec4 at = texelFetch(state, ivec2(514 + 11, 0), 0);\n    if (!(at.w >= 1.0 && at.w < 100.0)) at = vec4(0.0, 0.0, 0.0, 1.0);\n    vec4 la = bs_log(p, at);\n    float da = sqrt(max(bs_dot(la, la), 0.0));\n    vec4 ea = la / max(da, 1e-5);\n    float R0 = pred ? 1.5 : 0.95;\n\n    if (!pred) {\n        if (alive) {\n            float R = max(perception, 0.02);\n            float Rs = max(spacing, 0.005);\n            float chR = cosh(max(R, Rs));\n            vec4 sep = vec4(0.0);\n            vec4 coh = vec4(0.0);\n            vec4 ali = vec4(0.0);\n            float wsum = 0.0;\n            for (int j = 0; j < 512; j++) {\n                if (j >= n) break;\n                if (j == i) continue;\n                vec4 q = texelFetch(state, ivec2(j, 0), 0);\n                float c = -bs_dot(p, q);\n                if (!(c < chR)) continue;\n                c = max(c, 1.0 + 1e-6);\n                float sh = sqrt(c * c - 1.0);\n                float d = log(c + sh);\n                vec4 e = (q - c * p) / sh;                  // log map direction\n                if (d < Rs) {\n                    float x = d / Rs;\n                    sep -= e * (1.0 - x) * (1.0 - x) / max(x, 0.2);\n                }\n                float w = max(1.0 - d / R, 0.0);\n                w *= w * smoothstep(-0.8, -0.4, bs_dot(e, f));   // blind spot behind\n                if (w > 0.0) {\n                    vec4 vj = texelFetch(state, ivec2(j, 1), 0);\n                    ali += w * bs_transport(vj, q, p);        // neighbour velocity, transported to p\n                    coh += w * d * e;                          // log map of the neighbour\n                    wsum += w;\n                }\n            }\n            if (wsum > 1e-4) {\n                acc += alignment * 1.5 * (ali / wsum - v);\n                acc += cohesion * 1.0 * (coh / wsum);\n            }\n            acc += separation * sig0 * 4.0 * sep;\n            // flee from predators\n            float Rp = max(2.0 * R, 0.5);\n            for (int k = 0; k < 2; k++) {\n                if (k >= np) break;\n                vec4 q = texelFetch(state, ivec2(512 + k, 0), 0);\n                vec4 l = bs_log(p, q);\n                float d = sqrt(max(bs_dot(l, l), 1e-10));\n                if (d < Rp) {\n                    float t = 1.0 - d / Rp;\n                    acc -= (l / d) * t * t * sig0 * 7.0;\n                    threat = max(threat, t);\n                }\n            }\n        }\n        acc += containment * sig0 * ea * min(0.35 * da + 2.0 * max(da - R0, 0.0), 6.0);\n        sigT *= 1.0 + 0.8 * threat;\n        amax *= 1.0 + threat;\n    } else {\n        // predators: hunt the nearest boid for 15 s, then cruise for 11 s\n        float cyc = mod(m.z + dt, 26.0);\n        float hunt = alive ? smoothstep(0.0, 1.0, cyc) * (1.0 - smoothstep(14.0, 15.0, cyc)) : 0.0;\n        float best = 1e9;\n        vec4 tgt = at;\n        if (hunt > 0.0) {\n            for (int j = 0; j < 512; j++) {\n                if (j >= n) break;\n                vec4 q = texelFetch(state, ivec2(j, 0), 0);\n                float c = -bs_dot(p, q) - 0.15 * bs_dot(f, q);   // prefer prey ahead\n                if (c < best) { best = c; tgt = q; }\n            }\n        }\n        vec4 lt = bs_log(p, tgt);\n        float dtg = sqrt(max(bs_dot(lt, lt), 1e-10));\n        vec4 desired = (lt / dtg) * sig0 * 1.55;\n        acc += hunt * 1.3 * (desired - v);\n        // cruising: lurk about 1.1 from the flock centre, drifting\n        vec3 hw = bs_hash3(uvec3(uint(i), uint(floor(time * 0.2)), 77u)) - 0.5;\n        acc += (1.0 - hunt) * sig0 * 0.6 * bs_tan(vec4(hw, 0.0), p);\n        vec4 fc = texelFetch(state, ivec2(514 + 1, 0), 0);\n        if (fc.w >= 1.0 && fc.w < 1e3) {\n            vec4 lc = bs_log(p, fc);\n            float dc = sqrt(max(bs_dot(lc, lc), 1e-10));\n            acc += (1.0 - hunt) * sig0 * 1.2 * (lc / dc) * clamp(dc - 1.1, -1.0, 1.5);\n        }\n        acc += containment * sig0 * ea * min(0.2 * da + 1.5 * max(da - R0, 0.0), 4.0);\n        for (int k = 0; k < 2; k++) {\n            int o = 512 + k;\n            if (o == i || k >= np) continue;\n            vec4 l = bs_log(p, texelFetch(state, ivec2(o, 0), 0));\n            float d = sqrt(max(bs_dot(l, l), 1e-10));\n            if (d < 0.6) acc -= (l / d) * (1.0 - d / 0.6) * sig0 * 3.0;\n        }\n        sigT = sig0 * mix(0.75, 1.55, hunt);\n        amax = sig0 * 1.7;\n        m.z = cyc;\n    }\n\n    // individual wander (keeps the flock from freezing into a crystal)\n    vec4 side = bs_unit(bs_cross4(p, f, u));\n    float wt = time * (0.5 + 0.4 * hi.y) + 6.2831853 * hi.z;\n    acc += sig0 * 0.35 * (sin(wt) * u + cos(wt * 0.73 + 1.7) * side);\n    // bounded steering, tangent at p, then cruise-speed control (bounded on its own, so a strong\n    // pull can never starve the brakes)\n    acc = bs_tan(acc, p);\n    float an = sqrt(max(bs_dot(acc, acc), 0.0));\n    if (an > amax) acc *= amax / an;\n    acc += f * clamp((sigT - spd) * 2.0, -amax, amax);\n    if (!alive) acc = bs_tan(ea * da * sig0 * 0.5 + f * (sig0 - spd), p);\n\n    v = bs_tan(v + acc * dt, p);\n    spd = clamp(sqrt(max(bs_dot(v, v), 1e-12)), 0.35 * sig0, (pred ? 1.8 : 2.4) * sig0);\n    f = bs_unit(v);\n\n    // banking: up vector leans into the turn (lateral acceleration), relaxes to \"world up\"\n    vec4 Y = bs_tan(vec4(0.0, 1.0, 0.0, 0.0), p);\n    Y -= bs_dot(Y, f) * f;\n    float yl = bs_dot(Y, Y);\n    u = bs_tan(u, p);\n    u -= bs_dot(u, f) * f;\n    u = bs_unit(u);\n    vec4 aLat = acc - bs_dot(acc, f) * f;\n    vec4 ut = (yl > 1e-6 ? Y * inversesqrt(yl) : u) + aLat * (0.8 / sig0);\n    ut -= bs_dot(ut, f) * f;\n    u = bs_unit(mix(u, bs_unit(ut), 1.0 - exp(-dt * 3.0)));\n\n    // wings: flap harder when accelerating, climbing or fleeing; glide now and then\n    float climb = bs_dot(f, Y) * inversesqrt(max(yl, 1e-6) + 1.0);\n    float effort = clamp(0.25 + 0.7 * an / amax + 1.5 * climb + threat, 0.0, 1.0);\n    float glide = smoothstep(0.55, 0.9, sin(time * (0.21 + 0.1 * hi.y) + 6.2831853 * hi.x)) * (1.0 - threat);\n    effort *= 1.0 - 0.85 * glide;\n    m.y = mix(m.y, effort, 1.0 - exp(-dt * 2.5));\n    m.x = mod(m.x + dt * (pred ? 0.6 : 1.0) * (8.0 + 10.0 * m.y), 6.2831853);\n    if (!pred) m.z = max(threat, m.z * exp(-dt * 1.2));\n\n    // geodesic step: p' = cosh(s) p + sinh(s) f, velocity transported along it (the up vector is\n    // orthogonal to the geodesic plane, so transport leaves it unchanged)\n    float s = spd * dt;\n    vec4 p2 = bs_toH(cosh(s) * p + sinh(s) * f);\n    vec4 f2 = bs_unit(bs_tan(sinh(s) * p + cosh(s) * f, p2));\n    u = bs_tan(u, p2);\n    u = bs_unit(u - bs_dot(u, f2) * f2);\n\n    if (row == 0) return p2;\n    if (row == 1) return f2 * spd;\n    if (row == 2) return u;\n    return m;\n}\n"
+    },
+    "BoidProject": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "state",
+          "type": "sampler2D",
+          "paramName": "state"
+        },
+        {
+          "name": "count",
+          "type": "float",
+          "paramName": "count"
+        },
+        {
+          "name": "predators",
+          "type": "float",
+          "paramName": "predators"
+        },
+        {
+          "name": "boidSize",
+          "type": "float",
+          "paramName": "boidSize"
+        },
+        {
+          "name": "trailWidth",
+          "type": "float",
+          "paramName": "trailWidth"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec4"
+        }
+      ],
+      "customGLSL": "// @node boidProject\n// @title Boid Trail Projection\n// @category custom\n// @description Per-frame screen projection for the trails, into a 514x11 rgba32f / nearest Feedback (read by the scene, written after the sim). The camera frame comes from the sim state. Geodesics are straight lines in the Klein model centred on the camera, so they project to straight screen segments: each trail (the boid's tail plus its position history) is a screen polyline. Rows 0..6: two screen points per texel (x0, y0, x1, y1; 1e4 = behind the camera) | 7: screen bounding box of trail + body + halo | 8: (hue, predator, panic, body length) | 9: (trail half width, depth) at the tail | 10: screen bounding box of body + halo.\n// ---- H3 helpers, hyperboloid model: <a,b> = a.x b.x + a.y b.y + a.z b.z - a.w b.w, <p,p> = -1 ----\nfloat bp_dot(vec4 a, vec4 b) {\n    return dot(a.xyz, b.xyz) - a.w * b.w;\n}\n\n// Back onto the upper sheet of the hyperboloid\nvec4 bp_toH(vec4 p) {\n    return p / sqrt(max(-bp_dot(p, p), 1e-12));\n}\n\n// Tangent projection at p\nvec4 bp_tan(vec4 v, vec4 p) {\n    return v + bp_dot(v, p) * p;\n}\n\nvec4 bp_unit(vec4 v) {\n    return v * inversesqrt(max(bp_dot(v, v), 1e-14));\n}\n\nfloat bp_acosh(float c) {\n    c = max(c, 1.0);\n    return log(c + sqrt(c * c - 1.0));\n}\n\nfloat bp_asinh(float x) {\n    return log(x + sqrt(x * x + 1.0));\n}\n\n// Log map: tangent vector at p pointing to q, length = d(p, q)\nvec4 bp_log(vec4 p, vec4 q) {\n    float c = max(-bp_dot(p, q), 1.0);\n    float sh = sqrt(c * c - 1.0);\n    if (sh < 1e-7) return vec4(0.0);\n    return (q - c * p) * (log(c + sh) / sh);\n}\n\n// Exponential map: walk the geodesic from p with initial velocity v for |v|\nvec4 bp_exp(vec4 p, vec4 v) {\n    float n = sqrt(max(bp_dot(v, v), 0.0));\n    if (n < 1e-8) return p;\n    return cosh(n) * p + (sinh(n) / n) * v;\n}\n\n// Parallel transport of w (tangent at q) along the geodesic q -> p\nvec4 bp_transport(vec4 w, vec4 q, vec4 p) {\n    return w + bp_dot(p, w) / (1.0 - bp_dot(q, p)) * (q + p);\n}\n\n// Lorentz-orthogonal complement of three vectors (generalized cross product, index lowered)\nvec4 bp_cross4(vec4 a, vec4 b, vec4 c) {\n    float x = dot(a.yzw, cross(b.yzw, c.yzw));\n    float y = -dot(a.xzw, cross(b.xzw, c.xzw));\n    float z = dot(a.xyw, cross(b.xyw, c.xyw));\n    float w = -dot(a.xyz, cross(b.xyz, c.xyz));\n    return vec4(x, y, z, -w);\n}\n\nvec3 bp_hash3(uvec3 v) {\n    v = v * 1664525u + 1013904223u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    v ^= v >> 16u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    return vec3(v) * (1.0 / 4294967296.0);\n}\n\n// Outward unit normal of face k of the {4,3,5} base cell (Klein cube |x_j| <= A)\nvec4 bp_face(int k) {\n    const float A = 0.48586827;\n    int j = k / 2;\n    float s = (k - j * 2 == 0) ? 1.0 : -1.0;\n    vec3 e = j == 0 ? vec3(1.0, 0.0, 0.0) : (j == 1 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0));\n    return vec4(e * s, A) * 1.1441228;   // 1 / sqrt(1 - A^2)\n}\n\n// Three-colour cyclic palette\nvec3 bp_pal(float t, vec3 a, vec3 b, vec3 c) {\n    t = fract(t) * 3.0;\n    if (t < 1.0) return mix(a, b, smoothstep(0.0, 1.0, t));\n    if (t < 2.0) return mix(b, c, smoothstep(1.0, 2.0, t));\n    return mix(c, a, smoothstep(2.0, 3.0, t));\n}\n\n\nvoid bp_camera(sampler2D state, out vec4 P, out vec4 R, out vec4 U, out vec4 F) {\n    P = texelFetch(state, ivec2(514 + 3, 0), 0);\n    R = texelFetch(state, ivec2(514 + 4, 0), 0);\n    U = texelFetch(state, ivec2(514 + 5, 0), 0);\n    F = texelFetch(state, ivec2(514 + 6, 0), 0);\n}\n\n// (screen x, screen y, half width, depth) of world point x; half width = 0 when not drawable\nvec4 bp_project(vec4 x, vec4 P, vec4 R, vec4 U, vec4 F, float w) {\n    vec4 X = vec4(bp_dot(x, R), bp_dot(x, U), bp_dot(x, F), max(-bp_dot(x, P), 1.0));\n    float sh = sqrt(max(X.w * X.w - 1.0, 1e-10));\n    float d = log(X.w + sh);\n    if (X.z < 0.12 * sh || d < 0.02) return vec4(0.0, 0.0, 0.0, d);\n    return vec4(1.7 * X.xy / X.z, min(1.7 * sinh(w) / X.z, 0.016), d);   // near the camera: thin streamers\n}\n\nvec4 bp_point(sampler2D state, int i, int k, float L) {\n    if (k == 0) {\n        // tail tip: half a body length behind the centre, along the heading\n        vec4 p = texelFetch(state, ivec2(i, 0), 0);\n        vec4 f = bp_unit(texelFetch(state, ivec2(i, 1), 0));\n        return cosh(0.45 * L) * p - sinh(0.45 * L) * f;\n    }\n    return texelFetch(state, ivec2(i, 3 + k), 0);\n}\n\nvec4 boidProject(sampler2D state, float count, float predators, float boidSize, float trailWidth) {\n    ivec2 px = ivec2(gl_FragCoord.xy);\n    int i = px.x;\n    int row = px.y;\n    int n = clamp(int(count + 0.5), 0, 512);\n    int np = clamp(int(predators + 0.5), 0, 2);\n    bool pred = i >= 512;\n    bool alive = pred ? (i - 512) < np : i < n;\n    if (!alive || i >= 514) return row == 7 || row == 10 ? vec4(1e4, 1e4, -1e4, -1e4) : vec4(0.0);\n    float L = boidSize * (pred ? 2.4 : 1.0);\n    vec4 P, R, U, F;\n    bp_camera(state, P, R, U, F);\n    float w = 0.5 * trailWidth * L;\n    if (row < 7) {\n        vec4 a = bp_project(bp_point(state, i, 2 * row, L), P, R, U, F, w);\n        vec4 b = 2 * row + 1 <= 12 ? bp_project(bp_point(state, i, 2 * row + 1, L), P, R, U, F, w) : vec4(0.0);\n        return vec4(a.z > 0.0 ? a.xy : vec2(1e4), b.z > 0.0 ? b.xy : vec2(1e4));\n    }\n    vec4 m = texelFetch(state, ivec2(i, 3), 0);\n    if (row == 8) return vec4(m.w, pred ? 1.0 : 0.0, pred ? 0.0 : m.z, L);\n    if (row == 9) {\n        vec4 a = bp_project(bp_point(state, i, 0, L), P, R, U, F, w);\n        return vec4(a.z, a.w, 0.0, 0.0);\n    }\n\n    vec4 bb = vec4(1e4, 1e4, -1e4, -1e4);\n    if (row == 7) {\n        // trail polyline\n        for (int k = 0; k <= 12; k++) {\n            vec4 a = bp_project(bp_point(state, i, k, L), P, R, U, F, w);\n            if (a.z > 0.0) bb = vec4(min(bb.xy, a.xy - a.z), max(bb.zw, a.xy + a.z));\n        }\n        return bb;\n    }\n    // body / halo ball\n    vec4 c = texelFetch(state, ivec2(i, 0), 0);\n    float Hr = L * 1.5;                          // halo radius (the body bound is 0.72 L)\n    vec4 X = vec4(bp_dot(c, R), bp_dot(c, U), bp_dot(c, F), max(-bp_dot(c, P), 1.0));\n    float sh = sqrt(max(X.w * X.w - 1.0, 1e-10));\n    float d = log(X.w + sh);\n    if (d < Hr * 1.3) return vec4(-1e4, -1e4, 1e4, 1e4);      // next to the camera: everywhere\n    // angular radius of the halo ball: sin(a) = sinh(Hr) / sinh(d)\n    float sa = min(sinh(Hr) / sh, 0.999);\n    float cz = X.z / sh;                                         // cos of the angle off-axis\n    float ca = sqrt(1.0 - sa * sa);\n    float cp = cz * ca - sqrt(max(1.0 - cz * cz, 0.0)) * sa;   // cos(off-axis + radius)\n    if (cp > 0.02) {\n        // gnomonic image of the cone: radial extent foc sin(a) / (cos(b + a) cos(b)) bounds it\n        vec2 sc = 1.7 * X.xy / X.z;\n        float r = 1.7 * sa / (cp * cz) * 1.1 + 0.004;\n        bb = vec4(min(bb.xy, sc - r), max(bb.zw, sc + r));\n    } else if (cz > -sa) {\n        bb = vec4(-1e4, -1e4, 1e4, 1e4);\n    }\n    return bb;\n}\n"
+    },
+    "BoidTiles": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "proj",
+          "type": "sampler2D",
+          "paramName": "proj"
+        },
+        {
+          "name": "count",
+          "type": "float",
+          "paramName": "count"
+        },
+        {
+          "name": "predators",
+          "type": "float",
+          "paramName": "predators"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec4"
+        }
+      ],
+      "customGLSL": "// @node boidTiles\n// @title Boid Tile Bins\n// @category custom\n// @description Screen-tile binning for the boid renderer, into a 960x50 rgba32f / nearest Feedback: the uv screen (aspect 1.6) is cut into 80x50 tiles; each tile has 12 texels of 4 x 24-bit masks (as floats): texels 0..5 = boids whose body / halo box overlaps the tile, 6..11 = boids with a trail segment (capsule) near the tile. The scene then loops only over the set bits of its tile instead of over every boid.\nvec4 boidTiles(sampler2D proj, float count, float predators) {\n    ivec2 px = ivec2(gl_FragCoord.xy);\n    int tx = px.x / 12;\n    int slot = px.x - tx * 12;\n    bool trail = slot >= 6;\n    int texel = trail ? slot - 6 : slot;\n    int n = clamp(int(count + 0.5), 0, 512);\n    int np = clamp(int(predators + 0.5), 0, 2);\n    vec2 lo = vec2(-1.6, -1.0) + vec2(3.2 / 80.0, 2.0 / 50.0) * vec2(float(tx), float(px.y));\n    vec2 hi = lo + vec2(3.2 / 80.0, 2.0 / 50.0);\n    vec4 res = vec4(0.0);\n    for (int ch = 0; ch < 4; ch++) {\n        int w = texel * 4 + ch;\n        uint bits = 0u;\n        for (int b = 0; b < 24; b++) {\n            int i = w * 24 + b;\n            bool alive = i < n || (i >= 512 && i - 512 < np);\n            if (!alive || i >= 514) continue;\n            vec4 bb = texelFetch(proj, ivec2(i, trail ? 7 : 10), 0);\n            if (!(bb.x <= hi.x && bb.z >= lo.x && bb.y <= hi.y && bb.w >= lo.y)) continue;\n            if (trail) {\n                // finer: does any trail segment (a capsule of the trail's width) come near the tile?\n                float rr = length(hi - lo) * 0.5 + texelFetch(proj, ivec2(i, 9), 0).x;\n                vec2 cen = 0.5 * (lo + hi);\n                bool hit = false;\n                vec2 a = vec2(1e4);\n                for (int r = 0; r < 7; r++) {\n                    vec4 pp = texelFetch(proj, ivec2(i, r), 0);\n                    for (int h = 0; h < 2; h++) {\n                        if (2 * r + h > 12) break;\n                        vec2 q = h == 0 ? pp.xy : pp.zw;\n                        if (a.x < 1e3 && q.x < 1e3) {\n                            vec2 ab = q - a;\n                            float t = clamp(dot(cen - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);\n                            if (length(cen - a - ab * t) < rr) hit = true;\n                        }\n                        a = q;\n                    }\n                }\n                if (!hit) continue;\n            }\n            bits |= 1u << uint(b);\n        }\n        res[ch] = float(bits);\n    }\n    return res;\n}\n"
+    },
+    "BoidBloomSample": {
+      "category": "effect",
+      "inputs": [
+        {
+          "name": "tex",
+          "type": "sampler2D",
+          "paramName": "tex"
+        },
+        {
+          "name": "radius",
+          "type": "float",
+          "paramName": "radius"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "// @node boidBloomSample\n// @title Bicubic Bloom Sample\n// @category effect\n// @description Smooth upsampling of a low-resolution bloom target at the current pixel: cubic B-spline filtering (4 bilinear taps) at the centre plus a ring of 6 more B-spline taps at radius (in texels of the target). No blocky bilinear texels even from a 96x60 target.\nvec3 bb_bspline(sampler2D t, vec2 uv, vec2 res) {\n    vec2 st = uv * res - 0.5;\n    vec2 i = floor(st);\n    vec2 f = st - i;\n    vec2 f2 = f * f;\n    vec2 f3 = f2 * f;\n    vec2 w0 = (-f3 + 3.0 * f2 - 3.0 * f + 1.0) / 6.0;\n    vec2 w1 = (3.0 * f3 - 6.0 * f2 + 4.0) / 6.0;\n    vec2 w2 = (-3.0 * f3 + 3.0 * f2 + 3.0 * f + 1.0) / 6.0;\n    vec2 w3 = f3 / 6.0;\n    vec2 g0 = w0 + w1;\n    vec2 g1 = w2 + w3;\n    vec2 h0 = (i - 0.5 + w1 / g0) / res;\n    vec2 h1 = (i + 1.5 + w3 / g1) / res;\n    return g0.y * (g0.x * texture(t, h0).rgb + g1.x * texture(t, vec2(h1.x, h0.y)).rgb)\n         + g1.y * (g0.x * texture(t, vec2(h0.x, h1.y)).rgb + g1.x * texture(t, h1).rgb);\n}\n\nvec3 boidBloomSample(sampler2D tex, float radius) {\n    vec2 res = vec2(textureSize(tex, 0));\n    vec2 uv = gl_FragCoord.xy / u_resolution;\n    vec3 acc = bb_bspline(tex, uv, res) * 0.4;\n    for (int k = 0; k < 6; k++) {\n        float a = 1.0472 * float(k) + 0.3;\n        acc += bb_bspline(tex, uv + radius * vec2(cos(a), sin(a)) / res, res) * 0.1;\n    }\n    return acc;\n}\n"
+    },
+    "BoidTrails": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "uv",
+          "type": "vec2",
+          "paramName": "uv"
+        },
+        {
+          "name": "state",
+          "type": "sampler2D",
+          "paramName": "state"
+        },
+        {
+          "name": "proj",
+          "type": "sampler2D",
+          "paramName": "proj"
+        },
+        {
+          "name": "tiles",
+          "type": "sampler2D",
+          "paramName": "tiles"
+        },
+        {
+          "name": "count",
+          "type": "float",
+          "paramName": "count"
+        },
+        {
+          "name": "predators",
+          "type": "float",
+          "paramName": "predators"
+        },
+        {
+          "name": "fog",
+          "type": "float",
+          "paramName": "fog"
+        },
+        {
+          "name": "colorA",
+          "type": "vec3",
+          "paramName": "colorA"
+        },
+        {
+          "name": "colorB",
+          "type": "vec3",
+          "paramName": "colorB"
+        },
+        {
+          "name": "colorC",
+          "type": "vec3",
+          "paramName": "colorC"
+        },
+        {
+          "name": "predatorColor",
+          "type": "vec3",
+          "paramName": "predatorColor"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec4"
+        }
+      ],
+      "customGLSL": "// @node boidTrails\n// @title Boid Trails\n// @category custom\n// @description Draws the trails at reduced resolution into an rgba16f Feedback that the scene samples: each trail is a screen polyline of the projected history (geodesic segments are straight in the camera's Klein model), tapered and fading with age, tinted by the boid's hue, fogged by hyperbolic depth. Only boids whose trail touches this pixel's tile are visited. a = depth of the brightest trail (the scene dims trails behind a bird).\n// ---- H3 helpers, hyperboloid model: <a,b> = a.x b.x + a.y b.y + a.z b.z - a.w b.w, <p,p> = -1 ----\nfloat bw_dot(vec4 a, vec4 b) {\n    return dot(a.xyz, b.xyz) - a.w * b.w;\n}\n\n// Back onto the upper sheet of the hyperboloid\nvec4 bw_toH(vec4 p) {\n    return p / sqrt(max(-bw_dot(p, p), 1e-12));\n}\n\n// Tangent projection at p\nvec4 bw_tan(vec4 v, vec4 p) {\n    return v + bw_dot(v, p) * p;\n}\n\nvec4 bw_unit(vec4 v) {\n    return v * inversesqrt(max(bw_dot(v, v), 1e-14));\n}\n\nfloat bw_acosh(float c) {\n    c = max(c, 1.0);\n    return log(c + sqrt(c * c - 1.0));\n}\n\nfloat bw_asinh(float x) {\n    return log(x + sqrt(x * x + 1.0));\n}\n\n// Log map: tangent vector at p pointing to q, length = d(p, q)\nvec4 bw_log(vec4 p, vec4 q) {\n    float c = max(-bw_dot(p, q), 1.0);\n    float sh = sqrt(c * c - 1.0);\n    if (sh < 1e-7) return vec4(0.0);\n    return (q - c * p) * (log(c + sh) / sh);\n}\n\n// Exponential map: walk the geodesic from p with initial velocity v for |v|\nvec4 bw_exp(vec4 p, vec4 v) {\n    float n = sqrt(max(bw_dot(v, v), 0.0));\n    if (n < 1e-8) return p;\n    return cosh(n) * p + (sinh(n) / n) * v;\n}\n\n// Parallel transport of w (tangent at q) along the geodesic q -> p\nvec4 bw_transport(vec4 w, vec4 q, vec4 p) {\n    return w + bw_dot(p, w) / (1.0 - bw_dot(q, p)) * (q + p);\n}\n\n// Lorentz-orthogonal complement of three vectors (generalized cross product, index lowered)\nvec4 bw_cross4(vec4 a, vec4 b, vec4 c) {\n    float x = dot(a.yzw, cross(b.yzw, c.yzw));\n    float y = -dot(a.xzw, cross(b.xzw, c.xzw));\n    float z = dot(a.xyw, cross(b.xyw, c.xyw));\n    float w = -dot(a.xyz, cross(b.xyz, c.xyz));\n    return vec4(x, y, z, -w);\n}\n\nvec3 bw_hash3(uvec3 v) {\n    v = v * 1664525u + 1013904223u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    v ^= v >> 16u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    return vec3(v) * (1.0 / 4294967296.0);\n}\n\n// Outward unit normal of face k of the {4,3,5} base cell (Klein cube |x_j| <= A)\nvec4 bw_face(int k) {\n    const float A = 0.48586827;\n    int j = k / 2;\n    float s = (k - j * 2 == 0) ? 1.0 : -1.0;\n    vec3 e = j == 0 ? vec3(1.0, 0.0, 0.0) : (j == 1 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0));\n    return vec4(e * s, A) * 1.1441228;   // 1 / sqrt(1 - A^2)\n}\n\n// Three-colour cyclic palette\nvec3 bw_pal(float t, vec3 a, vec3 b, vec3 c) {\n    t = fract(t) * 3.0;\n    if (t < 1.0) return mix(a, b, smoothstep(0.0, 1.0, t));\n    if (t < 2.0) return mix(b, c, smoothstep(1.0, 2.0, t));\n    return mix(c, a, smoothstep(2.0, 3.0, t));\n}\n\n\nvec4 boidTrails(vec2 uv, sampler2D state, sampler2D proj, sampler2D tiles, float count, float predators, float fog, vec3 colorA, vec3 colorB, vec3 colorC, vec3 predatorColor) {\n    vec4 g0 = texelFetch(state, ivec2(514, 0), 0);\n    float pxs = 2.0 / u_resolution.y;\n    int n = clamp(int(count + 0.5), 0, 512);\n    int np = clamp(int(predators + 0.5), 0, 2);\n    ivec2 tile = ivec2(clamp(floor((uv + vec2(1.6, 1.0)) / vec2(3.2, 2.0) * vec2(80.0, 50.0)), vec2(0.0), vec2(80.0 - 1.0, 50.0 - 1.0)));\n    int nw = (n + 95) / 96;\n    float trailGlow = 1.0;\n    // ---- trails: screen polylines of geodesic segments (exact projection of the Klein lines)\n    float frac = clamp(g0.x, 0.0, 1.0);          // progress to the next history shift\n    vec3 trails = vec3(0.0);\n    float bestLum = 0.0;\n    float depth = 1e4;\n    if (trailGlow > 0.0) {\n        int budget = 48;\n        for (int t = 0; t < 6; t++) {\n            if (t >= nw && !(t == 5 && np > 0)) continue;\n            vec4 wv = texelFetch(tiles, ivec2(tile.x * 12 + 6 + t, tile.y), 0);\n            for (int ch = 0; ch < 4; ch++) {\n            uint bits = uint(wv[ch]);\n            while (bits != 0u && budget > 0) {\n            int i = (t * 4 + ch) * 24 + int(log2(float(bits & (~bits + 1u))) + 0.5);\n            bits &= bits - 1u;\n            vec4 bb = texelFetch(proj, ivec2(i, 7), 0);\n            if (uv.x < bb.x || uv.y < bb.y || uv.x > bb.z || uv.y > bb.w) continue;\n            budget--;\n            vec4 inf = texelFetch(proj, ivec2(i, 8), 0);\n            vec4 hd = texelFetch(proj, ivec2(i, 9), 0);\n            if (hd.x <= 0.0) continue;\n            float best = 0.0;\n            float bAge = 0.0;\n            vec2 a = vec2(1e4);\n            float ageA = 0.0;\n            for (int r = 0; r < 7; r++) {\n                vec4 pp = texelFetch(proj, ivec2(i, r), 0);\n                for (int h = 0; h < 2; h++) {\n                    int k = 2 * r + h;\n                    if (k > 12) break;\n                    vec2 b = h == 0 ? pp.xy : pp.zw;\n                    float ageB = k == 0 ? 0.0 : (float(k - 1) + frac) / 12.0;   // point k = history k - 1\n                    if (k > 0 && a.x < 1e3 && b.x < 1e3) {\n                        vec2 ab = b - a;\n                        float hseg = clamp(dot(uv - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);\n                        vec2 dv = uv - a - ab * hseg;\n                        float age = mix(ageA, ageB, hseg);\n                        float hw = hd.x * (1.0 - 0.75 * age);\n                        float w = max(hw, pxs * 0.75);\n                        float I = exp(-dot(dv, dv) / (w * w) * 1.6) * (hw / w) * (1.0 - age) * (1.0 - age);\n                        if (I > best) { best = I; bAge = age; }\n                    }\n                    a = b;\n                    ageA = ageB;\n                }\n            }\n            vec3 tc = inf.y > 0.5 ? predatorColor * 1.4 : bw_pal(inf.x + 0.15 * bAge, colorA, colorB, colorC) * (1.0 + inf.z);\n            vec3 add = tc * best * exp(-hd.y * fog);\n            float ad = dot(add, vec3(0.3, 0.5, 0.2));\n            if (ad > bestLum) { bestLum = ad; depth = hd.y; }\n            trails += add;\n            }\n            }\n        }\n    }\n    return vec4(trails, depth);\n}\n"
+    }
+  },
+  "editorStates": []
+}

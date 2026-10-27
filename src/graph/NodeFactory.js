@@ -14,7 +14,20 @@ import { ScreenCaptureNode } from '../nodes/ScreenCaptureNode.js';
 import { VideoURLNode } from '../nodes/VideoURLNode.js';
 import { UVNode } from '../nodes/UVNode.js';
 import { OperatorNode } from '../nodes/OperatorNode.js';
+import { LibraryNode } from '../nodes/LibraryNode.js';
+import { OptionNode } from '../nodes/OptionNode.js';
+import { ControlNode, SampleNode } from '../nodes/ControlNode.js';
+import { IONode } from '../nodes/IONode.js';
+import { AudioTextureNode } from '../nodes/AudioTextureNode.js';
+import { KeyboardNode } from '../nodes/KeyboardNode.js';
+import { CommentNode } from '../nodes/CommentNode.js';
+import { XYPadNode } from '../nodes/XYPadNode.js';
+import { MidiNoteNode } from '../nodes/MidiNoteNode.js';
+import { ParamNode } from '../nodes/ParamNode.js';
+import { SceneSwitcherNode, ScenePresenceNode } from '../nodes/SceneSwitcherNode.js';
+import { probeNodeClass } from '../nodes/ProbeNode.js';
 import { NodeDefinitions } from '../core/NodeDefinitions.js';
+import { featureNodeClass } from '../render3d/registry.js'; // Render 3D node classes (src/render3d)
 
 export class NodeFactory {
     static createNode(type, id, x, y, canvas, videoElement, sharedGL = null) {
@@ -28,6 +41,9 @@ export class NodeFactory {
 
         if (definition.isPreviewNode) {
             node = new PreviewNode(id, type, x, y, canvas, videoElement, sharedGL);
+        } else if (featureNodeClass(definition)) {
+            node = new (featureNodeClass(definition))(id, type, x, y);
+            node.updateDimensions();
         } else if (definition.isConstantNode) {
             node = new ConstantNode(id, type, x, y);
             node.updateDimensions();
@@ -67,6 +83,40 @@ export class NodeFactory {
             node = new OperatorNode(id, type, x, y, '×');
         } else if (type === 'Divide') {
             node = new OperatorNode(id, type, x, y, '÷');
+        } else if (definition.isCommentNode) {
+            node = new CommentNode(id, type, x, y);
+        } else if (definition.isKeyboardNode) {
+            node = new KeyboardNode(id, type, x, y);
+        } else if (definition.isXYPadNode) {
+            node = new XYPadNode(id, type, x, y);
+        } else if (definition.isMidiNoteNode) {
+            node = new MidiNoteNode(id, type, x, y);
+        } else if (definition.isParamNode) {
+            node = new ParamNode(id, type, x, y);
+        } else if (definition.isSceneSwitcher) {
+            node = new SceneSwitcherNode(id, type, x, y);
+        } else if (definition.isScenePresence) {
+            node = new ScenePresenceNode(id, type, x, y);
+        } else if (definition.isAudioTextureNode) {
+            node = new AudioTextureNode(id, type, x, y);
+            node.updateDimensions();
+        } else if (definition.isSampleNode) {
+            node = new SampleNode(id, type, x, y);
+            node.updateDimensions();
+        } else if (definition.isIONode) {
+            node = new IONode(id, type, x, y);
+            node.updateDimensions();
+        } else if (definition.rate === 'control' && !definition.isProbeNode) {
+            node = new ControlNode(id, type, x, y);
+            node.updateDimensions();
+        } else if (definition.isLibraryNode && definition.optionPills) {
+            node = new OptionNode(id, type, x, y);
+            node.updateDimensions();
+        } else if (definition.isLibraryNode) {
+            node = new LibraryNode(id, type, x, y);
+            node.updateDimensions();
+        } else if (definition.isProbeNode) {
+            node = new (probeNodeClass(definition))(id, type, x, y);
         } else {
             node = new Node(id, type, x, y);
             node.updateDimensions();
@@ -95,6 +145,8 @@ export class NodeFactory {
             if (json.width !== undefined || json.height !== undefined) {
                 node.resizeCanvas();
             }
+        } else if (featureNodeClass(definition)) {
+            node = new (featureNodeClass(definition))(json.id, json.type, json.x, json.y);
         } else if (definition.isConstantNode) {
             node = new ConstantNode(json.id, json.type, json.x, json.y);
             // Dimensions are recalculated, not restored
@@ -121,11 +173,9 @@ export class NodeFactory {
             // Restore saved values if available
             if (json.rawValue !== undefined) {
                 node.rawValue = json.rawValue;
-                console.log(`[NodeFactory] Restored rawValue for MIDI node ${json.id}: ${json.rawValue}`);
             }
             if (json.smoothedValue !== undefined) {
                 node.smoothedValue = json.smoothedValue;
-                console.log(`[NodeFactory] Restored smoothedValue for MIDI node ${json.id}: ${json.smoothedValue}`);
             }
             // Dimensions are recalculated, not restored
         } else if (definition.isCameraNode) {
@@ -151,6 +201,34 @@ export class NodeFactory {
             node = new OperatorNode(json.id, json.type, json.x, json.y, '×');
         } else if (json.type === 'Divide') {
             node = new OperatorNode(json.id, json.type, json.x, json.y, '÷');
+        } else if (definition.isCommentNode) {
+            node = new CommentNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isKeyboardNode) {
+            node = new KeyboardNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isXYPadNode) {
+            node = new XYPadNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isMidiNoteNode) {
+            node = new MidiNoteNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isParamNode) {
+            node = new ParamNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isSceneSwitcher) {
+            node = new SceneSwitcherNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isScenePresence) {
+            node = new ScenePresenceNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isAudioTextureNode) {
+            node = new AudioTextureNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isSampleNode) {
+            node = new SampleNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isIONode) {
+            node = new IONode(json.id, json.type, json.x, json.y);
+        } else if (definition.rate === 'control' && !definition.isProbeNode) {
+            node = new ControlNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isLibraryNode && definition.optionPills) {
+            node = new OptionNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isLibraryNode) {
+            node = new LibraryNode(json.id, json.type, json.x, json.y);
+        } else if (definition.isProbeNode) {
+            node = new (probeNodeClass(definition))(json.id, json.type, json.x, json.y);
         } else {
             node = new Node(json.id, json.type, json.x, json.y);
             // Dimensions are recalculated, not restored
@@ -158,7 +236,12 @@ export class NodeFactory {
 
         // Restore data
         if (json.data) {
-            node.data = { ...json.data };
+            // Saved data from before an input rename (e.g. Grain amount -> intensity)
+            const saved = typeof definition.migrateData === 'function' ? definition.migrateData(json.data) : json.data;
+            // Library nodes: keep inline defaults for fields added after the project was saved
+            node.data = definition.isLibraryNode
+                ? { ...(definition.data || {}), ...saved }
+                : { ...saved };
             node.rebuildTextInputs();
         }
 

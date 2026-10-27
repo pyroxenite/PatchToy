@@ -1,9 +1,13 @@
 import { Node } from './Node.js';
 import { CanvasTextInput } from '../rendering/CanvasTextInput.js';
+import { COLORS, NODE_LAYOUT } from '../ui/theme.js';
+import { drawLabel, drawCheckbox } from '../rendering/NodePainter.js';
 
 export class MapNode extends Node {
     constructor(id, type, x, y) {
         super(id, type, x, y);
+        this.width = 160;
+        this.fixedWidth = true;
     }
 
     rebuildTextInputs() {
@@ -43,106 +47,70 @@ export class MapNode extends Node {
         this.updateTextInputPositions();
     }
 
+    // Layout: row 0 = ports, row 1 = in range, row 2 = out range, row 3 = clip
+    getRangeColumns() {
+        const left = this.x + 32;
+        const right = this.x + this.width - 12;
+        const gap = 6;
+        const w = (right - left - gap) / 2;
+        return { left, w, gap };
+    }
+
     updateTextInputPositions() {
         if (!this.textInputs) return;
 
-        const leftFields = ['inMin', 'inMax'];
-        const rightFields = ['outMin', 'outMax'];
-        let yOffset = 40; // Start below the IN/OUT labels
-        const inputWidth = (this.width - 30) / 2;
-
-        // Left side (input range)
-        for (const field of leftFields) {
-            if (this.textInputs[field]) {
-                this.textInputs[field].x = this.x + 10;
-                this.textInputs[field].y = this.y + yOffset;
-                this.textInputs[field].width = inputWidth;
-                yOffset += 25;
-            }
-        }
-
-        // Right side (output range)
-        yOffset = 40; // Start below the IN/OUT labels
-        for (const field of rightFields) {
-            if (this.textInputs[field]) {
-                this.textInputs[field].x = this.x + this.width / 2 + 5;
-                this.textInputs[field].y = this.y + yOffset;
-                this.textInputs[field].width = inputWidth;
-                yOffset += 25;
-            }
-        }
+        const { left, w, gap } = this.getRangeColumns();
+        const fieldH = NODE_LAYOUT.fieldHeight;
+        const place = (field, row, col) => {
+            const input = this.textInputs[field];
+            if (!input) return;
+            input.x = left + col * (w + gap);
+            input.y = this.getRowCenterY(row) - fieldH / 2;
+            input.width = w;
+            input.height = fieldH;
+        };
+        place('inMin', 1, 0);
+        place('inMax', 1, 1);
+        place('outMin', 2, 0);
+        place('outMax', 2, 1);
     }
 
-    draw(ctx, options = {}) {
-        // Update text input positions before drawing
+    getClipRect() {
+        const cy = this.getRowCenterY(3);
+        return { x: this.x + 10, y: cy - 6, w: 48, h: 12 };
+    }
+
+    drawBody(ctx, options = {}) {
         this.updateTextInputPositions();
 
-        // Call parent draw
-        super.draw(ctx, options);
+        // Range captions
+        drawLabel(ctx, 'in', this.x + 11, this.getRowCenterY(1), COLORS.textFaint);
+        drawLabel(ctx, 'out', this.x + 11, this.getRowCenterY(2), COLORS.textFaint);
 
-        // Draw labels for the input/output columns
-        if (this.hasInputFields) {
-            ctx.fillStyle = '#888';
-            ctx.font = '10px -apple-system, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-
-            // Column headers with spacing from title
-            const leftCenter = this.x + this.width / 4;
-            const rightCenter = this.x + (this.width * 3) / 4;
-
-            ctx.fillText('IN', leftCenter, this.y + 25);
-            ctx.fillText('OUT', rightCenter, this.y + 25);
-
-            ctx.textAlign = 'left';
+        for (const field of ['inMin', 'inMax', 'outMin', 'outMax']) {
+            const input = this.textInputs && this.textInputs[field];
+            if (input) input.draw(ctx, options);
         }
 
-        // Draw clip toggle
-        this.drawClipToggle(ctx);
-    }
+        // Range arrow between in → out rows (pixel chevron)
+        const { left, w } = this.getRangeColumns();
+        const ax = Math.round(left + w + 1);
+        const ay = Math.round((this.getRowCenterY(1) + this.getRowCenterY(2)) / 2);
+        ctx.fillStyle = COLORS.textFaint;
+        ctx.fillRect(ax + 1, ay - 2, 1, 3);
+        ctx.fillRect(ax, ay - 1, 3, 1);
+        ctx.fillRect(ax + 1, ay + 1, 1, 1);
 
-    drawClipToggle(ctx) {
-        const toggleSize = 16;
-        const toggleX = this.x + 10;
-        const toggleY = this.y + 95; // Fixed position right after text inputs
-        const isChecked = this.data.clip || false;
-
-        // Checkbox background
-        ctx.fillStyle = isChecked ? '#007acc' : '#2a2a2a';
-        ctx.strokeStyle = isChecked ? '#0098ff' : '#555';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.roundRect(toggleX, toggleY, toggleSize, toggleSize, 3);
-        ctx.fill();
-        ctx.stroke();
-
-        // Checkmark
-        if (isChecked) {
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(toggleX + 3, toggleY + 8);
-            ctx.lineTo(toggleX + 6, toggleY + 11);
-            ctx.lineTo(toggleX + 13, toggleY + 4);
-            ctx.stroke();
-        }
-
-        // Label
-        ctx.fillStyle = '#ddd';
-        ctx.font = '11px -apple-system, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('clip', toggleX + toggleSize + 6, toggleY + toggleSize / 2);
+        const c = this.getClipRect();
+        drawCheckbox(ctx, c.x, c.y, !!this.data.clip, 'clip', this.getAccentColor());
     }
 
     _checkTextInputs(x, y) {
-        // Check clip toggle
-        const toggleSize = 16;
-        const toggleX = this.x + 10;
-        const toggleY = this.y + 95; // Fixed position right after text inputs
+        // Check clip toggle (box + label)
+        const c = this.getClipRect();
 
-        if (x >= toggleX && x <= toggleX + toggleSize + 30 &&
-            y >= toggleY && y <= toggleY + toggleSize) {
+        if (x >= c.x && x <= c.x + c.w &&
+            y >= c.y - 2 && y <= c.y + c.h + 2) {
             this.data.clip = !this.data.clip;
 
             if (this.graph && this.graph.onGraphChanged) {
@@ -156,19 +124,13 @@ export class MapNode extends Node {
         return super._checkTextInputs ? super._checkTextInputs(x, y) : null;
     }
 
+    getControlCursor(x, y) {
+        const c = this.getClipRect();
+        if (x >= c.x && x <= c.x + c.w && y >= c.y - 2 && y <= c.y + c.h + 2) return 'pointer';
+        return super.getControlCursor(x, y);
+    }
+
     updateDimensions() {
-        const baseHeight = 30;
-        // Headers (15) + 2 rows of text inputs (50) + small gap (5) + toggle (20) + bottom padding (5)
-        const controlsHeight = 15 + 50 + 5 + 20 + 5;
-        this.height = baseHeight + controlsHeight;
-    }
-
-    // Override to hide port labels
-    getInputPortLabel() {
-        return ''; // Hide input port labels
-    }
-
-    getOutputPortLabel() {
-        return ''; // Hide output port labels
+        this.height = this.heightForRows(4);
     }
 }

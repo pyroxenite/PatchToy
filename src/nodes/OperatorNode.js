@@ -1,129 +1,69 @@
 import { Node } from './Node.js';
+import { COLORS, FONTS } from '../ui/theme.js';
+import { drawNodeBase, drawNodeBorder, drawIconCentered } from '../rendering/NodePainter.js';
 
+// Pixel glyphs for the arithmetic operators (see NodePainter ICONS)
+const OPERATOR_GLYPHS = {
+    '+': 'opAdd',
+    '-': 'opSub',
+    '−': 'opSub',
+    '×': 'opMul',
+    '*': 'opMul',
+    '÷': 'opDiv',
+    '/': 'opDiv',
+};
+
+/**
+ * Compact, header-less "knob" module for + − × ÷.
+ */
 export class OperatorNode extends Node {
     constructor(id, type, x, y, operator) {
         super(id, type, x, y);
         this.operator = operator;
-        this.width = 50;
-        this.height = 50;
+        this.width = 48;
+        this.height = 48;
+        this.fixedWidth = true;
+    }
+
+    updateDimensions() {
+        this.height = 48;
     }
 
     draw(ctx, options = {}) {
-        const { isSelected = false } = options;
+        const selected = !!options.isSelected;
+        const radius = 14;
+        const x = this.x, y = this.y, w = this.width, h = this.height;
 
-        // Save context state
-        ctx.save();
+        drawNodeBase(ctx, x, y, w, h, {
+            selected,
+            accent: this.getAccentColor(),
+            header: false,
+            radius
+        });
 
-        // Draw shadow
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-        ctx.shadowBlur = 12;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 4;
-
-        // Node body
-        ctx.fillStyle = 'rgba(45, 45, 45, 0.95)';
-        ctx.beginPath();
-        ctx.roundRect(this.x, this.y, this.width, this.height, 8);
-        ctx.fill();
-
-        // Restore to remove shadow
-        ctx.restore();
-
-        // Border
-        let borderColor, borderWidth;
-        if (this.hasError) {
-            borderColor = '#f44336';
-            borderWidth = 2;
-        } else if (isSelected) {
-            borderColor = '#007acc';
-            borderWidth = 2;
+        // Operator symbol in chunky pixels
+        const glyph = OPERATOR_GLYPHS[this.operator];
+        const cx = x + w / 2;
+        const cy = y + h / 2 + 1;
+        if (glyph) {
+            drawIconCentered(ctx, glyph, cx, cy, options.isHovered || selected ? '#ffffff' : COLORS.text, 3);
         } else {
-            borderColor = 'rgba(68, 68, 68, 0.5)';
-            borderWidth = 1;
-        }
-
-        ctx.strokeStyle = borderColor;
-        ctx.lineWidth = borderWidth;
-        ctx.beginPath();
-        ctx.roundRect(this.x, this.y, this.width, this.height, 8);
-        ctx.stroke();
-
-        // Draw operator symbol (manually drawn for clean look)
-        const centerX = this.x + this.width / 2;
-        const centerY = this.y + this.height / 2;
-        ctx.fillStyle = '#ffffff';
-
-        if (this.operator === '+') {
-            // Draw clean + symbol
-            const size = 20;
-            const thickness = 4;
-            // Vertical bar
-            ctx.fillRect(centerX - thickness / 2, centerY - size / 2, thickness, size);
-            // Horizontal bar
-            ctx.fillRect(centerX - size / 2, centerY - thickness / 2, size, thickness);
-        } else if (this.operator === '-') {
-            // Draw clean - symbol
-            const size = 20;
-            const thickness = 4;
-            // Horizontal bar
-            ctx.fillRect(centerX - size / 2, centerY - thickness / 2, size, thickness);
-        } else if (this.operator === '×') {
-            // Draw clean × symbol
-            const size = 20;
-            const thickness = 4;
-            ctx.save();
-            ctx.translate(centerX, centerY);
-            ctx.rotate(Math.PI / 4);
-            // Vertical bar
-            ctx.fillRect(-thickness / 2, -size / 2, thickness, size);
-            // Horizontal bar
-            ctx.fillRect(-size / 2, -thickness / 2, size, thickness);
-            ctx.restore();
-        } else if (this.operator === '÷') {
-            // Draw clean ÷ symbol
-            const lineLength = 20;
-            const thickness = 4;
-            const dotSize = 4;
-            const spacing = 6;
-            // Horizontal line
-            ctx.fillRect(centerX - lineLength / 2, centerY - thickness / 2, lineLength, thickness);
-            // Top dot
-            ctx.beginPath();
-            ctx.arc(centerX, centerY - spacing - dotSize / 2, dotSize / 2, 0, Math.PI * 2);
-            ctx.fill();
-            // Bottom dot
-            ctx.beginPath();
-            ctx.arc(centerX, centerY + spacing + dotSize / 2, dotSize / 2, 0, Math.PI * 2);
-            ctx.fill();
-        } else {
-            // Fallback to text for other operators
-            ctx.font = '42px "Pixeloid Sans"';
+            ctx.font = FONTS.titleBold;
+            ctx.fillStyle = COLORS.text;
             ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(this.operator, centerX, centerY);
+            ctx.textBaseline = 'alphabetic';
+            ctx.fillText(this.operator, Math.round(cx), Math.round(cy + 3));
+            ctx.textAlign = 'left';
         }
 
-        // Draw input ports (evenly distributed)
-        for (let i = 0; i < this.inputs.length; i++) {
-            const spacing = this.height / (this.inputs.length + 1);
-            const y = this.y + spacing * (i + 1);
+        drawNodeBorder(ctx, x, y, w, h, {
+            selected,
+            error: this.isInErrorState(),
+            hovered: options.isHovered,
+            radius
+        });
 
-            ctx.fillStyle = '#007acc';
-            ctx.beginPath();
-            ctx.arc(this.x, y, 6, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        // Draw output ports (evenly distributed)
-        for (let i = 0; i < this.outputs.length; i++) {
-            const spacing = this.height / (this.outputs.length + 1);
-            const y = this.y + spacing * (i + 1);
-
-            ctx.fillStyle = '#007acc';
-            ctx.beginPath();
-            ctx.arc(this.x + this.width, y, 6, 0, Math.PI * 2);
-            ctx.fill();
-        }
+        this.drawPorts(ctx, options);
     }
 
     // Override to hide input port labels

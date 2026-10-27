@@ -1,0 +1,1898 @@
+{
+  "name": "Hyperbolic Currents",
+  "description": "Helmholtz flow on a hyperbolic plane inside H3: v = grad phi + J grad psi from smoothed hyperbolic Green kernels (2 sources, 2 sinks, 3 vortices drifting slowly). The plane is a field map - color = scalar potential, flow net of equipotentials and true streamlines (total stream function), advected dye and particle trails - seen from an orbiting camera, receding to the ideal boundary. 64 particles live in a rgba32f Feedback (RK4 advection, respawn at sources) and are sphere-traced as hyperbolic spheres merged with smin, glassy and glowing, pooling into liquid blobs at the sinks. Multi-pass post: render targets, two-level bloom, chromatic aberration, vignette, grain. Tweak it in the Parameters panel (P): Flow, Particles, Trails, Look, Post and Music.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T07:14:52.220Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 51,
+        "type": "Comment",
+        "x": 80,
+        "y": -282,
+        "data": {
+          "text": "# Hyperbolic Currents\nHelmholtz flow on a hyperbolic plane inside H³: v = ∇φ + J∇ψ from smoothed hyperbolic Green kernels (2 sources, 2 sinks, 3 drifting vortices). Color = potential, with equipotentials, streamlines, advected dye and 64 glassy particles pooling at the sinks.\nReacts to music: open the audio menu → Mic (a front of light sweeps from the sources into the sinks on every beat).\n## Tweak it in the Parameters panel\nPress P (or the sliders button in the top bar): Flow, Particles, Trails, Look, Post and Music settings with pretty names; hover a name for what it does, double-click a slider to reset it.\nDouble-click a group box to open it, Esc to come back.",
+          "width": 420,
+          "height": 314,
+          "color": "orange"
+        }
+      },
+      {
+        "id": 53,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Particle Sim\nThe particles live in an rgba32f Feedback texture: each frame HelmholtzParticles reads the previous state, advects every particle with RK4 and respawns it at a source when its lifetime ends.",
+          "width": 320,
+          "height": 152,
+          "color": "gray"
+        }
+      },
+      {
+        "id": 54,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Flow Canvas\nAn rgba16f Feedback buffer accumulates dye: particle trails drawn over the faded previous frame.",
+          "width": 300,
+          "height": 118,
+          "color": "gray"
+        }
+      },
+      {
+        "id": 55,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Scene (H³ Raymarch)\nHyperbolicCurrents raymarches the plane in H³ from an orbiting camera: field-map colors, flow net, the dye canvas, and the particles sphere-traced as hyperbolic spheres merged with smin.",
+          "width": 320,
+          "height": 152,
+          "color": "violet"
+        }
+      },
+      {
+        "id": 56,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Render Targets\nThe graded frame (ACES, saturation) and a bright pass (two Feedback buffers) for chromatic aberration and bloom.",
+          "width": 300,
+          "height": 118,
+          "color": "gray"
+        }
+      },
+      {
+        "id": 57,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Bloom\nTwo blur radii of the bright pass, weighted and added.",
+          "width": 280,
+          "height": 102,
+          "color": "orange"
+        }
+      },
+      {
+        "id": 58,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Post FX\nChromatic aberration on the graded frame, bloom added, then vignette and grain.",
+          "width": 280,
+          "height": 102,
+          "color": "green"
+        }
+      },
+      {
+        "id": 70,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Music\nAudio level gates everything: with the audio off or silent, drive = 0 and the piece looks exactly as before. drive = music × smoothstep(level).\n- Beat: inside Hyperbolic Currents, an equipotential front of light sweeps from the sources into the sinks over each beat, brightening the streamlines it crosses.\n- Beat: particle glow (spheres, halos, floor light) flares up to +60% (BeatEnvelope ad).\n- Bass: vortex strength swells up to +30% in the sim, the dye canvas and the map.\nBeat-phase couplings (the equipotential front inside Hyperbolic Currents, particle glow flare) are also multiplied by the beat tracker's confidence (Beat.confidence = u_beatConfidence: 0 with the audio off, ~1 once the beat locks, 1 with the metronome) and run on the stable beat clock with its certainty gate (Beat.gate / BeatEnvelope gate: fade, u_beatTrust): after a track change the clock holds the old tempo, then glides to the new one without jumps, and these couplings fade out until the new beat is trusted. Level and band couplings (bass vortex swell) are not.",
+          "width": 320,
+          "height": 260,
+          "color": "green"
+        }
+      },
+      {
+        "id": 0,
+        "type": "Time",
+        "x": 358,
+        "y": 685,
+        "data": {}
+      },
+      {
+        "id": 1,
+        "type": "CenteredUV",
+        "x": 80,
+        "y": 245,
+        "data": {}
+      },
+      {
+        "id": 2,
+        "type": "Param",
+        "x": 358,
+        "y": 791,
+        "data": {
+          "label": "Particles",
+          "kind": "float",
+          "value": 64,
+          "default": 64,
+          "min": 0,
+          "max": 64,
+          "step": 1,
+          "scale": "linear",
+          "section": "Particles",
+          "order": 5,
+          "description": "Number of glassy particles (up to 64)."
+        }
+      },
+      {
+        "id": 3,
+        "type": "Param",
+        "x": 358,
+        "y": 1295,
+        "data": {
+          "label": "Flow speed",
+          "kind": "float",
+          "value": 0.25,
+          "default": 0.25,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flow",
+          "order": 0,
+          "description": "How fast particles and dye are advected."
+        }
+      },
+      {
+        "id": 4,
+        "type": "Param",
+        "x": 358,
+        "y": 917,
+        "data": {
+          "label": "Source strength",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flow",
+          "order": 1,
+          "description": "Strength of the two sources."
+        }
+      },
+      {
+        "id": 5,
+        "type": "Param",
+        "x": 358,
+        "y": 1043,
+        "data": {
+          "label": "Sink strength",
+          "kind": "float",
+          "value": 1.5,
+          "default": 1.5,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flow",
+          "order": 2,
+          "description": "Strength of the two sinks."
+        }
+      },
+      {
+        "id": 6,
+        "type": "Param",
+        "x": 80,
+        "y": 562,
+        "data": {
+          "label": "Vortex strength",
+          "kind": "float",
+          "value": 0.6,
+          "default": 0.6,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Flow",
+          "order": 3,
+          "description": "Strength of the three drifting vortices (J grad psi)."
+        }
+      },
+      {
+        "id": 7,
+        "type": "Param",
+        "x": 358,
+        "y": 1169,
+        "data": {
+          "label": "Kernel core",
+          "kind": "float",
+          "value": 0.15,
+          "default": 0.15,
+          "min": 0.03,
+          "max": 0.5,
+          "step": 0.005,
+          "scale": "linear",
+          "section": "Flow",
+          "order": 4,
+          "description": "Smoothing radius of the Green kernels."
+        }
+      },
+      {
+        "id": 8,
+        "type": "Param",
+        "x": 358,
+        "y": 80,
+        "data": {
+          "label": "Lifetime",
+          "kind": "float",
+          "value": 14,
+          "default": 14,
+          "min": 2,
+          "max": 40,
+          "step": 0.5,
+          "scale": "linear",
+          "section": "Particles",
+          "order": 6,
+          "description": "Average particle lifetime in seconds before respawning at a source."
+        }
+      },
+      {
+        "id": 9,
+        "type": "Param",
+        "x": 358,
+        "y": 206,
+        "data": {
+          "label": "Sphere size",
+          "kind": "float",
+          "value": 0.034,
+          "default": 0.034,
+          "min": 0.01,
+          "max": 0.08,
+          "step": 0.001,
+          "scale": "linear",
+          "section": "Particles",
+          "order": 7,
+          "description": "Radius of the particle spheres."
+        }
+      },
+      {
+        "id": 10,
+        "type": "Param",
+        "x": 358,
+        "y": 559,
+        "data": {
+          "label": "Arc height",
+          "kind": "float",
+          "value": 0.12,
+          "default": 0.12,
+          "min": 0,
+          "max": 0.4,
+          "step": 0.005,
+          "scale": "linear",
+          "section": "Particles",
+          "order": 8,
+          "description": "How high particles hop above the plane along their path."
+        }
+      },
+      {
+        "id": 11,
+        "type": "Param",
+        "x": 1060,
+        "y": 110,
+        "data": {
+          "label": "Blob smoothing",
+          "kind": "float",
+          "value": 0.06,
+          "default": 0.06,
+          "min": 0,
+          "max": 0.2,
+          "step": 0.002,
+          "scale": "linear",
+          "section": "Particles",
+          "order": 9,
+          "description": "Smooth-min radius merging particles with each other and the plane."
+        }
+      },
+      {
+        "id": 12,
+        "type": "Param",
+        "x": 1060,
+        "y": 236,
+        "data": {
+          "label": "Streamlines",
+          "kind": "float",
+          "value": 18,
+          "default": 18,
+          "min": 4,
+          "max": 48,
+          "step": 1,
+          "scale": "linear",
+          "section": "Look",
+          "order": 13,
+          "description": "Number of streamlines in the flow net."
+        }
+      },
+      {
+        "id": 13,
+        "type": "Param",
+        "x": 80,
+        "y": 688,
+        "data": {
+          "label": "Particle glow",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Particles",
+          "order": 10,
+          "description": "Glow of spheres, halos and floor light."
+        }
+      },
+      {
+        "id": 14,
+        "type": "Param",
+        "x": 1060,
+        "y": 362,
+        "data": {
+          "label": "Fog",
+          "kind": "float",
+          "value": 0.25,
+          "default": 0.25,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 14,
+          "description": "Hyperbolic distance fog toward the ideal boundary."
+        }
+      },
+      {
+        "id": 15,
+        "type": "Param",
+        "x": 1060,
+        "y": 488,
+        "data": {
+          "label": "Camera orbit",
+          "kind": "float",
+          "value": 0.05,
+          "default": 0.05,
+          "min": 0,
+          "max": 0.3,
+          "step": 0.001,
+          "scale": "linear",
+          "section": "Look",
+          "order": 15,
+          "description": "Orbit speed of the camera."
+        }
+      },
+      {
+        "id": 16,
+        "type": "Param",
+        "x": 696,
+        "y": 434,
+        "data": {
+          "label": "Trail fade",
+          "kind": "float",
+          "value": 2.5,
+          "default": 2.5,
+          "min": 0.2,
+          "max": 10,
+          "step": 0.01,
+          "scale": "log",
+          "section": "Trails",
+          "order": 11,
+          "description": "Seconds for dye and trails to fade."
+        }
+      },
+      {
+        "id": 17,
+        "type": "Param",
+        "x": 696,
+        "y": 560,
+        "data": {
+          "label": "Trail width",
+          "kind": "float",
+          "value": 0.007,
+          "default": 0.007,
+          "min": 0.002,
+          "max": 0.03,
+          "step": 0.0005,
+          "scale": "linear",
+          "section": "Trails",
+          "order": 12,
+          "description": "Width of the particle trails on the canvas."
+        }
+      },
+      {
+        "id": 18,
+        "type": "Param",
+        "x": 1060,
+        "y": 614,
+        "data": {
+          "label": "Source colour",
+          "kind": "color",
+          "value": [
+            1,
+            0.42,
+            0.16
+          ],
+          "default": [
+            1,
+            0.42,
+            0.16
+          ],
+          "alpha": false,
+          "section": "Look",
+          "order": 16,
+          "description": "Colour at the sources (low potential)."
+        }
+      },
+      {
+        "id": 19,
+        "type": "Param",
+        "x": 1060,
+        "y": 1127,
+        "data": {
+          "label": "Sink colour",
+          "kind": "color",
+          "value": [
+            0.36,
+            0.32,
+            1
+          ],
+          "default": [
+            0.36,
+            0.32,
+            1
+          ],
+          "alpha": false,
+          "section": "Look",
+          "order": 17,
+          "description": "Colour at the sinks (high potential)."
+        }
+      },
+      {
+        "id": 20,
+        "type": "Param",
+        "x": 1060,
+        "y": 1259,
+        "data": {
+          "label": "Flow-line colour",
+          "kind": "color",
+          "value": [
+            0.55,
+            0.95,
+            1
+          ],
+          "default": [
+            0.55,
+            0.95,
+            1
+          ],
+          "alpha": false,
+          "section": "Look",
+          "order": 18,
+          "description": "Colour of the streamlines."
+        }
+      },
+      {
+        "id": 21,
+        "type": "HelmholtzParticles",
+        "x": 320,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 22,
+        "type": "Feedback",
+        "x": 80,
+        "y": 190,
+        "data": {
+          "width": 64,
+          "height": 5,
+          "format": "rgba32f",
+          "filter": "nearest"
+        }
+      },
+      {
+        "id": 23,
+        "type": "HelmholtzCanvas",
+        "x": 320,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 24,
+        "type": "Feedback",
+        "x": 80,
+        "y": 190,
+        "data": {
+          "width": 1024,
+          "height": 1024,
+          "format": "rgba16f",
+          "filter": "linear"
+        }
+      },
+      {
+        "id": 25,
+        "type": "HyperbolicCurrents",
+        "x": 320,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 26,
+        "type": "TonemapACES",
+        "x": 80,
+        "y": 127,
+        "data": {
+          "exposure": 1.15,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 27,
+        "type": "Saturation",
+        "x": 320,
+        "y": 127,
+        "data": {
+          "amount": 1.15,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 28,
+        "type": "Vec3ToVec4",
+        "x": 560,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 29,
+        "type": "Feedback",
+        "x": 560,
+        "y": 196,
+        "data": {
+          "width": 1600,
+          "height": 1000,
+          "format": "rgba8",
+          "filter": "linear"
+        }
+      },
+      {
+        "id": 30,
+        "type": "Grayscale",
+        "x": 80,
+        "y": 174,
+        "data": {}
+      },
+      {
+        "id": 31,
+        "type": "Smoothstep",
+        "x": 320,
+        "y": 163,
+        "data": {
+          "edge0": 0.6,
+          "edge1": 1.6,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 32,
+        "type": "Multiply",
+        "x": 560,
+        "y": 143,
+        "data": {}
+      },
+      {
+        "id": 33,
+        "type": "Multiply",
+        "x": 754,
+        "y": 190,
+        "data": {}
+      },
+      {
+        "id": 34,
+        "type": "Float",
+        "x": 560,
+        "y": 227,
+        "data": {
+          "value": 0.5,
+          "useUniform": false
+        }
+      },
+      {
+        "id": 35,
+        "type": "Vec3ToVec4",
+        "x": 892,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 36,
+        "type": "Feedback",
+        "x": 892,
+        "y": 196,
+        "data": {
+          "width": 320,
+          "height": 200,
+          "format": "rgba16f",
+          "filter": "linear"
+        }
+      },
+      {
+        "id": 37,
+        "type": "Feedback",
+        "x": 892,
+        "y": 290,
+        "data": {
+          "width": 96,
+          "height": 60,
+          "format": "rgba16f",
+          "filter": "linear"
+        }
+      },
+      {
+        "id": 38,
+        "type": "ChromaticAberration",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "amount": 0.004,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 39,
+        "type": "TextureBlur",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "radius": 1.5,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 40,
+        "type": "TextureBlur",
+        "x": 80,
+        "y": 332,
+        "data": {
+          "radius": 1.5,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 41,
+        "type": "Multiply",
+        "x": 338,
+        "y": 248,
+        "data": {}
+      },
+      {
+        "id": 42,
+        "type": "Param",
+        "x": 80,
+        "y": 218,
+        "data": {
+          "label": "Bloom",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 19,
+          "description": "Tight bloom level."
+        }
+      },
+      {
+        "id": 43,
+        "type": "Multiply",
+        "x": 338,
+        "y": 332,
+        "data": {}
+      },
+      {
+        "id": 44,
+        "type": "Param",
+        "x": 80,
+        "y": 470,
+        "data": {
+          "label": "Bloom wide",
+          "kind": "float",
+          "value": 1.5,
+          "default": 1.5,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 20,
+          "description": "Wide bloom level."
+        }
+      },
+      {
+        "id": 45,
+        "type": "Add",
+        "x": 476,
+        "y": 290,
+        "data": {}
+      },
+      {
+        "id": 46,
+        "type": "Add",
+        "x": 320,
+        "y": 118,
+        "data": {}
+      },
+      {
+        "id": 47,
+        "type": "Vignette",
+        "x": 458,
+        "y": 80,
+        "data": {
+          "radius": 0.95,
+          "softness": 0.6,
+          "color": "vec3(1.0)",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 48,
+        "type": "Grain",
+        "x": 698,
+        "y": 91,
+        "data": {
+          "amount": 0.03,
+          "color": "vec3(1.0)",
+          "t": "u_time"
+        }
+      },
+      {
+        "id": 49,
+        "type": "Vec3ToVec4",
+        "x": 938,
+        "y": 102,
+        "data": {}
+      },
+      {
+        "id": 50,
+        "type": "Preview",
+        "x": 2982,
+        "y": 617,
+        "data": {},
+        "width": 300,
+        "height": 219.5,
+        "isBackground": true
+      },
+      {
+        "id": 59,
+        "type": "Param",
+        "x": 80,
+        "y": 814,
+        "data": {
+          "label": "Music reactivity",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Music",
+          "order": 21,
+          "description": "0 = ignore the music. A front of light sweeps into the sinks on each beat; vortices swell on the bass."
+        }
+      },
+      {
+        "id": 60,
+        "type": "Audio",
+        "x": 80,
+        "y": 240,
+        "data": {}
+      },
+      {
+        "id": 61,
+        "type": "Smoothstep",
+        "x": 320,
+        "y": 80,
+        "data": {
+          "edge0": 0.02,
+          "edge1": 0.12,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 62,
+        "type": "Multiply",
+        "x": 560,
+        "y": 247,
+        "data": {}
+      },
+      {
+        "id": 63,
+        "type": "BeatEnvelope",
+        "x": 320,
+        "y": 218,
+        "data": {
+          "k": 5,
+          "shape": "ad",
+          "phase": "u_beatPhase",
+          "gate": "fade"
+        }
+      },
+      {
+        "id": 64,
+        "type": "Multiply",
+        "x": 698,
+        "y": 331,
+        "data": {}
+      },
+      {
+        "id": 65,
+        "type": "Mix",
+        "x": 836,
+        "y": 331,
+        "data": {
+          "a": 1,
+          "b": 1.35,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 66,
+        "type": "Multiply",
+        "x": 1076,
+        "y": 331,
+        "data": {}
+      },
+      {
+        "id": 67,
+        "type": "Multiply",
+        "x": 698,
+        "y": 247,
+        "data": {}
+      },
+      {
+        "id": 68,
+        "type": "Mix",
+        "x": 836,
+        "y": 193,
+        "data": {
+          "a": 1,
+          "b": 1.3,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 69,
+        "type": "Multiply",
+        "x": 1076,
+        "y": 247,
+        "data": {}
+      },
+      {
+        "id": 71,
+        "type": "Beat",
+        "x": 320,
+        "y": 356,
+        "data": {
+          "decay": 6,
+          "rate": 1,
+          "threshold": 0.5,
+          "clock": "stable",
+          "gate": "fade"
+        }
+      },
+      {
+        "id": 72,
+        "type": "Multiply",
+        "x": 560,
+        "y": 331,
+        "data": {}
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 22,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 8,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 9,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 10,
+        "swizzle": null
+      },
+      {
+        "fromId": 23,
+        "fromOutput": 0,
+        "toId": 24,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 24,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 8,
+        "swizzle": null
+      },
+      {
+        "fromId": 16,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 9,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 10,
+        "swizzle": null
+      },
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 24,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 8,
+        "swizzle": null
+      },
+      {
+        "fromId": 11,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 9,
+        "swizzle": null
+      },
+      {
+        "fromId": 12,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 10,
+        "swizzle": null
+      },
+      {
+        "fromId": 14,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 12,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 13,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 14,
+        "swizzle": null
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 15,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 16,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 27,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 27,
+        "fromOutput": 0,
+        "toId": 28,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 28,
+        "fromOutput": 0,
+        "toId": 29,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 30,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 30,
+        "fromOutput": 1,
+        "toId": 31,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 32,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 31,
+        "fromOutput": 0,
+        "toId": 32,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 0,
+        "toId": 33,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 34,
+        "fromOutput": 0,
+        "toId": 33,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 33,
+        "fromOutput": 0,
+        "toId": 35,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 35,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 35,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 38,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 36,
+        "fromOutput": 0,
+        "toId": 39,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 37,
+        "fromOutput": 0,
+        "toId": 40,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 39,
+        "fromOutput": 0,
+        "toId": 41,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 42,
+        "fromOutput": 0,
+        "toId": 41,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 40,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 44,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 41,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 43,
+        "fromOutput": 0,
+        "toId": 45,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 38,
+        "fromOutput": 0,
+        "toId": 46,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 45,
+        "fromOutput": 0,
+        "toId": 46,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 46,
+        "fromOutput": 0,
+        "toId": 47,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 47,
+        "fromOutput": 0,
+        "toId": 48,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 48,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 49,
+        "fromOutput": 0,
+        "toId": 50,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 60,
+        "fromOutput": 0,
+        "toId": 61,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 59,
+        "fromOutput": 0,
+        "toId": 62,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 61,
+        "fromOutput": 0,
+        "toId": 62,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 62,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 17,
+        "swizzle": null
+      },
+      {
+        "fromId": 62,
+        "fromOutput": 0,
+        "toId": 64,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 72,
+        "fromOutput": 0,
+        "toId": 64,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 64,
+        "fromOutput": 0,
+        "toId": 65,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 13,
+        "fromOutput": 0,
+        "toId": 66,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 65,
+        "fromOutput": 0,
+        "toId": 66,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 66,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 11,
+        "swizzle": null
+      },
+      {
+        "fromId": 62,
+        "fromOutput": 0,
+        "toId": 67,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 60,
+        "fromOutput": 1,
+        "toId": 67,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 67,
+        "fromOutput": 0,
+        "toId": 68,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 69,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 68,
+        "fromOutput": 0,
+        "toId": 69,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 69,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 69,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 69,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 63,
+        "fromOutput": 0,
+        "toId": 72,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 71,
+        "fromOutput": 6,
+        "toId": 72,
+        "toInput": 1,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 73,
+    "panX": 29.01686445971268,
+    "panY": 238.00874453466585,
+    "zoom": 0.3372891942535915,
+    "groups": [
+      {
+        "id": "g2",
+        "name": "Particle Sim",
+        "parentId": null,
+        "nodeIds": [
+          21,
+          22,
+          53
+        ],
+        "x": 696,
+        "y": 693,
+        "color": "logic"
+      },
+      {
+        "id": "g3",
+        "name": "Flow Canvas",
+        "parentId": null,
+        "nodeIds": [
+          23,
+          24,
+          54
+        ],
+        "x": 1060,
+        "y": 753,
+        "color": "logic"
+      },
+      {
+        "id": "g4",
+        "name": "Scene (H³ Raymarch)",
+        "parentId": null,
+        "nodeIds": [
+          1,
+          25,
+          55
+        ],
+        "x": 1432,
+        "y": 490,
+        "color": "sdf3d"
+      },
+      {
+        "id": "g5",
+        "name": "Render Targets",
+        "parentId": null,
+        "nodeIds": [
+          56
+        ],
+        "x": 1890,
+        "y": 644,
+        "color": "logic"
+      },
+      {
+        "id": "g6",
+        "name": "Graded Frame",
+        "parentId": "g5",
+        "nodeIds": [
+          26,
+          27,
+          28,
+          29
+        ],
+        "x": 80,
+        "y": 87
+      },
+      {
+        "id": "g7",
+        "name": "Bright Pass",
+        "parentId": "g5",
+        "nodeIds": [
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37
+        ],
+        "x": 80,
+        "y": 270
+      },
+      {
+        "id": "g8",
+        "name": "Bloom",
+        "parentId": null,
+        "nodeIds": [
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          57
+        ],
+        "x": 2306,
+        "y": 655,
+        "color": "effect"
+      },
+      {
+        "id": "g9",
+        "name": "Post FX",
+        "parentId": null,
+        "nodeIds": [
+          38,
+          46,
+          47,
+          48,
+          49,
+          58
+        ],
+        "x": 2644,
+        "y": 655,
+        "color": "effect"
+      },
+      {
+        "id": "g10",
+        "name": "Music",
+        "parentId": null,
+        "nodeIds": [
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72
+        ],
+        "x": 358,
+        "y": 339,
+        "color": "source"
+      }
+    ]
+  },
+  "customNodes": {
+    "HelmholtzParticles": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "state",
+          "type": "sampler2D",
+          "paramName": "state"
+        },
+        {
+          "name": "time",
+          "type": "float",
+          "paramName": "time"
+        },
+        {
+          "name": "count",
+          "type": "float",
+          "paramName": "count"
+        },
+        {
+          "name": "flowSpeed",
+          "type": "float",
+          "paramName": "flowSpeed"
+        },
+        {
+          "name": "sourceStrength",
+          "type": "float",
+          "paramName": "sourceStrength"
+        },
+        {
+          "name": "sinkStrength",
+          "type": "float",
+          "paramName": "sinkStrength"
+        },
+        {
+          "name": "vortexStrength",
+          "type": "float",
+          "paramName": "vortexStrength"
+        },
+        {
+          "name": "core",
+          "type": "float",
+          "paramName": "core"
+        },
+        {
+          "name": "lifetime",
+          "type": "float",
+          "paramName": "lifetime"
+        },
+        {
+          "name": "sphereSize",
+          "type": "float",
+          "paramName": "sphereSize"
+        },
+        {
+          "name": "arcHeight",
+          "type": "float",
+          "paramName": "arcHeight"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec4"
+        }
+      ],
+      "customGLSL": "// @node helmholtzParticles\n// @title Helmholtz Particles\n// @category custom\n// @description Particle state update for a 64x5 rgba32f / nearest Feedback (wire its out back into state). Each column is one particle advected through the hyperbolic Helmholtz flow v = grad phi + J grad psi with RK4 (dt from the clock stored in the state). Particles respawn near sources (or anywhere) when their life ends, they reach the disk rim, or a sink swallows them. Rows: 0 (u.xy, age, gen) | 1 (previous u.xy, dt, time) | 2 (velocity.xy, tanh(phi), life) | 3 lifted centre on the H3 hyperboloid | 4 (radius, source-to-sink tint, speed, envelope).\n// ---- Shared Helmholtz field on the hyperbolic plane (Poincare disk coordinates u, |u| < 1) ----\n// 7 smooth kernels: 2 sources, 2 sinks, 3 vortices whose centres drift on bounded paths.\n\nvec3 hp_hash3(uvec3 v) {\n    v = v * 1664525u + 1013904223u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    v ^= v >> 16u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    return vec3(v) * (1.0 / 4294967296.0);\n}\n\n// Kernel centre k at time t (0,1 sources | 2,3 sinks | 4,5,6 vortices)\nvec2 hp_center(int k, float t) {\n    float fk = float(k);\n    float ang = 0.0;\n    float rad = 0.0;\n    if (k == 0) { ang = 0.0; rad = 0.32; }\n    else if (k == 1) { ang = 3.14159; rad = 0.32; }\n    else if (k == 2) { ang = 1.5708; rad = 0.34; }\n    else if (k == 3) { ang = 4.7124; rad = 0.34; }\n    else if (k == 5) { ang = 0.7854; rad = 0.46; }\n    else if (k == 6) { ang = 3.9270; rad = 0.46; }\n    ang += -t * 0.012 + 0.3 * sin(t * (0.050 + 0.011 * fk) + fk * 1.7);\n    rad *= 1.0 + 0.16 * sin(t * (0.043 + 0.007 * fk) + fk * 2.3);\n    vec2 c = rad * vec2(cos(ang), sin(ang));\n    if (k == 4) c = 0.08 * vec2(sin(t * 0.061), cos(t * 0.047));\n    return c;\n}\n\n// Smoothed hyperbolic Green kernel around c. x = rho^2, rho = tanh(d/2) the pseudo-hyperbolic\n// distance |u-c| / |1 - conj(c) u|. Outside the core (rho > rho0) K = log rho (the exact Green\n// function of the hyperbolic Laplacian, up to 1/2pi); inside, a C2 polynomial in rho^2 with\n// zero gradient at the centre, so the flow is smooth and bounded.\n// g = Euclidean gradient of K in disk coordinates. F = flux fraction (1 outside the core).\nfloat hp_kernel(vec2 u, vec2 c, float x0, out vec2 g, out float F, out vec2 nm) {\n    vec2 n = u - c;\n    vec2 m = vec2(1.0 - dot(c, u), c.y * u.x - c.x * u.y);       // 1 - conj(c) u\n    float m2 = max(dot(m, m), 1e-8);\n    float x = dot(n, n) / m2;\n    vec2 P = vec2(n.x * m.x - n.y * m.y, n.x * m.y + n.y * m.x);  // n * m\n    float FoverX;\n    float K;\n    if (x < x0) {\n        float s = x / x0;\n        F = s * (2.0 - s);\n        FoverX = (2.0 - s) / x0;\n        K = s - 0.25 * s * s + 0.5 * log(x0) - 0.75;\n    } else {\n        F = 1.0;\n        FoverX = 1.0 / x;\n        K = 0.5 * log(x);\n    }\n    g = (1.0 - dot(c, c)) * FoverX * P / (m2 * m2);\n    nm = vec2(n.x * m.x + n.y * m.y, n.y * m.x - n.x * m.y);      // n * conj(m): arg = angle around c\n    return K;\n}\n\n// Helmholtz flow: v = grad_H phi + J grad_H psi = lambda^-2 (grad_E phi + J grad_E psi).\n// Returns the disk-coordinate velocity; phi = scalar potential.\nvec2 hp_flow(vec2 u, float t, vec3 str, float x0, out float phi) {\n    phi = 0.0;\n    vec2 gphi = vec2(0.0);\n    vec2 gpsi = vec2(0.0);\n    for (int k = 0; k < 7; k++) {\n        vec2 g;\n        float F;\n        vec2 nm;\n        float K = hp_kernel(u, hp_center(k, t), x0, g, F, nm);\n        if (k < 2) { phi += str.x * K; gphi += str.x * g; }\n        else if (k < 4) { phi -= str.y * K; gphi -= str.y * g; }\n        else { float sg = k == 4 ? 1.0 : -1.0; gpsi += sg * str.z * g; }\n    }\n    float l = 1.0 - dot(u, u);\n    return (gphi + vec2(-gpsi.y, gpsi.x)) * (0.25 * l * l);\n}\n\n\n// Disk point at hyperbolic offset z (disk coords around 0) from c: Mobius (z + c) / (1 + conj(c) z)\nvec2 hp_mobius(vec2 z, vec2 c) {\n    vec2 num = z + c;\n    vec2 den = vec2(1.0 + c.x * z.x + c.y * z.y, c.x * z.y - c.y * z.x);\n    return vec2(num.x * den.x + num.y * den.y, num.y * den.x - num.x * den.y) / max(dot(den, den), 1e-8);\n}\n\nvec4 helmholtzParticles(sampler2D state, float time, float count, float flowSpeed, float sourceStrength, float sinkStrength, float vortexStrength, float core, float lifetime, float sphereSize, float arcHeight) {\n    ivec2 px = ivec2(gl_FragCoord.xy);\n    int i = px.x;\n    int row = px.y;\n    vec4 s0 = texelFetch(state, ivec2(i, 0), 0);\n    vec4 s1 = texelFetch(state, ivec2(i, 1), 0);\n    vec4 s2 = texelFetch(state, ivec2(i, 2), 0);\n    vec3 str = vec3(sourceStrength, sinkStrength, vortexStrength);\n    float x0 = max(core * core, 1e-4);\n\n    vec2 u = s0.xy;\n    float age = s0.z;\n    float gen = s0.w;\n    float life = s2.w;\n    // First frame (zeroed buffer), clock reset or a broken state: reseed everything\n    bool init = s1.w <= 0.0 || time < s1.w - 1.0 || !(dot(u, u) < 0.99) || !(life > 0.0);\n    float dt = init ? 0.0 : clamp(time - s1.w, 0.0, 0.1);\n    vec2 uPrev = u;\n    bool respawn = init;\n\n    if (!init) {\n        // RK4 in disk coordinates (the field drifts slowly, so it is frozen during a step)\n        float h = dt * flowSpeed;\n        float ph;\n        vec2 k1 = hp_flow(u, time, str, x0, ph);\n        vec2 k2 = hp_flow(u + 0.5 * h * k1, time, str, x0, ph);\n        vec2 k3 = hp_flow(u + 0.5 * h * k2, time, str, x0, ph);\n        vec2 k4 = hp_flow(u + h * k3, time, str, x0, ph);\n        u += h / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4);\n        age += dt;\n        // Swallowed by a sink: finish the life (shrink while merging with the others)\n        for (int k = 2; k < 4; k++) {\n            vec2 c = hp_center(k, time);\n            vec2 n = u - c;\n            vec2 m = vec2(1.0 - dot(c, u), c.y * u.x - c.x * u.y);\n            if (dot(n, n) / max(dot(m, m), 1e-8) < x0 * 0.3) age = max(age, life - 1.8);\n        }\n        if (age > life || !(dot(u, u) < 0.64)) respawn = true;\n    }\n\n    if (respawn) {\n        gen = init ? floor(hp_hash3(uvec3(uint(i), 17u, 3u)).x * 1000.0) : gen + 1.0;\n        vec3 r = hp_hash3(uvec3(uint(i), uint(gen), 7u));\n        vec3 r2 = hp_hash3(uvec3(uint(i), uint(gen), 911u));\n        life = max(lifetime, 1.0) * mix(0.6, 1.4, r.z);\n        float a = 6.2831853 * r2.y;\n        if (r.x < 0.85 && !init) {\n            // Near a source, at hyperbolic distance 0.1..0.3\n            vec2 c = hp_center(r.y < 0.5 ? 0 : 1, time);\n            float d = mix(0.10, 0.30, r2.x);\n            u = hp_mobius(tanh(0.5 * d) * vec2(cos(a), sin(a)), c);\n        } else {\n            // Anywhere within hyperbolic radius 1.2 (uniform in hyperbolic area)\n            float rr = acosh(1.0 + (cosh(1.2) - 1.0) * r2.x);\n            u = tanh(0.5 * rr) * vec2(cos(a), sin(a));\n        }\n        age = init ? life * 0.8 * r2.z : 0.0;\n        uPrev = u;\n    }\n\n    float phi;\n    vec2 vel = hp_flow(u, time, str, x0, phi) * flowSpeed;\n    float l = max(1.0 - dot(u, u), 1e-4);\n    float speed = length(vel) * 2.0 / l;                 // hyperbolic speed\n    float phiN = tanh(0.8 * phi);\n    float tt = 0.5 + 0.5 * phiN;                          // 0 at sources .. 1 at sinks\n    float env = smoothstep(0.0, 0.8, age) * (1.0 - smoothstep(life - 1.5, life, age));\n    if (float(i) >= count) env = 0.0;\n    float rad = sphereSize * env * (0.8 + 0.4 * fract(gen * 0.618 + float(i) * 0.37));\n    float hgt = sphereSize * 1.2 + arcHeight * 4.0 * tt * (1.0 - tt);\n    vec4 q0 = vec4(2.0 * u.x, 0.0, 2.0 * u.y, 1.0 + dot(u, u)) / l;\n    vec4 c = cosh(hgt) * q0 + vec4(0.0, sinh(hgt), 0.0, 0.0);\n\n    if (row == 0) return vec4(u, age, gen);\n    if (row == 1) return vec4(uPrev, dt, time);\n    if (row == 2) return vec4(vel, phiN, life);\n    if (row == 3) return c;\n    return vec4(rad, tt, speed, env);\n}\n"
+    },
+    "HelmholtzCanvas": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "canvas",
+          "type": "sampler2D",
+          "paramName": "canvas"
+        },
+        {
+          "name": "particles",
+          "type": "sampler2D",
+          "paramName": "particles"
+        },
+        {
+          "name": "time",
+          "type": "float",
+          "paramName": "time"
+        },
+        {
+          "name": "count",
+          "type": "float",
+          "paramName": "count"
+        },
+        {
+          "name": "flowSpeed",
+          "type": "float",
+          "paramName": "flowSpeed"
+        },
+        {
+          "name": "sourceStrength",
+          "type": "float",
+          "paramName": "sourceStrength"
+        },
+        {
+          "name": "sinkStrength",
+          "type": "float",
+          "paramName": "sinkStrength"
+        },
+        {
+          "name": "vortexStrength",
+          "type": "float",
+          "paramName": "vortexStrength"
+        },
+        {
+          "name": "core",
+          "type": "float",
+          "paramName": "core"
+        },
+        {
+          "name": "trailFade",
+          "type": "float",
+          "paramName": "trailFade"
+        },
+        {
+          "name": "trailWidth",
+          "type": "float",
+          "paramName": "trailWidth"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec4"
+        }
+      ],
+      "customGLSL": "// @node helmholtzCanvas\n// @title Helmholtz Flow Canvas\n// @category custom\n// @description Disk-space flow canvas for a square rgba16f Feedback (wire its out back into canvas): the texture covers the Poincare disk. r = particle trails (stationary, fading), g = dye advected along the flow with image-based flow visualization (back-traced each frame, refreshed with pulsing noise), b = trail tint.\n// ---- Shared Helmholtz field on the hyperbolic plane (Poincare disk coordinates u, |u| < 1) ----\n// 7 smooth kernels: 2 sources, 2 sinks, 3 vortices whose centres drift on bounded paths.\n\nvec3 hc_hash3(uvec3 v) {\n    v = v * 1664525u + 1013904223u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    v ^= v >> 16u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    return vec3(v) * (1.0 / 4294967296.0);\n}\n\n// Kernel centre k at time t (0,1 sources | 2,3 sinks | 4,5,6 vortices)\nvec2 hc_center(int k, float t) {\n    float fk = float(k);\n    float ang = 0.0;\n    float rad = 0.0;\n    if (k == 0) { ang = 0.0; rad = 0.32; }\n    else if (k == 1) { ang = 3.14159; rad = 0.32; }\n    else if (k == 2) { ang = 1.5708; rad = 0.34; }\n    else if (k == 3) { ang = 4.7124; rad = 0.34; }\n    else if (k == 5) { ang = 0.7854; rad = 0.46; }\n    else if (k == 6) { ang = 3.9270; rad = 0.46; }\n    ang += -t * 0.012 + 0.3 * sin(t * (0.050 + 0.011 * fk) + fk * 1.7);\n    rad *= 1.0 + 0.16 * sin(t * (0.043 + 0.007 * fk) + fk * 2.3);\n    vec2 c = rad * vec2(cos(ang), sin(ang));\n    if (k == 4) c = 0.08 * vec2(sin(t * 0.061), cos(t * 0.047));\n    return c;\n}\n\n// Smoothed hyperbolic Green kernel around c. x = rho^2, rho = tanh(d/2) the pseudo-hyperbolic\n// distance |u-c| / |1 - conj(c) u|. Outside the core (rho > rho0) K = log rho (the exact Green\n// function of the hyperbolic Laplacian, up to 1/2pi); inside, a C2 polynomial in rho^2 with\n// zero gradient at the centre, so the flow is smooth and bounded.\n// g = Euclidean gradient of K in disk coordinates. F = flux fraction (1 outside the core).\nfloat hc_kernel(vec2 u, vec2 c, float x0, out vec2 g, out float F, out vec2 nm) {\n    vec2 n = u - c;\n    vec2 m = vec2(1.0 - dot(c, u), c.y * u.x - c.x * u.y);       // 1 - conj(c) u\n    float m2 = max(dot(m, m), 1e-8);\n    float x = dot(n, n) / m2;\n    vec2 P = vec2(n.x * m.x - n.y * m.y, n.x * m.y + n.y * m.x);  // n * m\n    float FoverX;\n    float K;\n    if (x < x0) {\n        float s = x / x0;\n        F = s * (2.0 - s);\n        FoverX = (2.0 - s) / x0;\n        K = s - 0.25 * s * s + 0.5 * log(x0) - 0.75;\n    } else {\n        F = 1.0;\n        FoverX = 1.0 / x;\n        K = 0.5 * log(x);\n    }\n    g = (1.0 - dot(c, c)) * FoverX * P / (m2 * m2);\n    nm = vec2(n.x * m.x + n.y * m.y, n.y * m.x - n.x * m.y);      // n * conj(m): arg = angle around c\n    return K;\n}\n\n// Helmholtz flow: v = grad_H phi + J grad_H psi = lambda^-2 (grad_E phi + J grad_E psi).\n// Returns the disk-coordinate velocity; phi = scalar potential.\nvec2 hc_flow(vec2 u, float t, vec3 str, float x0, out float phi) {\n    phi = 0.0;\n    vec2 gphi = vec2(0.0);\n    vec2 gpsi = vec2(0.0);\n    for (int k = 0; k < 7; k++) {\n        vec2 g;\n        float F;\n        vec2 nm;\n        float K = hc_kernel(u, hc_center(k, t), x0, g, F, nm);\n        if (k < 2) { phi += str.x * K; gphi += str.x * g; }\n        else if (k < 4) { phi -= str.y * K; gphi -= str.y * g; }\n        else { float sg = k == 4 ? 1.0 : -1.0; gpsi += sg * str.z * g; }\n    }\n    float l = 1.0 - dot(u, u);\n    return (gphi + vec2(-gpsi.y, gpsi.x)) * (0.25 * l * l);\n}\n\n\nvec4 helmholtzCanvas(sampler2D canvas, sampler2D particles, float time, float count, float flowSpeed, float sourceStrength, float sinkStrength, float vortexStrength, float core, float trailFade, float trailWidth) {\n    vec2 res = vec2(textureSize(canvas, 0));\n    vec2 uv01 = gl_FragCoord.xy / res;\n    vec2 u = uv01 * 2.0 - 1.0;\n    float r2 = dot(u, u);\n    if (r2 > 0.995) return vec4(0.0, 0.5, 0.0, 1.0);\n    vec3 str = vec3(sourceStrength, sinkStrength, vortexStrength);\n    float x0 = max(core * core, 1e-4);\n    float dt = texelFetch(particles, ivec2(0, 1), 0).z;\n\n    // Dye: semi-Lagrangian advection + pulsing noise injection (van Wijk's IBFV)\n    float phi;\n    vec2 vel = hc_flow(u, time, str, x0, phi) * flowSpeed;\n    vec2 back = u - vel * dt;\n    vec4 adv = texture(canvas, back * 0.5 + 0.5);\n    vec4 here = texelFetch(canvas, ivec2(gl_FragCoord.xy), 0);\n    vec3 hn = hc_hash3(uvec3(uvec2(gl_FragCoord.xy * 0.5), 5u));\n    float pulse = smoothstep(0.35, 0.5, fract(time * 0.45 + hn.x)) * (1.0 - smoothstep(0.75, 0.9, fract(time * 0.45 + hn.x)));\n    float alpha = 1.0 - exp(-dt * 1.6);\n    float dye = mix(adv.g, pulse, alpha);\n\n    // Trails: stationary, fading; splat each particle's last step as a segment\n    float tr = here.r * exp(-dt / max(trailFade, 0.05));\n    float tint = here.b;\n    float lam = 2.0 / (1.0 - r2);\n    int n = int(count);\n    for (int i = 0; i < 64; i++) {\n        if (i >= n) break;\n        vec4 a = texelFetch(particles, ivec2(i, 0), 0);\n        vec2 d0 = u - a.xy;\n        if (dot(d0, d0) > 0.0025) continue;\n        vec4 b = texelFetch(particles, ivec2(i, 1), 0);\n        vec4 e = texelFetch(particles, ivec2(i, 4), 0);\n        vec2 ab = a.xy - b.xy;\n        float hh = clamp(dot(u - b.xy, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);\n        float dH = length(u - b.xy - ab * hh) * lam;\n        float w = trailWidth * (0.5 + 0.5 * e.w);\n        float s = exp(-dH * dH / max(w * w, 1e-8)) * e.w;\n        tint = mix(tint, e.y, s / max(tr + s, 1e-5));\n        tr = max(tr, s);\n    }\n    return vec4(tr, dye, tint, 1.0);\n}\n"
+    },
+    "HyperbolicCurrents": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "uv",
+          "type": "vec2",
+          "paramName": "uv"
+        },
+        {
+          "name": "time",
+          "type": "float",
+          "paramName": "time"
+        },
+        {
+          "name": "particles",
+          "type": "sampler2D",
+          "paramName": "particles"
+        },
+        {
+          "name": "canvas",
+          "type": "sampler2D",
+          "paramName": "canvas"
+        },
+        {
+          "name": "count",
+          "type": "float",
+          "paramName": "count"
+        },
+        {
+          "name": "sourceStrength",
+          "type": "float",
+          "paramName": "sourceStrength"
+        },
+        {
+          "name": "sinkStrength",
+          "type": "float",
+          "paramName": "sinkStrength"
+        },
+        {
+          "name": "vortexStrength",
+          "type": "float",
+          "paramName": "vortexStrength"
+        },
+        {
+          "name": "core",
+          "type": "float",
+          "paramName": "core"
+        },
+        {
+          "name": "smoothK",
+          "type": "float",
+          "paramName": "smoothK"
+        },
+        {
+          "name": "lineCount",
+          "type": "float",
+          "paramName": "lineCount"
+        },
+        {
+          "name": "glow",
+          "type": "float",
+          "paramName": "glow"
+        },
+        {
+          "name": "fog",
+          "type": "float",
+          "paramName": "fog"
+        },
+        {
+          "name": "camSpeed",
+          "type": "float",
+          "paramName": "camSpeed"
+        },
+        {
+          "name": "sourceColor",
+          "type": "vec3",
+          "paramName": "sourceColor"
+        },
+        {
+          "name": "sinkColor",
+          "type": "vec3",
+          "paramName": "sinkColor"
+        },
+        {
+          "name": "lineColor",
+          "type": "vec3",
+          "paramName": "lineColor"
+        },
+        {
+          "name": "music",
+          "type": "float",
+          "paramName": "music"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "// @node hyperbolicCurrents\n// @title Hyperbolic Currents\n// @category custom\n// @description Sphere-traces H3 (hyperboloid model) above the plane y = 0, which carries a Helmholtz flow v = grad phi + J grad psi. The plane shows a field map: color = scalar potential phi, faint lines = equipotentials of phi, bright lines = streamlines (level sets of the total stream function: conjugate of phi minus psi), plus advected dye and particle trails from the canvas. Particles from the state texture are hyperbolic spheres merged with smin (with each other and with the plane), glowing, reflecting the map, mirrored in the floor. music (0 = silent): on each beat an equipotential front of light sweeps from the sources into the sinks, brightening the streamlines it crosses. Returns HDR color.\n// ---- Shared Helmholtz field on the hyperbolic plane (Poincare disk coordinates u, |u| < 1) ----\n// 7 smooth kernels: 2 sources, 2 sinks, 3 vortices whose centres drift on bounded paths.\n\nvec3 hr_hash3(uvec3 v) {\n    v = v * 1664525u + 1013904223u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    v ^= v >> 16u;\n    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;\n    return vec3(v) * (1.0 / 4294967296.0);\n}\n\n// Kernel centre k at time t (0,1 sources | 2,3 sinks | 4,5,6 vortices)\nvec2 hr_center(int k, float t) {\n    float fk = float(k);\n    float ang = 0.0;\n    float rad = 0.0;\n    if (k == 0) { ang = 0.0; rad = 0.32; }\n    else if (k == 1) { ang = 3.14159; rad = 0.32; }\n    else if (k == 2) { ang = 1.5708; rad = 0.34; }\n    else if (k == 3) { ang = 4.7124; rad = 0.34; }\n    else if (k == 5) { ang = 0.7854; rad = 0.46; }\n    else if (k == 6) { ang = 3.9270; rad = 0.46; }\n    ang += -t * 0.012 + 0.3 * sin(t * (0.050 + 0.011 * fk) + fk * 1.7);\n    rad *= 1.0 + 0.16 * sin(t * (0.043 + 0.007 * fk) + fk * 2.3);\n    vec2 c = rad * vec2(cos(ang), sin(ang));\n    if (k == 4) c = 0.08 * vec2(sin(t * 0.061), cos(t * 0.047));\n    return c;\n}\n\n// Smoothed hyperbolic Green kernel around c. x = rho^2, rho = tanh(d/2) the pseudo-hyperbolic\n// distance |u-c| / |1 - conj(c) u|. Outside the core (rho > rho0) K = log rho (the exact Green\n// function of the hyperbolic Laplacian, up to 1/2pi); inside, a C2 polynomial in rho^2 with\n// zero gradient at the centre, so the flow is smooth and bounded.\n// g = Euclidean gradient of K in disk coordinates. F = flux fraction (1 outside the core).\nfloat hr_kernel(vec2 u, vec2 c, float x0, out vec2 g, out float F, out vec2 nm) {\n    vec2 n = u - c;\n    vec2 m = vec2(1.0 - dot(c, u), c.y * u.x - c.x * u.y);       // 1 - conj(c) u\n    float m2 = max(dot(m, m), 1e-8);\n    float x = dot(n, n) / m2;\n    vec2 P = vec2(n.x * m.x - n.y * m.y, n.x * m.y + n.y * m.x);  // n * m\n    float FoverX;\n    float K;\n    if (x < x0) {\n        float s = x / x0;\n        F = s * (2.0 - s);\n        FoverX = (2.0 - s) / x0;\n        K = s - 0.25 * s * s + 0.5 * log(x0) - 0.75;\n    } else {\n        F = 1.0;\n        FoverX = 1.0 / x;\n        K = 0.5 * log(x);\n    }\n    g = (1.0 - dot(c, c)) * FoverX * P / (m2 * m2);\n    nm = vec2(n.x * m.x + n.y * m.y, n.y * m.x - n.x * m.y);      // n * conj(m): arg = angle around c\n    return K;\n}\n\n// Helmholtz flow: v = grad_H phi + J grad_H psi = lambda^-2 (grad_E phi + J grad_E psi).\n// Returns the disk-coordinate velocity; phi = scalar potential.\nvec2 hr_flow(vec2 u, float t, vec3 str, float x0, out float phi) {\n    phi = 0.0;\n    vec2 gphi = vec2(0.0);\n    vec2 gpsi = vec2(0.0);\n    for (int k = 0; k < 7; k++) {\n        vec2 g;\n        float F;\n        vec2 nm;\n        float K = hr_kernel(u, hr_center(k, t), x0, g, F, nm);\n        if (k < 2) { phi += str.x * K; gphi += str.x * g; }\n        else if (k < 4) { phi -= str.y * K; gphi -= str.y * g; }\n        else { float sg = k == 4 ? 1.0 : -1.0; gpsi += sg * str.z * g; }\n    }\n    float l = 1.0 - dot(u, u);\n    return (gphi + vec2(-gpsi.y, gpsi.x)) * (0.25 * l * l);\n}\n\n\nfloat hr_dot(vec4 a, vec4 b) {\n    return dot(a.xyz, b.xyz) - a.w * b.w;\n}\n\n// Full field for the map: potential phi, total stream function Psi = sum(+-q theta) - psi\n// (theta = angle around each source / sink = harmonic conjugate of log rho; the source flow is\n// radial, so its streamlines are exactly the rays theta = const; strengths quantized to the line\n// spacing S so the 2pi jumps at the angle branch cuts never show), psi, and the\n// Euclidean disk gradients of phi and of the flow (vE = grad phi + J grad psi).\nvoid hr_fieldMap(vec2 u, float t, vec3 str, float x0, float S, out float phi, out float Psi, out vec2 gphi, out vec2 vE, out float psi) {\n    phi = 0.0;\n    Psi = 0.0;\n    psi = 0.0;\n    gphi = vec2(0.0);\n    vec2 gpsi = vec2(0.0);\n    float qs = S * floor(str.x * 6.2831853 / S + 0.5) / 6.2831853;\n    float qk = S * floor(str.y * 6.2831853 / S + 0.5) / 6.2831853;\n    for (int k = 0; k < 7; k++) {\n        vec2 g;\n        float F;\n        vec2 nm;\n        float K = hr_kernel(u, hr_center(k, t), x0, g, F, nm);\n        float th = atan(nm.y, nm.x);\n        if (k < 2) { phi += str.x * K; gphi += str.x * g; Psi += qs * th; }\n        else if (k < 4) { phi -= str.y * K; gphi -= str.y * g; Psi -= qk * th; }\n        else { float sg = k == 4 ? 1.0 : -1.0; psi += sg * str.z * K; gpsi += sg * str.z * g; }\n    }\n    Psi -= psi;\n    vE = gphi + vec2(-gpsi.y, gpsi.x);\n}\n\n// Orbiting camera: circle of hyperbolic radius ~1 around the origin, height ~0.5 above the plane\nvoid hr_camera(float t, float speed, out vec4 p, out vec4 F, out vec4 R, out vec4 U) {\n    float th = t * speed + 2.2;\n    float Rr = 1.0 + 0.12 * sin(t * 0.031);\n    float H = 0.5 + 0.06 * sin(t * 0.047 + 1.0);\n    vec4 p0 = vec4(sinh(Rr) * cos(th), 0.0, sinh(Rr) * sin(th), cosh(Rr));\n    vec4 T0 = vec4(-sin(th), 0.0, cos(th), 0.0);\n    vec4 Rad = vec4(cosh(Rr) * cos(th), 0.0, cosh(Rr) * sin(th), sinh(Rr));\n    p = cosh(H) * p0 + vec4(0.0, sinh(H), 0.0, 0.0);\n    vec4 Up = sinh(H) * p0 + vec4(0.0, cosh(H), 0.0, 0.0);\n    float yaw = 0.68 + 0.18 * sin(t * 0.039);\n    float pitch = 0.68 + 0.06 * sin(t * 0.057 + 0.5);\n    vec4 Hd = cos(yaw) * T0 - sin(yaw) * Rad;\n    R = -cos(yaw) * Rad - sin(yaw) * T0;\n    F = cos(pitch) * Hd - sin(pitch) * Up;\n    U = sin(pitch) * Hd + cos(pitch) * Up;\n}\n\n// Change of disk coordinates for a tangent displacement D at a plane point q (y = 0)\nvec2 hr_diskDiff(vec4 q, vec4 D) {\n    float iw = 1.0 / (1.0 + q.w);\n    return vec2(D.x - q.x * D.w * iw, D.z - q.z * D.w * iw) * iw;\n}\n\n// Anti-aliased isoline: x in line units, fw = change of x per pixel\nfloat hr_iso(float x, float fw, float wpx) {\n    float d = abs(fract(x + 0.5) - 0.5);\n    float pxd = d / max(fw, 1e-6);\n    return (1.0 - smoothstep(wpx * 0.5 - 0.5, wpx * 0.5 + 0.7, pxd)) * (1.0 - smoothstep(0.12, 0.35, fw));\n}\n\nvec3 hr_sphereColor(vec4 e, vec3 a, vec3 b) {\n    vec3 c = mix(a, b, smoothstep(0.4, 0.9, e.y));\n    float sp = clamp(e.z * 1.5, 0.0, 1.5);\n    return c * (0.7 + 0.8 * sp) + vec3(0.12) * sp;\n}\n\n// Sky: the ideal boundary. q + V is the null vector of the ray's endpoint at infinity.\nvec3 hr_sky(vec4 q, vec4 V, vec3 a, vec3 b) {\n    vec4 e = q + V;\n    vec3 xi = e.xyz / max(e.w, 1e-6);\n    float y = xi.y;\n    vec3 col = mix(vec3(0.02, 0.03, 0.06), vec3(0.002, 0.003, 0.009), smoothstep(0.0, 0.6, y));\n    col += (a * 0.4 + b * 0.6 + vec3(0.2, 0.3, 0.4)) * 0.06 * exp(-abs(y) * 12.0);\n    // faint nebula on the ideal sphere, tinted by the two palette colors\n    float nb = sin(xi.x * 3.1 + sin(xi.z * 4.3 + xi.y * 2.0)) * sin(xi.z * 2.7 - xi.y * 3.3 + sin(xi.x * 5.1));\n    float nb2 = sin(xi.x * 7.3 - xi.z * 6.1 + nb * 2.0) * 0.5 + 0.5;\n    col += mix(a, b, 0.5 + 0.5 * nb) * 0.022 * smoothstep(0.0, 1.0, nb * 0.5 + 0.5) * nb2 * smoothstep(-0.05, 0.3, y) * (1.0 - smoothstep(0.4, 0.9, y));\n    vec3 sp = xi * 150.0;\n    vec3 h = hr_hash3(uvec3(ivec3(floor(sp)) + 4096));\n    vec3 f = fract(sp) - 0.5 - (h - 0.5) * 0.6;\n    col += vec3(0.65, 0.78, 1.0) * step(0.93, h.x) * exp(-dot(f, f) * 70.0) * (0.25 + 0.75 * h.y) * smoothstep(0.03, 0.25, y);\n    return col;\n}\n\n// The field map on the plane at disk point u; dux / duy = disk-coordinate change per pixel\nvec3 hr_map(vec2 u, vec2 dux, vec2 duy, float t, vec3 str, float x0, float S, sampler2D canvas, vec3 srcCol, vec3 snkCol, vec3 lineCol, float music, out float phiN) {\n    float phi;\n    float Psi;\n    float psi;\n    vec2 gphi;\n    vec2 vE;\n    hr_fieldMap(u, t, str, x0, S, phi, Psi, gphi, vE, psi);\n    float l = max(1.0 - dot(u, u), 1e-5);\n    float speed = length(vE) * 0.5 * l;\n    phiN = tanh(0.8 * phi);\n    float pc = tanh(0.45 * phi);\n    float a = smoothstep(0.05, 0.95, -pc);\n    float b = smoothstep(0.15, 1.0, pc);\n    vec3 col = vec3(0.018, 0.075, 0.090) * (1.0 - smoothstep(0.0, 0.6, abs(pc)));\n    col += vec3(0.007, 0.009, 0.020);\n    col += srcCol * 0.42 * a * a + snkCol * 0.28 * b * b;\n\n    // Canvas: advected dye (flow texture) and particle trails\n    vec4 cv = texture(canvas, u * 0.5 + 0.5);\n    float texel = max(length(dux), length(duy)) * 0.5 * float(textureSize(canvas, 0).x);\n    float dyeVis = (1.0 - smoothstep(0.7, 3.0, texel)) * smoothstep(0.03, 0.15, speed);\n    col *= 1.0 + (cv.g - 0.5) * 1.1 * dyeVis;\n\n    // Equipotentials and streamlines with analytic screen-space derivatives\n    vec2 gPsi = vec2(-vE.y, vE.x);\n    float fwPsi = length(vec2(dot(gPsi, dux), dot(gPsi, duy))) / S;\n    float fwPhi = length(vec2(dot(gphi, dux), dot(gphi, duy))) / S;\n    // Music: a front of light rides the potential from the sources (phiN = -1) to the sinks (+1) over each beat\n    float bph = u_beatPhase;\n    float front = (phiN - mix(-0.95, 0.95, 1.0 - (1.0 - bph) * (1.0 - bph))) / 0.11;\n    float wave = music * u_beatConfidence * smoothstep(0.25, 0.75, u_beatTrust) * exp(-front * front) * (1.0 - bph * bph) * smoothstep(0.0, 0.03, bph);\n    col += lineCol * hr_iso(Psi / S, fwPsi, 1.5) * 0.7 * (1.0 + 2.2 * wave);\n    col += mix(srcCol, snkCol, 0.5 + 0.5 * phiN) * hr_iso(phi / S, fwPhi, 1.1) * 0.35 * (1.0 + 1.5 * wave);\n    col += mix(srcCol, snkCol, 0.5 + 0.5 * phiN) * 0.05 * wave;\n\n    vec3 tc = mix(srcCol, snkCol, smoothstep(0.4, 0.9, cv.b));\n    col += (tc * 1.4 + 0.15) * cv.r * (1.0 - smoothstep(1.5, 5.0, texel)) * 0.6;\n\n    // Sources (bright), sinks (dark wells with a rim), vortices (soft cores)\n    for (int k = 0; k < 7; k++) {\n        vec2 c = hr_center(k, t);\n        vec2 n = u - c;\n        vec2 m = vec2(1.0 - dot(c, u), c.y * u.x - c.x * u.y);\n        float rho = sqrt(dot(n, n) / max(dot(m, m), 1e-8));\n        float d = 2.0 * atanh(min(rho, 0.9999));\n        if (k < 2) {\n            col += srcCol * (1.7 * exp(-d * d / 0.003) + 0.45 * exp(-d * d / 0.04)) * str.x;\n            float ph = fract(t * 0.35 + float(k) * 0.5);\n            float wv = (d - 0.05 - ph * 0.45) / 0.012;\n            col += srcCol * 0.6 * exp(-wv * wv) * (1.0 - ph) * str.x;\n        } else if (k < 4) {\n            col *= mix(0.15, 1.0, smoothstep(0.02, 0.16, d));\n            float rr = (d - 0.13) / 0.025;\n            col += snkCol * 0.8 * exp(-rr * rr) * str.y;\n            float ph = fract(t * 0.3 + float(k) * 0.37);\n            float wv = (d - 0.14 - (1.0 - ph) * 0.4) / 0.01;\n            col += snkCol * 0.3 * exp(-wv * wv) * ph * str.y;\n        } else {\n            col += lineCol * 0.25 * exp(-d * d / 0.01) * str.z;\n        }\n    }\n    return col;\n}\n\n// What a reflected ray from q sees: the map (soft lines) or the sky\nvec3 hr_env(vec4 q, vec4 Rf, float t, vec3 str, float x0, float S, sampler2D canvas, vec3 srcCol, vec3 snkCol, vec3 lineCol, float fog, float music) {\n    if (Rf.y < -1e-5) {\n        float tt = -q.y / Rf.y;\n        if (tt < 0.9999) {\n            float s = atanh(max(tt, 0.0));\n            vec4 h = cosh(s) * q + sinh(s) * Rf;\n            vec2 u = h.xz / (1.0 + h.w);\n            float phiN;\n            vec3 m = hr_map(u, vec2(0.004), vec2(0.004), t, str, x0, S, canvas, srcCol, snkCol, lineCol, music, phiN);\n            return mix(hr_sky(q, Rf, srcCol, snkCol), m, exp(-s * fog));\n        }\n    }\n    return hr_sky(q, Rf, srcCol, snkCol);\n}\n\nvec3 hyperbolicCurrents(vec2 uv, float time, sampler2D particles, sampler2D canvas, float count, float sourceStrength, float sinkStrength, float vortexStrength, float core, float smoothK, float lineCount, float glow, float fog, float camSpeed, vec3 sourceColor, vec3 sinkColor, vec3 lineColor, float music) {\n    vec3 str = vec3(sourceStrength, sinkStrength, vortexStrength);\n    float x0 = max(core * core, 1e-4);\n    float qref = max(max(str.x, str.y), 0.05);\n    float S = 6.2831853 * qref / max(lineCount, 1.0);\n    float k = max(smoothK, 1e-4);\n    float kP = k * 1.3;\n\n    vec4 p;\n    vec4 F;\n    vec4 R;\n    vec4 U;\n    hr_camera(time, camSpeed, p, F, R, U);\n    float foc = 1.7;\n    float wl = sqrt(dot(uv, uv) + foc * foc);\n    vec4 v = (uv.x * R + uv.y * U + foc * F) / wl;\n    float pix = 2.0 / u_resolution.y;\n    vec4 Ex = (R - v * (uv.x / wl)) * (pix / wl);\n    vec4 Ey = (U - v * (uv.y / wl)) * (pix / wl);\n\n    // Plane y = 0: <gamma(s), n> = cosh(s) p.y + sinh(s) v.y = 0\n    float sP = 1e4;\n    if (v.y < -1e-6) {\n        float tt = -p.y / v.y;\n        if (tt < 0.99999) sP = atanh(tt);\n    }\n    float sMax = min(sP, 8.0);\n    float chM = cosh(sMax);\n    float shM = sinh(sMax);\n\n    // Particles: closest approach of the ray (halo) and candidates for sphere tracing\n    int n = int(count);\n    vec4 cc[12];\n    vec4 ce[12];\n    int nc = 0;\n    float sIn = 1e4;\n    float sOut = -1.0;\n    vec3 halo = vec3(0.0);\n    for (int i = 0; i < 64; i++) {\n        if (i >= n) break;\n        vec4 e = texelFetch(particles, ivec2(i, 4), 0);\n        if (e.x < 1e-4) continue;\n        vec4 c = texelFetch(particles, ivec2(i, 3), 0);\n        float A = -hr_dot(p, c);\n        float B = -hr_dot(v, c);\n        float ts = -B / A;\n        // cosh^2 of the closest distance over s in [0, sMax]\n        float f = ts <= 0.0 ? A : (ts >= tanh(sMax) ? A * chM + B * shM : sqrt(max(A * A - B * B, 1.0)));\n        float sh2 = max(f * f - 1.0, 0.0);\n        float w = e.x * 2.0 + 0.01;\n        float sc = clamp(atanh(clamp(ts, 0.0, 0.9999)), 0.0, sMax);\n        float hl = 1.0 / (1.0 + sh2 / (w * w));\n        halo += hr_sphereColor(e, sourceColor, sinkColor) * e.w * hl * hl * exp(-sc * fog);\n        float Rr = e.x + 1.25 * kP + 0.005;\n        float shR = sinh(Rr);\n        if (sh2 < shR * shR && nc < 12) {\n            float C = cosh(Rr);\n            float disc = C * C - (A * A - B * B);\n            if (disc > 0.0) {\n                float sq = sqrt(disc);\n                float s1 = log(max((C - sq) / (A + B), 1e-6));\n                float s2 = log(max((C + sq) / (A + B), 1e-6));\n                if (s2 > 0.0 && s1 < sMax) {\n                    cc[nc] = c;\n                    ce[nc] = e;\n                    nc++;\n                    sIn = min(sIn, max(s1, 0.0));\n                    sOut = max(sOut, min(s2, sMax + 0.02));\n                }\n            }\n        }\n    }\n\n    // Sphere tracing along the geodesic gamma(s) = cosh(s) p + sinh(s) v, smin(spheres) smin plane\n    float sHit = -1.0;\n    if (nc > 0) {\n        float s = sIn;\n        for (int it = 0; it < 80; it++) {\n            vec4 q = cosh(s) * p + sinh(s) * v;\n            float dS = 1e4;\n            for (int j = 0; j < 12; j++) {\n                if (j >= nc) break;\n                float dj = acosh(max(-hr_dot(q, cc[j]), 1.0)) - ce[j].x;\n                float h = clamp(0.5 + 0.5 * (dS - dj) / k, 0.0, 1.0);\n                dS = mix(dS, dj, h) - k * h * (1.0 - h);\n            }\n            float dPl = asinh(q.y);\n            float h = clamp(0.5 + 0.5 * (dPl - dS) / kP, 0.0, 1.0);\n            float d = mix(dPl, dS, h) - kP * h * (1.0 - h);\n            if (d < 0.0003 * (1.0 + 2.0 * s)) { sHit = s; break; }\n            s += d;\n            if (s > sOut) break;\n        }\n    }\n\n    vec3 col;\n    float sEnd = 8.0;\n    if (sHit >= 0.0 || sP < 1e4) {\n        bool marched = sHit >= 0.0;\n        float s = marched ? sHit : sP;\n        sEnd = s;\n        vec4 q = cosh(s) * p + sinh(s) * v;\n        vec4 V = sinh(s) * p + cosh(s) * v;\n        float wS = 0.0;\n        vec4 N = vec4(0.0, 1.0, 0.0, 0.0);\n        vec4 eS = vec4(0.0);\n        if (marched) {\n            // Normal = tangent gradient through the same smin chain (exact for quadratic smin)\n            float dS = 1e4;\n            vec4 gS = vec4(0.0);\n            for (int j = 0; j < 12; j++) {\n                if (j >= nc) break;\n                float ch = max(-hr_dot(q, cc[j]), 1.0);\n                float dj = acosh(ch) - ce[j].x;\n                vec4 gj = -(cc[j] - ch * q) / max(sqrt(ch * ch - 1.0), 1e-6);\n                float h = clamp(0.5 + 0.5 * (dS - dj) / k, 0.0, 1.0);\n                dS = mix(dS, dj, h) - k * h * (1.0 - h);\n                gS = mix(gS, gj, h);\n                eS = mix(eS, ce[j], h);\n            }\n            float dPl = asinh(q.y);\n            vec4 gP = (vec4(0.0, 1.0, 0.0, 0.0) + q.y * q) / cosh(dPl);\n            wS = clamp(0.5 + 0.5 * (dPl - dS) / kP, 0.0, 1.0);\n            vec4 g = mix(gP, gS, wS);\n            g += hr_dot(g, q) * q;\n            N = g / sqrt(max(hr_dot(g, g), 1e-12));\n        }\n\n        vec3 planeCol = vec3(0.0);\n        vec3 sphCol = vec3(0.0);\n        if (wS < 0.999) {\n            vec4 q0 = vec4(q.x, 0.0, q.z, q.w) / sqrt(max(q.w * q.w - q.x * q.x - q.z * q.z, 1e-6));\n            vec2 u = q0.xz / (1.0 + q0.w);\n            float sv = sinh(s);\n            float vy = min(V.y, -1e-4);\n            vec2 dux = hr_diskDiff(q0, sv * (Ex - (Ex.y / vy) * V));\n            vec2 duy = hr_diskDiff(q0, sv * (Ey - (Ey.y / vy) * V));\n            float phiN;\n            vec3 base = hr_map(u, dux, duy, time, str, x0, S, canvas, sourceColor, sinkColor, lineColor, music, phiN);\n            // Sphere light on the floor (1/sinh^2 falloff, cosine = sinh(h)/sinh(d)) and the glossy\n            // mirror image of the spheres (closest approach of the reflected geodesic)\n            vec4 Vr = vec4(V.x, -V.y, V.z, V.w);\n            vec3 light = vec3(0.0);\n            vec3 refl = vec3(0.0);\n            for (int i = 0; i < 64; i++) {\n                if (i >= n) break;\n                vec4 e = texelFetch(particles, ivec2(i, 4), 0);\n                if (e.x < 1e-4) continue;\n                vec4 c = texelFetch(particles, ivec2(i, 3), 0);\n                vec3 scol = hr_sphereColor(e, sourceColor, sinkColor) * e.w;\n                float A = max(-hr_dot(q0, c), 1.0);\n                float inv = inversesqrt(A * A - 1.0 + 0.003);\n                light += scol * (e.x * e.x * c.y) * inv * inv * inv;\n                float B = -hr_dot(Vr, c);\n                float f2 = B < 0.0 ? A * A - B * B : A * A;\n                float w = e.x * 2.0 + 0.01;\n                float hl = 1.0 / (1.0 + max(f2 - 1.0, 0.0) / (w * w));\n                refl += scol * hl * hl;\n            }\n            float fr = 0.05 + 0.6 * pow(1.0 - abs(V.y), 5.0);\n            planeCol = base + light * glow * 0.35 + refl * fr * glow * 1.2;\n        }\n        if (wS > 0.001) {\n            vec3 scol = hr_sphereColor(eS, sourceColor, sinkColor);\n            float NdV = clamp(-hr_dot(N, V), 0.0, 1.0);\n            vec4 Rf = V - 2.0 * hr_dot(V, N) * N;\n            vec3 env = hr_env(q, Rf, time, str, x0, S, canvas, sourceColor, sinkColor, lineColor, fog, music);\n            float fr = 0.04 + 0.96 * pow(1.0 - NdV, 5.0);\n            // light from straight above: unit normal of the equidistant surface through q\n            vec4 L = (vec4(0.0, 1.0, 0.0, 0.0) + q.y * q) / sqrt(1.0 + q.y * q.y);\n            vec4 Hh = L - V;\n            Hh /= sqrt(max(hr_dot(Hh, Hh), 1e-8));\n            float spec = pow(max(hr_dot(N, Hh), 0.0), 80.0);\n            sphCol = scol * (0.07 + 1.05 * pow(NdV, 3.0)) * glow + env * (0.2 + 0.9 * fr) + scol * pow(1.0 - NdV, 3.0) * 0.6 + vec3(1.0, 0.95, 0.9) * spec * 0.9;\n        }\n        col = mix(planeCol, sphCol, wS);\n        vec3 fogCol = hr_sky(p, v, sourceColor, sinkColor) * 0.6 + vec3(0.016, 0.024, 0.05);\n        col = mix(fogCol, col, exp(-s * fog));\n    } else {\n        col = hr_sky(p, v, sourceColor, sinkColor);\n    }\n    col += halo * glow * 0.25;\n    return col;\n}\n"
+    }
+  },
+  "editorStates": []
+}

@@ -1,3 +1,6 @@
+import { COLORS, FONTS, CANVAS } from '../ui/theme.js';
+import { withAlpha, measure } from './NodePainter.js';
+
 /**
  * Canvas-based text input field
  * Handles text editing, cursor, selection, and number parsing
@@ -18,6 +21,7 @@ export class CanvasTextInput {
         this.selectionStart = -1;
         this.selectionEnd = -1;
         this.onChange = null;
+        this.onDragEnd = null; // a scrub ended (mouse up)
 
         // Drag-to-scrub (only for numeric types)
         this.isDragging = false;
@@ -32,6 +36,9 @@ export class CanvasTextInput {
 
     focus() {
         this.focused = true;
+        // Blur only commits when the text was edited: a focus + Enter on "0.0035" must not
+        // write back a rounded display value (review E-m6)
+        this._focusValue = this.value;
         this.cursorPos = this.value.length;
         this.cursorBlinkTime = 0;
         this.cursorVisible = true;
@@ -41,6 +48,10 @@ export class CanvasTextInput {
         this.focused = false;
         this.selectionStart = -1;
         this.selectionEnd = -1;
+
+        const edited = this._focusValue === undefined || this.value !== this._focusValue;
+        this._focusValue = undefined;
+        if (!edited) return;
 
         // Validate and format based on type
         if (this.type === 'text') {
@@ -59,12 +70,18 @@ export class CanvasTextInput {
         } else {
             const num = parseFloat(this.value);
             if (!isNaN(num)) {
-                this.value = num.toFixed(2);
+                this.value = CanvasTextInput.formatFloat(num);
                 if (this.onChange) {
                     this.onChange(num);
                 }
             }
         }
+    }
+
+    /** Display text of a float: 2 decimals when that is exact, else every digit it needs. */
+    static formatFloat(num) {
+        const fixed = num.toFixed(2);
+        return parseFloat(fixed) === num ? fixed : String(num);
     }
 
     startDrag(mouseX) {
@@ -99,7 +116,9 @@ export class CanvasTextInput {
     }
 
     endDrag() {
+        const was = this.isDragging;
         this.isDragging = false;
+        if (was && this.onDragEnd) this.onDragEnd();
     }
 
     handleKeyDown(e) {
@@ -300,61 +319,98 @@ export class CanvasTextInput {
         }
     }
 
-    draw(ctx) {
-        // Background
-        ctx.fillStyle = this.focused ? '#1e1e1e' : '#2d2d2d';
-        ctx.beginPath();
-        ctx.roundRect(this.x, this.y, this.width, this.height, 3);
-        ctx.fill();
+    /**
+     * Draw as a dark inset field. Numeric fields are centered with pixel
+     * chevrons hinting drag-to-scrub; text fields are left-aligned.
+     * opts (optional): { mouseX, mouseY } world-space mouse for hover styling.
+     * Per-field style hooks: this.valueColor, this.placeholder.
+     */
+    draw(ctx, opts) {
+        const x = this.x, y = this.y, w = this.width, h = this.height;
+        const numeric = this.type !== 'text';
+        const hovered = !!(opts && opts.mouseX !== undefined && this.containsPoint(opts.mouseX, opts.mouseY));
+        const active = this.focused || this.isDragging;
 
-        // Border
-        ctx.strokeStyle = this.focused ? '#007acc' : '#444';
+        // Focus ring (outside the field)
+        if (this.focused) {
+            ctx.beginPath();
+            ctx.roundRect(x - 2, y - 2, w + 4, h + 4, 5);
+            ctx.fillStyle = COLORS.accentSoft;
+            ctx.fill();
+        }
+
+        // Well
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 3);
+        ctx.fillStyle = this.focused ? '#08090c' : CANVAS.inset;
+        ctx.fill();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+        ctx.fillRect(x + 3, y, w - 6, 1);
+        ctx.beginPath();
+        ctx.roundRect(x + 0.5, y + 0.5, w - 1, h - 1, 2.5);
+        ctx.strokeStyle = active ? COLORS.accent : (hovered ? CANVAS.insetHover : CANVAS.insetBorder);
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        // Clip text to input bounds
+        // Scrub chevrons (pixel arrows) for numeric fields
+        const cy = Math.round(y + h / 2);
+        if (numeric && !this.focused && w >= 34) {
+            ctx.fillStyle = this.isDragging ? COLORS.accent : (hovered ? COLORS.textDim : COLORS.textFaint);
+            const lx = Math.round(x) + 4;
+            ctx.fillRect(lx, cy - 1, 1, 1);
+            ctx.fillRect(lx + 1, cy - 2, 1, 3);
+            const rx = Math.round(x + w) - 5;
+            ctx.fillRect(rx, cy - 1, 1, 1);
+            ctx.fillRect(rx - 1, cy - 2, 1, 3);
+        }
+
+        // Clip text to the field
         ctx.save();
         ctx.beginPath();
-        ctx.rect(this.x, this.y, this.width, this.height);
+        ctx.rect(x + 1, y + 1, w - 2, h - 2);
         ctx.clip();
 
-        // Text
-        ctx.fillStyle = '#fff';
-        ctx.font = '11px monospace';
-        ctx.textBaseline = 'middle';
+        ctx.font = FONTS.value;
+        ctx.textBaseline = 'alphabetic';
+        ctx.textAlign = 'left';
+        const baseY = Math.round(y + h / 2 + 3);
 
-        const textY = this.y + this.height / 2;
-        const textX = this.x + 4;
+        const showPlaceholder = !this.value && !this.focused && this.placeholder;
+        const text = showPlaceholder ? this.placeholder : this.value;
 
-        // Draw selection
+        // Left edge of the text run (numeric: centered)
+        let textX;
+        if (numeric) {
+            textX = Math.round(x + w / 2 - measure(ctx, FONTS.value, text) / 2);
+        } else {
+            textX = Math.round(x + 5);
+            // Keep the caret visible when editing long text
+            if (this.focused) {
+                const caretW = ctx.measureText(this.value.slice(0, this.cursorPos)).width;
+                const overflow = caretW - (w - 12);
+                if (overflow > 0) textX -= Math.ceil(overflow);
+            }
+        }
+
+        // Selection
         if (this.focused && this.selectionStart >= 0) {
             const start = Math.min(this.selectionStart, this.selectionEnd);
             const end = Math.max(this.selectionStart, this.selectionEnd);
-            const beforeSel = this.value.slice(0, start);
-            const selection = this.value.slice(start, end);
-
-            const beforeWidth = ctx.measureText(beforeSel).width;
-            const selWidth = ctx.measureText(selection).width;
-
-            ctx.fillStyle = '#007acc';
-            ctx.fillRect(textX + beforeWidth, this.y + 2, selWidth, this.height - 4);
+            const beforeWidth = ctx.measureText(this.value.slice(0, start)).width;
+            const selWidth = ctx.measureText(this.value.slice(start, end)).width;
+            ctx.fillStyle = withAlpha(COLORS.accent, 0.35);
+            ctx.fillRect(textX + beforeWidth, y + 3, selWidth, h - 6);
         }
 
-        // Draw text
-        ctx.fillStyle = '#fff';
-        ctx.fillText(this.value, textX, textY);
+        // Value
+        ctx.fillStyle = showPlaceholder ? COLORS.textFaint : (this.valueColor || COLORS.text);
+        ctx.fillText(text, textX, baseY);
 
-        // Draw cursor
+        // Caret (accent, 1px)
         if (this.focused && this.cursorVisible) {
-            const beforeCursor = this.value.slice(0, this.cursorPos);
-            const cursorX = textX + ctx.measureText(beforeCursor).width;
-
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(cursorX, this.y + 3);
-            ctx.lineTo(cursorX, this.y + this.height - 3);
-            ctx.stroke();
+            const cursorX = Math.round(textX + ctx.measureText(this.value.slice(0, this.cursorPos)).width);
+            ctx.fillStyle = COLORS.accent;
+            ctx.fillRect(cursorX, y + 3, 1, h - 6);
         }
 
         ctx.restore();

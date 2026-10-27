@@ -1,0 +1,82 @@
+name: test
+
+# npm test: node library checks, MCP end-to-end suite, visual regression + shader compile
+# check, production build. See README.md "Testing".
+#
+# Headless Chrome on ubuntu-latest has no GPU: WebGL2 runs on SwiftShader (software), about
+# 50x slower than a desktop GPU for these demos, so the visual stage caps the deterministic
+# warm-up at 10 frames (--max-warmup 10) and compares against a Linux golden set made the
+# same way (tests/visual/golden-linux/). Run this workflow manually with update_goldens to
+# produce that set (uploaded as the "visual-goldens-linux" artifact) and commit it. Until it
+# exists, the visual suite runs as a non-blocking report against the default (macOS) goldens
+# in tolerance mode.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      update_goldens:
+        description: 'Regenerate the Linux visual goldens (uploaded as an artifact) instead of comparing'
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Extra flags for the auto-launched headless Chrome (mcp/lib/launcher.mjs already passes
+      # --ignore-gpu-blocklist --enable-unsafe-swiftshader): pick software WebGL explicitly.
+      PATCHTOY_CHROME_ARGS: --use-angle=swiftshader --use-gl=angle
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # no npm cache: package-lock.json is gitignored in this repo
+
+      - name: Install dependencies
+        # package-lock.json is gitignored in this repo: fall back to npm install
+        run: if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi
+
+      - name: Chrome
+        # ubuntu-latest ships Google Chrome (found by playwright-core's 'chrome' channel)
+        run: google-chrome --version
+
+      - name: Visual goldens (Linux)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.update_goldens }}
+        run: node tests/visual/run.mjs --update --set linux --max-warmup 10
+
+      - name: Upload Linux goldens
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.update_goldens }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-goldens-linux
+          path: tests/visual/golden-linux/
+
+      - name: npm test
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.update_goldens) }}
+        run: |
+          if [ -f tests/visual/golden-linux/manifest.json ]; then
+            # exact when the runner's Chrome / SwiftShader match the manifest, tolerance otherwise
+            npm test -- --set linux --max-warmup 10
+          else
+            npm test -- --skip visual
+          fi
+
+      - name: Visual report (no Linux goldens yet, non-blocking)
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.update_goldens) && hashFiles('tests/visual/golden-linux/manifest.json') == '' }}
+        continue-on-error: true
+        run: node tests/visual/run.mjs --max-warmup 10 --tolerance 3
+
+      - name: Upload visual diffs
+        if: ${{ always() && hashFiles('tests/visual/out/report.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diffs
+          path: tests/visual/out/
+          if-no-files-found: ignore

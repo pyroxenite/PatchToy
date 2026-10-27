@@ -1,95 +1,17 @@
 import { Node } from './Node.js';
+import { COLORS, FONTS, LAYOUT } from '../ui/theme.js';
 
 export class ColorNode extends Node {
     constructor(id, type, x, y) {
         super(id, type, x, y);
-        this.width = 100;
-        this.height = 80;
+        this.width = 112;
+        this.fixedWidth = true;
+        this.height = 82;
     }
 
-    draw(ctx, options = {}) {
-        const { isSelected = false } = options;
-
-        // Save context state
-        ctx.save();
-
-        // Draw shadow
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-        ctx.shadowBlur = 12;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 4;
-
-        // Node body
-        ctx.fillStyle = 'rgba(45, 45, 45, 0.95)';
-        ctx.beginPath();
-        ctx.roundRect(this.x, this.y, this.width, this.height, 8);
-        ctx.fill();
-
-        // Restore to remove shadow
-        ctx.restore();
-
-        // Border
-        let borderColor, borderWidth;
-        if (this.hasError) {
-            borderColor = '#f44336';
-            borderWidth = 2;
-        } else if (isSelected) {
-            borderColor = '#007acc';
-            borderWidth = 2;
-        } else {
-            borderColor = 'rgba(68, 68, 68, 0.5)';
-            borderWidth = 1;
-        }
-
-        ctx.strokeStyle = borderColor;
-        ctx.lineWidth = borderWidth;
-        ctx.beginPath();
-        ctx.roundRect(this.x, this.y, this.width, this.height, 8);
-        ctx.stroke();
-
-        // Title
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '12px bold "Pixeloid Sans"';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'alphabetic';
-        ctx.fillText('Color', this.x + 10, this.y + 18);
-
-        // Color fill - entire node below title
-        const titleBarHeight = 30;
-        const colorX = this.x;
-        const colorY = this.y + titleBarHeight;
-        const colorWidth = this.width;
-        const colorHeight = this.height - titleBarHeight;
-
-        const r = Math.floor(this.data.r * 255);
-        const g = Math.floor(this.data.g * 255);
-        const b = Math.floor(this.data.b * 255);
-
-        // Draw color fill with rounded bottom corners
-        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-        ctx.beginPath();
-        // Start at top-left (no rounding)
-        ctx.moveTo(colorX, colorY);
-        // Top-right (no rounding)
-        ctx.lineTo(colorX + colorWidth, colorY);
-        // Bottom-right (rounded)
-        ctx.lineTo(colorX + colorWidth, colorY + colorHeight - 8);
-        ctx.arcTo(colorX + colorWidth, colorY + colorHeight, colorX + colorWidth - 8, colorY + colorHeight, 8);
-        // Bottom edge
-        ctx.lineTo(colorX + 8, colorY + colorHeight);
-        // Bottom-left (rounded)
-        ctx.arcTo(colorX, colorY + colorHeight, colorX, colorY + colorHeight - 8, 8);
-        // Left edge back to top
-        ctx.lineTo(colorX, colorY);
-        ctx.closePath();
-        ctx.fill();
-
-        // Draw output port (on title bar, right side)
-        const portY = this.y + 15; // Center of title bar
-        ctx.fillStyle = '#007acc';
-        ctx.beginPath();
-        ctx.arc(this.x + this.width, portY, 6, 0, Math.PI * 2);
-        ctx.fill();
+    updateDimensions() {
+        // Header + full-bleed swatch
+        this.height = 82;
     }
 
     // Override to hide output port label
@@ -97,23 +19,57 @@ export class ColorNode extends Node {
         return '';
     }
 
-    // Override port position to be on title bar
-    getOutputPortPosition(index) {
-        return {
-            x: this.x + this.width,
-            y: this.y + 15 // Center of title bar
-        };
+    /** The swatch fills the whole body below the header (click → color picker). */
+    getColorSwatchRect() {
+        const top = this.y + LAYOUT.headerHeight;
+        return { x: this.x, y: top, w: this.width, h: this.y + this.height - top };
+    }
+
+    drawBody(ctx) {
+        const s = this.getColorSwatchRect();
+        const r = LAYOUT.nodeRadius;
+        const R = Math.round(Math.max(0, Math.min(1, this.data.r ?? 0)) * 255);
+        const G = Math.round(Math.max(0, Math.min(1, this.data.g ?? 0)) * 255);
+        const B = Math.round(Math.max(0, Math.min(1, this.data.b ?? 0)) * 255);
+
+        // Cache the CSS/hex strings per color so we don't rebuild them every frame
+        const key = (R << 16) | (G << 8) | B;
+        if (this._swatchKey !== key) {
+            this._swatchKey = key;
+            this._swatchCss = `rgb(${R}, ${G}, ${B})`;
+            this._swatchHex = '#' + ((1 << 24) | key).toString(16).slice(1).toUpperCase();
+            const luma = (0.2126 * R + 0.7152 * G + 0.0722 * B) / 255;
+            this._swatchInk = luma > 0.55 ? 'rgba(0, 0, 0, 0.62)' : 'rgba(255, 255, 255, 0.82)';
+        }
+
+        ctx.beginPath();
+        ctx.roundRect(s.x, s.y, s.w, s.h, [0, 0, r, r]);
+        ctx.fillStyle = this._swatchCss;
+        ctx.fill();
+
+        // Pixel "gloss" notch + hex readout
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+        ctx.fillRect(s.x, s.y, s.w, 1);
+        ctx.font = FONTS.value;
+        ctx.fillStyle = this._swatchInk;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(this._swatchHex, Math.round(s.x + 8), Math.round(s.y + s.h - 7));
+    }
+
+    getControlCursor(x, y) {
+        const s = this.getColorSwatchRect();
+        if (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h) return 'pointer';
+        return super.getControlCursor(x, y);
     }
 
     // Color picker click handler
     handleMouseDown(x, y, event) {
         // Check if clicking on color area
-        const titleBarHeight = 30;
-        const colorY = this.y + titleBarHeight;
-        const colorHeight = this.height - titleBarHeight;
+        const s = this.getColorSwatchRect();
 
-        if (x >= this.x && x <= this.x + this.width &&
-            y >= colorY && y <= colorY + colorHeight) {
+        if (x >= s.x && x <= s.x + s.w &&
+            y >= s.y && y <= s.y + s.h) {
             this._checkAndHandleColorPicker(x, y, event);
             return { handled: true };
         }

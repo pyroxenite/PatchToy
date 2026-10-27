@@ -1,0 +1,745 @@
+{
+  "name": "JS Beat Lyrics",
+  "description": "JavaScript node demo: a new word on every beat drawn into a 2D canvas (setup + per-frame code, canvas(w, h) texture output), warped by a shader with liquid ripples, RGB split, glow, an outline echo and Feedback trails. Works with the metronome, mic or a music file. Tweak it in the Parameters panel (P): Words, Look and Beat.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T07:33:26.973Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 0,
+        "type": "Comment",
+        "x": 80,
+        "y": -438,
+        "data": {
+          "text": "# JS Beat Lyrics\nA JavaScript node writes a new word on every beat into a 2D canvas; a shader warps it, splits it into RGB, makes it glow and leaves fading trails.\nWorks with the metronome (audio menu → Metronome), the mic or a music file. With the audio off the beat clock free-runs, so the words keep changing.\n## What the JS does\n- Setup (runs once): the word lists, a 1024×512 canvas(w, h) and a draw(word) function that paints each word into three channels: R = crisp fill, G = blurred glow (ctx.filter = 'blur(18px)'), B = outline.\n- Every frame: word = list[floor(audio.beatCount) % length], on the stable beat clock; while it is unsure (audio.trust < 0.5: a track change) the word holds. The canvas is redrawn only when the word, list, font or size changes, so the texture is uploaded once per beat.\n- Outputs: words (the canvas → sampler2D), pulse (audio.beat × Beat punch, scaled by the beat confidence) and hue (Base hue + beat × Hue step).\n## Make it yours\n- Double-click the JS node (in the JS Words group) and edit state.sets in the setup block to write your own lyrics. Param kinds have no text kind, so the words live in the code; the Lyrics param picks a list by index (keep its options in the same order as the list names).\n- Change state.fonts for other typefaces, or draw anything else on the canvas (emoji, shapes, images).\n## Tweak it in the Parameters panel\nPress P: Words, Look and Beat settings; hover a name for what it does, double-click a slider to reset it.\nDouble-click a group box to open it, Esc to come back.",
+          "width": 460,
+          "height": 470,
+          "color": "violet"
+        }
+      },
+      {
+        "id": 1,
+        "type": "Comment",
+        "x": 80,
+        "y": -138,
+        "data": {
+          "text": "## JS Words\nsetup: word lists, fonts, the canvas and draw().\nframe: picks the word for floor(audio.beatCount) (held while audio.trust < 0.5), redraws on change, returns { words: canvas, pulse, hue }.\nParams are read by label: params['Lyrics'], params['Font'], params['Font size'], params['Beat punch'], params['Base hue'], params['Hue step'].",
+          "width": 340,
+          "height": 170,
+          "color": "yellow"
+        }
+      },
+      {
+        "id": 2,
+        "type": "Comment",
+        "x": 80,
+        "y": -118,
+        "data": {
+          "text": "## Warp & Trails\nLyric Warp samples the canvas through sine ripples, punches in and splits RGB on the beat, adds an outline echo that grows over each beat (x the beat clock's trust), and keeps max(new, last frame × Trails) from the Feedback buffer (rgba16f) for glowing trails.",
+          "width": 340,
+          "height": 150,
+          "color": "blue"
+        }
+      },
+      {
+        "id": 3,
+        "type": "Comment",
+        "x": 80,
+        "y": -88,
+        "data": {
+          "text": "## Stage & Grade\nLyric Stage adds a violet backdrop, a beat-swelling spotlight in the word colour, light rays and a wet-floor reflection (both read the trail Feedback) and fine scanlines; then ACES tonemap, vignette and grain.",
+          "width": 320,
+          "height": 120,
+          "color": "green"
+        }
+      },
+      {
+        "id": 4,
+        "type": "JS",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "setupCode": "// Word lists. Pick one with the \"Lyrics\" param; edit them or add your own here\n// (keep the Lyrics param options in the same order as these names).\nstate.sets = {\n  'Feel the beat': ['FEEL', 'THE', 'BEAT', 'MOVE', 'YOUR', 'BODY', 'ALL', 'NIGHT', 'LONG'],\n  'Neon nights': ['NEON', 'NIGHTS', 'CITY', 'LIGHTS', 'NEVER', 'SLEEP'],\n  'Hold on': ['HOLD', 'ON', 'TO', 'THE', 'LIGHT'],\n  'Countdown': ['3', '2', '1', 'GO!'],\n};\nstate.setNames = Object.keys(state.sets);\n// The \"Font\" param options, as CSS fonts ({size} is replaced)\nstate.fonts = [\n  '900 {size}px \"Arial Black\", \"Helvetica Neue\", Impact, sans-serif',\n  'italic 700 {size}px Georgia, \"Times New Roman\", serif',\n  '700 {size}px \"SF Mono\", Menlo, Consolas, monospace',\n];\nstate.c = canvas(1024, 512);\nstate.g = state.c.getContext('2d');\n// Draw a word into three channels: G = blurred glow, R = crisp fill, B = outline\nstate.draw = (word, font, size) => {\n  const g = state.g, W = 1024, H = 512;\n  g.globalCompositeOperation = 'source-over';\n  g.filter = 'none';\n  g.fillStyle = '#000';\n  g.fillRect(0, 0, W, H);\n  g.font = font.replace('{size}', size);\n  const s = Math.round(Math.min(size, size * 920 / Math.max(g.measureText(word).width, 1))); // long words shrink to fit\n  g.font = font.replace('{size}', s);\n  g.textAlign = 'center';\n  g.textBaseline = 'middle';\n  const y = H / 2 + s * 0.04;\n  g.globalCompositeOperation = 'lighter';\n  g.filter = 'blur(18px)';\n  g.fillStyle = '#00ff00';\n  g.fillText(word, W / 2, y);\n  g.filter = 'none';\n  g.fillStyle = '#ff0000';\n  g.fillText(word, W / 2, y);\n  g.lineWidth = Math.max(2, s * 0.025);\n  g.strokeStyle = '#0000ff';\n  g.strokeText(word, W / 2, y);\n};",
+          "code": "// A new word on every beat (audio.beatCount: metronome, mic or music file; it free-runs\n// when the audio is off). The canvas is redrawn, and re-uploaded to the GPU, only when\n// the word, the list, the font or the size changes.\nconst words = state.sets[state.setNames[params['Lyrics'] | 0] || state.setNames[0]];\n// While the beat clock is unsure (a track change: audio.trust = u_beatTrust low) the word\n// holds, so words don't change on beats that aren't in the music (trust is 1 without live audio)\nif (state.n === undefined || (audio.trust ?? 1) >= 0.5) state.n = Math.floor(audio.beatCount);\nconst n = state.n;\nconst word = words[((n % words.length) + words.length) % words.length];\nconst font = state.fonts[params['Font'] | 0] || state.fonts[0];\nconst size = Math.round(params['Font size'] ?? 170);\nconst key = `${word}|${font}|${size}`;\nif (key !== state.key) {\n  state.key = key;\n  state.draw(word, font, size);\n}\n// Beat punch: full strength once the beat is locked (confidence 1 with the metronome)\nconst pulse = audio.beat * (params['Beat punch'] ?? 1) * (0.35 + 0.65 * audio.confidence);\n// Each word gets the next hue\nconst hue = ((params['Base hue'] ?? 0.85) + n * (params['Hue step'] ?? 0.13)) % 1;\nreturn { words: state.c, pulse: float(pulse), hue: float(hue) };",
+          "outputs": [
+            {
+              "name": "words",
+              "type": "sampler2D",
+              "tex": "canvas 1024x512"
+            },
+            {
+              "name": "pulse",
+              "type": "float"
+            },
+            {
+              "name": "hue",
+              "type": "float"
+            }
+          ]
+        }
+      },
+      {
+        "id": 5,
+        "type": "UV",
+        "x": 80,
+        "y": 173,
+        "data": {
+          "mode": "stretch"
+        }
+      },
+      {
+        "id": 6,
+        "type": "Feedback",
+        "x": 80,
+        "y": 168,
+        "data": {
+          "width": 1280,
+          "height": 800,
+          "format": "rgba16f",
+          "filter": "linear"
+        }
+      },
+      {
+        "id": 7,
+        "type": "LyricWarp",
+        "x": 320,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 8,
+        "type": "Vec3ToVec4",
+        "x": 560,
+        "y": 157,
+        "data": {
+          "a": 1
+        }
+      },
+      {
+        "id": 9,
+        "type": "LyricStage",
+        "x": 80,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 10,
+        "type": "TonemapACES",
+        "x": 320,
+        "y": 135,
+        "data": {
+          "exposure": 1,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 11,
+        "type": "Vignette",
+        "x": 560,
+        "y": 113,
+        "data": {
+          "radius": 1.3,
+          "softness": 0.9,
+          "color": "vec3(1.0)",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 12,
+        "type": "Grain",
+        "x": 800,
+        "y": 124,
+        "data": {
+          "amount": 0.035,
+          "color": "vec3(1.0)",
+          "t": "u_time"
+        }
+      },
+      {
+        "id": 13,
+        "type": "Preview",
+        "x": 1196,
+        "y": 80,
+        "data": {},
+        "width": 300,
+        "height": 219.5,
+        "isBackground": false
+      },
+      {
+        "id": 14,
+        "type": "Param",
+        "x": 1196,
+        "y": 348,
+        "data": {
+          "label": "Lyrics",
+          "kind": "enum",
+          "value": 0,
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Words",
+          "order": 0,
+          "description": "Which word list the JS node cycles through (edit the lists in the JS setup code).",
+          "options": [
+            "Feel the beat",
+            "Neon nights",
+            "Hold on",
+            "Countdown"
+          ]
+        }
+      },
+      {
+        "id": 15,
+        "type": "Param",
+        "x": 1196,
+        "y": 474,
+        "data": {
+          "label": "Font",
+          "kind": "enum",
+          "value": 0,
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Words",
+          "order": 1,
+          "description": "Typeface for the words.",
+          "options": [
+            "Black sans",
+            "Serif italic",
+            "Mono"
+          ]
+        }
+      },
+      {
+        "id": 16,
+        "type": "Param",
+        "x": 1196,
+        "y": 600,
+        "data": {
+          "label": "Font size",
+          "kind": "float",
+          "value": 170,
+          "default": 170,
+          "min": 60,
+          "max": 240,
+          "step": 1,
+          "scale": "linear",
+          "section": "Words",
+          "order": 2,
+          "description": "Text size in canvas pixels (1024×512 canvas); long words shrink to fit."
+        }
+      },
+      {
+        "id": 17,
+        "type": "Param",
+        "x": 80,
+        "y": 506,
+        "data": {
+          "label": "Warp",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 3,
+          "description": "Strength of the liquid sine warp."
+        }
+      },
+      {
+        "id": 18,
+        "type": "Param",
+        "x": 80,
+        "y": 632,
+        "data": {
+          "label": "Glow",
+          "kind": "float",
+          "value": 1.2,
+          "default": 1.2,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 4,
+          "description": "Blurred halo and outline echo."
+        }
+      },
+      {
+        "id": 19,
+        "type": "Param",
+        "x": 80,
+        "y": 758,
+        "data": {
+          "label": "Chromatic split",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 4,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 5,
+          "description": "RGB split of the letters (wider on the beat)."
+        }
+      },
+      {
+        "id": 20,
+        "type": "Param",
+        "x": 80,
+        "y": 884,
+        "data": {
+          "label": "Trails",
+          "kind": "float",
+          "value": 0.8,
+          "default": 0.8,
+          "min": 0,
+          "max": 0.97,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 6,
+          "description": "How much of the last frame stays: 0 = none, 0.97 = long smears."
+        }
+      },
+      {
+        "id": 21,
+        "type": "Param",
+        "x": 418,
+        "y": 234,
+        "data": {
+          "label": "Light rays",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 7,
+          "description": "Radial light rays streaming from the words."
+        }
+      },
+      {
+        "id": 22,
+        "type": "Param",
+        "x": 418,
+        "y": 360,
+        "data": {
+          "label": "Floor reflection",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 8,
+          "description": "Mirror image of the words on a wet floor."
+        }
+      },
+      {
+        "id": 23,
+        "type": "Param",
+        "x": 1196,
+        "y": 726,
+        "data": {
+          "label": "Base hue",
+          "kind": "float",
+          "value": 0.85,
+          "default": 0.85,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 9,
+          "description": "Hue of the first word (read by the JS node)."
+        }
+      },
+      {
+        "id": 24,
+        "type": "Param",
+        "x": 1196,
+        "y": 852,
+        "data": {
+          "label": "Hue step",
+          "kind": "float",
+          "value": 0.13,
+          "default": 0.13,
+          "min": 0,
+          "max": 0.5,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 10,
+          "description": "Hue change per beat (read by the JS node)."
+        }
+      },
+      {
+        "id": 25,
+        "type": "Param",
+        "x": 418,
+        "y": 486,
+        "data": {
+          "label": "Exposure",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0.3,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 11,
+          "description": "Tone-mapping exposure."
+        }
+      },
+      {
+        "id": 26,
+        "type": "Param",
+        "x": 1196,
+        "y": 978,
+        "data": {
+          "label": "Beat punch",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Beat",
+          "order": 12,
+          "description": "Zoom, split and glow kick on each beat (read by the JS node; full once the beat is locked, 35% while it free-runs)."
+        }
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 1,
+        "toId": 7,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 2,
+        "toId": 7,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 8,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 1,
+        "toId": 9,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 2,
+        "toId": 9,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 10,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 10,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 11,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 11,
+        "fromOutput": 0,
+        "toId": 12,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 12,
+        "fromOutput": 0,
+        "toId": 13,
+        "toInput": 0,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 27,
+    "panX": 224.6800535475234,
+    "panY": 276.3935742971887,
+    "zoom": 0.47121820615796517,
+    "groups": [
+      {
+        "id": "g1",
+        "name": "JS Words",
+        "parentId": null,
+        "nodeIds": [
+          4,
+          1
+        ],
+        "x": 80,
+        "y": 286,
+        "color": "source"
+      },
+      {
+        "id": "g2",
+        "name": "Warp & Trails",
+        "parentId": null,
+        "nodeIds": [
+          7,
+          6,
+          8,
+          2
+        ],
+        "x": 418,
+        "y": 619,
+        "color": "effect"
+      },
+      {
+        "id": "g3",
+        "name": "Stage & Grade",
+        "parentId": null,
+        "nodeIds": [
+          9,
+          10,
+          11,
+          12,
+          3
+        ],
+        "x": 802,
+        "y": 430,
+        "color": "color"
+      }
+    ]
+  },
+  "customNodes": {
+    "LyricWarp": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "uv",
+          "type": "vec2",
+          "paramName": "uv"
+        },
+        {
+          "name": "words",
+          "type": "sampler2D",
+          "paramName": "words"
+        },
+        {
+          "name": "prev",
+          "type": "sampler2D",
+          "paramName": "prev"
+        },
+        {
+          "name": "pulse",
+          "type": "float",
+          "paramName": "pulse"
+        },
+        {
+          "name": "hue",
+          "type": "float",
+          "paramName": "hue"
+        },
+        {
+          "name": "warp",
+          "type": "float",
+          "paramName": "warp"
+        },
+        {
+          "name": "glow",
+          "type": "float",
+          "paramName": "glow"
+        },
+        {
+          "name": "split",
+          "type": "float",
+          "paramName": "split"
+        },
+        {
+          "name": "trails",
+          "type": "float",
+          "paramName": "trails"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "// @node lyricWarp\n// @title Lyric Warp\n// @category custom\n// @description Warps the JS word canvas (R = crisp fill, G = blurred glow, B = outline) with layered sine ripples, punches in and splits it into RGB on the beat, adds an outline echo that grows over each beat, and keeps fading trails of the previous frame (prev = Feedback.out of this node's own output). Returns the light layer (HDR, no background).\nvec3 lw_hue(float h) {\n    vec3 k = clamp(abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);\n    return mix(vec3(1.0), k, 0.75);\n}\n\nvec3 lyricWarp(vec2 uv, sampler2D words, sampler2D prev, float pulse, float hue, float warp, float glow, float split, float trails) {\n    float aspect = u_resolution.x / max(u_resolution.y, 1.0);\n    vec2 p = (uv - 0.5) * vec2(aspect, 1.0);\n    float t = u_time;\n    // Punch in on the beat\n    p *= 1.0 - 0.09 * pulse;\n    // Liquid warp: two sine layers per axis\n    vec2 w = vec2(sin(p.y * 6.0 + t * 1.6) + 0.5 * sin(p.y * 15.0 - t * 2.7 + p.x * 3.0),\n                  sin(p.x * 4.0 - t * 1.2) + 0.5 * sin(p.x * 11.0 + t * 2.1));\n    p += warp * (0.012 + 0.025 * pulse) * w;\n    // The 2:1 word canvas spans 1.7 units, centred\n    vec2 q = p / vec2(1.7, 0.85) + 0.5;\n    // Chromatic split, wider on the beat\n    vec2 off = split * (0.0025 + 0.012 * pulse) * vec2(1.0, 0.2);\n    vec3 ink = vec3(texture(words, q + off).r, texture(words, q).r, texture(words, q - off).r);\n    float halo = texture(words, q).g;\n    // Outline echo: grows and fades over each beat\n    float ph = u_beatPhase;\n    vec2 qe = (q - 0.5) / (1.0 + 0.35 * ph) + 0.5;\n    float echo = texture(words, qe).b * (1.0 - ph) * (1.0 - ph) * smoothstep(0.25, 0.75, u_beatTrust); // fades while the beat clock is unsure\n    vec3 c1 = lw_hue(hue);\n    vec3 c2 = lw_hue(hue + 0.12);\n    vec3 cur = ink * mix(vec3(1.0), c1, 0.35) * (0.85 + 0.6 * pulse)\n             + halo * c1 * c1 * glow * (0.5 + 0.8 * pulse)\n             + echo * c2 * c2 * 0.7 * glow;\n    // Trails: last frame's light, zoomed out a hair, drifting and cooling\n    vec2 pu = 0.5 + (uv - 0.5) * 0.988 + 0.0015 * vec2(sin(t * 0.7), cos(t * 0.9));\n    vec3 old = texture(prev, pu).rgb * trails * vec3(0.96, 0.93, 1.0);\n    return max(cur, old);\n}"
+    },
+    "LyricStage": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "uv",
+          "type": "vec2",
+          "paramName": "uv"
+        },
+        {
+          "name": "light",
+          "type": "vec3",
+          "paramName": "light"
+        },
+        {
+          "name": "prev",
+          "type": "sampler2D",
+          "paramName": "prev"
+        },
+        {
+          "name": "pulse",
+          "type": "float",
+          "paramName": "pulse"
+        },
+        {
+          "name": "hue",
+          "type": "float",
+          "paramName": "hue"
+        },
+        {
+          "name": "rays",
+          "type": "float",
+          "paramName": "rays"
+        },
+        {
+          "name": "reflection",
+          "type": "float",
+          "paramName": "reflection"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "// @node lyricStage\n// @title Lyric Stage\n// @category custom\n// @description Stage for the lyric light layer: a deep violet backdrop with a spotlight in the word colour that swells on the beat, light rays (a radial smear of last frame's light, prev = the trail Feedback), a rippled floor reflection and a scrolling perspective grid below the horizon and fine scanlines. Adds the light layer on top (HDR, tonemap afterwards).\nvec3 ls_hue(float h) {\n    vec3 k = clamp(abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);\n    return mix(vec3(1.0), k, 0.75);\n}\n\nvec3 lyricStage(vec2 uv, vec3 light, sampler2D prev, float pulse, float hue, float rays, float reflection) {\n    float aspect = u_resolution.x / max(u_resolution.y, 1.0);\n    vec2 p = (uv - 0.5) * vec2(aspect, 1.0);\n    vec3 c1 = ls_hue(hue);\n    vec3 bg = mix(vec3(0.010, 0.006, 0.026), vec3(0.05, 0.014, 0.08), smoothstep(0.0, 1.0, uv.y));\n    bg += c1 * 0.10 * exp(-dot(p, p) * 2.2) * (0.5 + 0.9 * pulse);\n    // Light rays: last frame's light smeared toward the centre\n    vec3 ray = vec3(0.0);\n    for (int i = 1; i <= 12; i++) {\n        float k = float(i) / 12.0;\n        ray += texture(prev, mix(uv, vec2(0.5), k * 0.4)).rgb * (1.0 - k) * c1;\n    }\n    ray *= 0.035 * rays * (0.7 + 0.6 * pulse);\n    // Wet floor: a rippled mirror image of the light below the horizon\n    float hz = 0.37;\n    vec3 refl = vec3(0.0);\n    if (uv.y < hz) {\n        float depth = (hz - uv.y) / hz;\n        vec2 ru = vec2(uv.x + 0.006 * depth * sin(uv.y * 160.0 + u_time * 3.0), 2.0 * hz - uv.y);\n        refl = texture(prev, ru).rgb * reflection * 0.3 * (1.0 - depth) * (1.0 - depth);\n        // Perspective floor grid scrolling toward the viewer, brighter on the beat\n        float fz = 0.1 / max(hz - uv.y, 0.002);\n        vec2 gp = vec2(p.x * fz * 9.0, fz * 3.0 + u_time * 1.5);\n        vec2 gd = abs(fract(gp) - 0.5);\n        vec2 gw = fwidth(gp) * 1.5;\n        float line = max(1.0 - smoothstep(vec2(0.0), gw, 0.5 - gd).x, 1.0 - smoothstep(0.0, gw.y, 0.5 - gd.y));\n        float fade = smoothstep(0.0, 0.3, depth) * (1.0 - depth * 0.5);\n        bg += c1 * c1 * line * fade * (0.14 + 0.22 * pulse);\n        bg += c1 * 0.02 * (1.0 - depth);\n    }\n    float scan = 0.93 + 0.07 * sin(uv.y * u_resolution.y * 1.6);\n    return (bg + light + ray + refl) * scan;\n}"
+    }
+  },
+  "editorStates": []
+}

@@ -11,22 +11,82 @@
  */
 
 import { TypeRegistry } from './TypeRegistry.js';
+import { libNode, binaryMap } from './library/define.js';
+import { MathNodes, LegacyMathOverrides } from './library/math.js';
+import { VectorNodes, LegacyVectorOverrides } from './library/vector.js';
+import { UVNodes } from './library/uv.js';
+import { NoiseNodes } from './library/noise.js';
+import { ShapeNodes, LegacyShapeOverrides } from './library/shape.js';
+import { SDF3DNodes } from './library/sdf3d.js';
+import { ColorNodes } from './library/color.js';
+import { EffectNodes, LegacyEffectOverrides } from './library/effect.js';
+import { LogicNodes } from './library/logic.js';
+import { SourceNodes } from './library/sources.js';
+import { AudioNodes } from './library/audio.js';
+import { ParamNodes } from './library/params.js';
+import { SceneNodes } from './library/scenes.js';
+import { DebugNodes } from './library/debug.js';
+import { ControlNodes } from './library/control.js';
+import { IONodes } from './library/io.js';
+import { Render3DNodes } from './library/render3d.js'; // rasterized 3D (runtime: src/render3d)
+import { installControlTwins } from './control/legacyTwins.js';
+import { JS_DEFAULT_CODE, JS_DEFAULT_SETUP, JS_DEFAULT_OUTPUTS } from './jsDefaults.js';
+
+/** Category keys used by the UI (see src/ui/theme.js CATEGORY_LABELS). */
+export const NODE_CATEGORIES = [
+    'output', 'constant', 'input', 'source', 'math', 'vector', 'uv', 'noise',
+    'shape', 'sdf3d', 'render3d', 'color', 'effect', 'logic', 'control', 'io', 'custom', 'debug', 'note'
+];
+
+/** Generic arithmetic: float/int broadcast to vectors, vectors must match (else padded). */
+function arithmetic(description, op, defA, defB) {
+    const js = { '+': (a, b) => a + b, '-': (a, b) => a - b, '*': (a, b) => a * b, '/': (a, b) => a / b }[op];
+    return libNode({
+        category: 'math',
+        description,
+        inputs: [
+            { name: 'a', type: 'T', default: defA, inline: false },
+            { name: 'b', type: 'T', default: defB, inline: false }
+        ],
+        outputs: [{ name: 'out', type: 'T' }],
+        expr: I => `${I.a} ${op} ${I.b}`,
+        js: I => binaryMap(I.a, I.b, js) // control-rate twin (src/core/control/rates.js)
+    });
+}
 
 export const NodeDefinitions = {
     // ===== OUTPUT NODES =====
     'Preview': {
         category: 'output',
+        description: 'Displays its input as a live image. float = grayscale, vec2 = red/green, vec3 = RGB, vec4 = RGBA; a texture is shown directly.',
         inputs: [{ name: 'color', type: 'vec4', default: 'vec4(1.0, 0.0, 1.0, 1.0)' }],
         outputs: [],
         isPreviewNode: true,
         glsl: null // Special handling - renders to canvas within the node
     },
 
+    // ===== NOTES =====
+    'Comment': {
+        category: 'note',
+        description: 'A sticky note for documenting the patch on the canvas; it is not part of the shader. Double-click to edit (supports # headings and - bullets), drag the corner to resize.',
+        inputs: [],
+        outputs: [],
+        data: {
+            text: '# Note\nDouble-click to write.\n- # for headings\n- dashes for bullets',
+            width: 260,
+            height: 140,
+            color: 'yellow'
+        },
+        isCommentNode: true,
+        glsl: null
+    },
+
     // ===== CONSTANT/VALUE NODES =====
     'Float': {
         category: 'constant',
+        description: 'A float constant; toggle U to make it a live uniform you can tweak without recompiling.',
         inputs: [],
-        outputs: [{ name: 'value', type: 'float' }],
+        outputs: [{ name: 'out', type: 'float' }],
         uniforms: [],
         data: { value: 1.0, useUniform: true },
         hasInputFields: true,
@@ -35,7 +95,8 @@ export const NodeDefinitions = {
         fieldType: 'float',
         glsl: (node, inputs) => {
             const value = node.data.value !== undefined ? node.data.value : 1.0;
-            if (node.data.useUniform) {
+            // liveUniform: an inline constant being scrubbed (ConstantNode.inlineValueChanged)
+            if (node.data.useUniform || node.liveUniform) {
                 return {
                     code: "",
                     output: `${node.varName}`,
@@ -52,8 +113,9 @@ export const NodeDefinitions = {
 
     'Int': {
         category: 'constant',
+        description: 'An integer constant (e.g. loop counts); toggle U for a live uniform.',
         inputs: [],
-        outputs: [{ name: 'value', type: 'int' }],
+        outputs: [{ name: 'out', type: 'int' }],
         uniforms: [],
         data: { value: 0, useUniform: true },
         hasInputFields: true,
@@ -79,8 +141,9 @@ export const NodeDefinitions = {
 
     'Bool': {
         category: 'constant',
+        description: 'A true/false constant (e.g. ForLoopEnd.break); toggle U for a live uniform.',
         inputs: [],
-        outputs: [{ name: 'value', type: 'bool' }],
+        outputs: [{ name: 'out', type: 'bool' }],
         uniforms: [],
         data: { value: false, useUniform: true },
         hasInputFields: true,
@@ -106,6 +169,7 @@ export const NodeDefinitions = {
 
     'Vec2': {
         category: 'constant',
+        description: 'A 2D vector constant (x, y). In non-uniform mode the components can be connected.',
         inputs: [
             { name: 'x', type: 'float', optional: true },
             { name: 'y', type: 'float', optional: true }
@@ -119,7 +183,7 @@ export const NodeDefinitions = {
             const x = inputs.x || (node.data.x !== undefined ? node.data.x.toFixed(4) : '0.0');
             const y = inputs.y || (node.data.y !== undefined ? node.data.y.toFixed(4) : '0.0');
 
-            if (node.data.useUniform && !inputs.x && !inputs.y) {
+            if ((node.data.useUniform || node.liveUniform) && !inputs.x && !inputs.y) {
                 // Only use uniform if no inputs are connected
                 const xVal = node.data.x !== undefined ? node.data.x : 0.0;
                 const yVal = node.data.y !== undefined ? node.data.y : 0.0;
@@ -139,6 +203,7 @@ export const NodeDefinitions = {
 
     'Vec3': {
         category: 'constant',
+        description: 'A 3D vector / RGB constant (x, y, z). In non-uniform mode the components can be connected.',
         inputs: [
             { name: 'x', type: 'float', optional: true },
             { name: 'y', type: 'float', optional: true },
@@ -154,7 +219,7 @@ export const NodeDefinitions = {
             const y = inputs.y || (node.data.y !== undefined ? node.data.y.toFixed(4) : '0.5');
             const z = inputs.z || (node.data.z !== undefined ? node.data.z.toFixed(4) : '0.0');
 
-            if (node.data.useUniform && !inputs.x && !inputs.y && !inputs.z) {
+            if ((node.data.useUniform || node.liveUniform) && !inputs.x && !inputs.y && !inputs.z) {
                 const xVal = node.data.x !== undefined ? node.data.x : 1.0;
                 const yVal = node.data.y !== undefined ? node.data.y : 0.5;
                 const zVal = node.data.z !== undefined ? node.data.z : 0.0;
@@ -174,6 +239,7 @@ export const NodeDefinitions = {
 
     'Vec4': {
         category: 'constant',
+        description: 'A 4D vector / RGBA constant (x, y, z, w). In non-uniform mode the components can be connected.',
         inputs: [
             { name: 'x', type: 'float', optional: true },
             { name: 'y', type: 'float', optional: true },
@@ -191,7 +257,7 @@ export const NodeDefinitions = {
             const z = inputs.z || (node.data.z !== undefined ? node.data.z.toFixed(4) : '0.0');
             const w = inputs.w || (node.data.w !== undefined ? node.data.w.toFixed(4) : '1.0');
 
-            if (node.data.useUniform && !inputs.x && !inputs.y && !inputs.z && !inputs.w) {
+            if ((node.data.useUniform || node.liveUniform) && !inputs.x && !inputs.y && !inputs.z && !inputs.w) {
                 const xVal = node.data.x !== undefined ? node.data.x : 1.0;
                 const yVal = node.data.y !== undefined ? node.data.y : 0.0;
                 const zVal = node.data.z !== undefined ? node.data.z : 0.0;
@@ -212,8 +278,9 @@ export const NodeDefinitions = {
 
     'Color': {
         category: 'constant',
+        description: 'An RGB color picked with a color picker (data.r/g/b in 0..1).',
         inputs: [],
-        outputs: [{ name: 'rgb', type: 'vec3' }],
+        outputs: [{ name: 'color', type: 'vec3' }],
         data: { r: 1.0, g: 0.5, b: 0.0 },
         hasColorPicker: true,
         glsl: (node, inputs) => {
@@ -230,6 +297,7 @@ export const NodeDefinitions = {
     // ===== UNIFORM/INPUT NODES (JS -> Shader) =====
     'Time': {
         category: 'input',
+        description: 'Seconds since the preview started (u_time). Drive animation with it.',
         inputs: [],
         outputs: [{ name: 'time', type: 'float' }],
         uniforms: ['u_time'],
@@ -247,6 +315,7 @@ export const NodeDefinitions = {
 
     'UV': {
         category: 'input',
+        description: 'Pixel coordinates 0..1. data.mode: stretch (fills the frame), contain (aspect-correct, centered) or cover.',
         inputs: [],
         outputs: [{ name: 'uv', type: 'vec2' }],
         uniforms: ['u_resolution'],
@@ -292,6 +361,7 @@ export const NodeDefinitions = {
 
     'Resolution': {
         category: 'input',
+        description: 'Output size in pixels (u_resolution).',
         inputs: [],
         outputs: [{ name: 'resolution', type: 'vec2' }],
         uniforms: ['u_resolution'],
@@ -309,6 +379,7 @@ export const NodeDefinitions = {
 
     'Mouse': {
         category: 'input',
+        description: 'Mouse position over the editor, 0..1 with (0,0) bottom-left (u_mouse).',
         inputs: [],
         outputs: [{ name: 'mouse', type: 'vec2' }],
         uniforms: ['u_mouse'],
@@ -325,12 +396,14 @@ export const NodeDefinitions = {
     },
 
     'Camera': {
-        category: 'input',
+        category: 'source',
+        description: 'Webcam image sampled at uv (enable the camera from the toolbar); tex is the texture for effects.',
         inputs: [{ name: 'uv', type: 'vec2', default: 'gl_FragCoord.xy / u_resolution' }],
-        outputs: [{ name: 'color', type: 'vec4' }],
+        outputs: [{ name: 'color', type: 'vec4' }, { name: 'tex', type: 'sampler2D' }],
         uniforms: ['u_camera', 'u_resolution'],
         isCameraNode: true,
         glsl: (node, inputs) => {
+            node.outputVars = { color: node.varName, tex: 'u_camera' };
             return {
                 code: `vec4 ${node.varName} = texture(u_camera, ${inputs.uv});`,
                 output: node.varName
@@ -339,12 +412,14 @@ export const NodeDefinitions = {
     },
 
     'ScreenCapture': {
-        category: 'input',
+        category: 'source',
+        description: 'Captured screen / window sampled at uv; tex is the texture for effects.',
         inputs: [{ name: 'uv', type: 'vec2', default: 'gl_FragCoord.xy / u_resolution' }],
-        outputs: [{ name: 'color', type: 'vec4' }],
+        outputs: [{ name: 'color', type: 'vec4' }, { name: 'tex', type: 'sampler2D' }],
         uniforms: ['u_camera', 'u_resolution'],
         isScreenCaptureNode: true,
         glsl: (node, inputs) => {
+            node.outputVars = { color: node.varName, tex: 'u_camera' };
             return {
                 code: `vec4 ${node.varName} = texture(u_camera, ${inputs.uv});`,
                 output: node.varName
@@ -353,14 +428,16 @@ export const NodeDefinitions = {
     },
 
     'VideoURL': {
-        category: 'input',
+        category: 'source',
+        description: 'Video from a URL (data.url) sampled at uv; tex is the texture for effects.',
         inputs: [{ name: 'uv', type: 'vec2', default: 'gl_FragCoord.xy / u_resolution' }],
-        outputs: [{ name: 'color', type: 'vec4' }],
+        outputs: [{ name: 'color', type: 'vec4' }, { name: 'tex', type: 'sampler2D' }],
         uniforms: ['u_camera', 'u_resolution'],
         data: { url: '', loop: true, autoplay: true },
         hasInputFields: true,
         isVideoURLNode: true,
         glsl: (node, inputs) => {
+            node.outputVars = { color: node.varName, tex: 'u_camera' };
             return {
                 code: `vec4 ${node.varName} = texture(u_camera, ${inputs.uv});`,
                 output: node.varName
@@ -369,7 +446,8 @@ export const NodeDefinitions = {
     },
 
     'Microphone': {
-        category: 'input',
+        category: 'source',
+        description: 'Microphone loudness (RMS, roughly 0..1). Enable the mic from the toolbar.',
         inputs: [],
         outputs: [{ name: 'rms', type: 'float' }],
         isMicrophoneNode: true,
@@ -388,9 +466,10 @@ export const NodeDefinitions = {
     },
 
     'MIDI CC': {
-        category: 'input',
+        category: 'source',
+        description: 'A MIDI control-change value 0..1 (data.channel 1-16, data.ccNumber 0-127, data.smoothing 0..1). Use learn to bind a knob.',
         inputs: [],
-        outputs: [{ name: 'value', type: 'float' }],
+        outputs: [{ name: 'out', type: 'float' }],
         data: { channel: 1, ccNumber: 1, smoothing: 0.0 },
         hasInputFields: true,
         fieldType: 'float',
@@ -412,37 +491,42 @@ export const NodeDefinitions = {
     },
 
     'JS': {
-        category: 'input',
+        category: 'custom',
+        description: 'Runs JavaScript every frame (double-click to edit): data.setupCode runs once (async, await loadScript(url)), data.code runs each frame with time, dt, frame, resolution, mouse, audio, params (Param values by label) and state. Its return value defines typed outputs (number -> float, true/false -> bool, [x,y(,z,w)] -> vecN, a canvas / texture(src) / dataTexture(array, w, h, channels) -> sampler2D, or float()/int()/vec3()... helpers; return { name: value } for several outputs), pushed as live uniforms every frame without recompiling.',
         inputs: [],
-        outputs: [], // Dynamic - determined by return value
-        data: { setupCode: '', code: 'return float(Math.sin(u_time));' },
+        outputs: [], // Dynamic: data.outputs, the signature of the last returned value
+        data: { setupCode: JS_DEFAULT_SETUP, code: JS_DEFAULT_CODE, outputs: JS_DEFAULT_OUTPUTS },
         isJSNode: true,
-        glsl: (node, inputs) => {
-            // JS nodes output uniforms
-            // The actual execution happens in JSNode.execute()
-            // Here we just return the cached uniform values
-            if (!node._cachedUniforms || node._cachedUniforms.length === 0) {
-                return {
-                    code: '',
-                    output: node.varName,
-                    uniforms: []
-                };
+        glsl: (node) => {
+            const v = node.varName;
+            // The compiler renames node_<id> to compact ids: remember the name for per-frame pushes
+            node.compiledVarName = v;
+            const outs = node.outputs || [];
+            if (!outs.length) {
+                node.outputVars = null;
+                return { code: '', output: '0.0' };
             }
-
-            // Return uniforms from cached execution
-            return {
-                code: '',
-                output: node.varName,
-                uniforms: node._cachedUniforms
-            };
+            const zero = (t) => (t === 'bool' ? false : /^vec([234])$/.test(t) ? new Array(+t[3]).fill(0) : 0);
+            const controlOnly = (t) => t === 'event' || t === 'string' || t === 'list'; // never reach GLSL
+            const uniforms = outs.map((o, i) => {
+                if (controlOnly(o.type)) return null;
+                // Texture outputs: bound by FeedbackRenderer.injectFeedbackTextures (shared GL context)
+                if (o.type === 'sampler2D') return { name: `${v}_o${i}`, type: 'sampler2D', value: 0, jsTextureNodeId: node.id, jsTextureOutput: o.name };
+                const value = typeof node.getOutputValue === 'function' ? node.getOutputValue(i) : zero(o.type);
+                return { name: `${v}_o${i}`, type: o.type, value: Array.isArray(value) ? [...value] : value };
+            }).filter(Boolean);
+            node.outputVars = {};
+            outs.forEach((o, i) => { if (!controlOnly(o.type)) node.outputVars[o.name] = `${v}_o${i}`; });
+            return { code: '', output: `${v}_o0`, uniforms };
         }
     },
 
     'Feedback': {
-        category: 'utility',
+        category: 'effect',
+        description: 'Previous-frame buffer: whatever is connected to in is rendered every frame, and out is last frame\'s result as a texture (sample it with TextureSample for trails / echoes). data.format rgba8 (default) | rgba16f | rgba32f (float formats keep values outside 0..1 - state, positions, HDR), data.filter linear | nearest. Inside a SceneSwitcher scene the pass is skipped while that scene is hidden (it resumes where it froze); data.keepRunning = true keeps it running (simulations). data.autoScale = true sizes the buffer to the output being shown (a small preview, or the render-quality scale of the background / output window), never above data.width x height, and keeps its content when it changes; leave it off for buffers whose pixels are simulation state (exact texel sizes).',
         inputs: [{ name: 'in', type: 'vec4' }],
         outputs: [{ name: 'out', type: 'sampler2D' }],
-        data: { width: 512, height: 512 },
+        data: { width: 512, height: 512, format: 'rgba8', filter: 'linear', keepRunning: false },
         isFeedbackNode: true,
         glsl: (node) => {
             // Feedback node provides a sampler2D uniform with previous frame
@@ -459,7 +543,7 @@ export const NodeDefinitions = {
     },
 
     'TextureSample': {
-        category: 'utility',
+        category: 'effect',
         inputs: [
             { name: 'texture', type: 'sampler2D' },
             { name: 'uv', type: 'vec2', default: 'v_uv' }
@@ -475,8 +559,9 @@ export const NodeDefinitions = {
 
     // ===== STRUCT NODES =====
     'CameraObject': {
-        category: 'struct',
+        category: 'sdf3d',
         description: 'Create a Camera Object with position, target, and field of view',
+        inlineInputs: true, // unconnected inputs read node.data[inputName] (ShaderCompiler.defaultForInput)
         inputs: [
             { name: 'position', type: 'vec3', default: 'vec3(0.0, 0.0, 5.0)' },
             { name: 'target', type: 'vec3', default: 'vec3(0.0, 0.0, 0.0)' },
@@ -492,8 +577,9 @@ export const NodeDefinitions = {
     },
 
     'OrbitalCamera': {
-        category: 'struct',
+        category: 'sdf3d',
         description: 'Create a camera using spherical coordinates (latitude, longitude, radius)',
+        inlineInputs: true,
         inputs: [
             { name: 'latitude', type: 'float', default: '0.0' },
             { name: 'longitude', type: 'float', default: '0.0' },
@@ -522,8 +608,9 @@ export const NodeDefinitions = {
     },
 
     'Ray': {
-        category: 'struct',
+        category: 'sdf3d',
         description: 'Create a ray with origin and direction',
+        inlineInputs: true,
         inputs: [
             { name: 'origin', type: 'vec3', default: 'vec3(0.0)' },
             { name: 'direction', type: 'vec3', default: 'vec3(0.0, 0.0, -1.0)' }
@@ -538,14 +625,14 @@ export const NodeDefinitions = {
     },
 
     'Blend': {
-        category: 'blend',
+        category: 'logic',
         description: 'Blend between multiple inputs using a continuous index (e.g., 1.7 blends input 1 and 2)',
         inputs: [
             { name: 'index', type: 'float', default: '0.0' },
             { name: '0', type: 'any', default: null },
             { name: '1', type: 'any', default: null }
         ],
-        outputs: [{ name: 'result', type: 'any' }],
+        outputs: [{ name: 'out', type: 'any' }],
         isDynamicInput: true, // Allows dynamic addition of inputs
         minInputs: 2, // Minimum number of blend inputs (excluding index)
 
@@ -715,11 +802,34 @@ export const NodeDefinitions = {
     },
 
     'ForLoopStart': {
-        category: 'control',
-        description: 'Start of a for loop. Connect outputs through loop body to paired ForLoopEnd node.',
+        category: 'logic',
+        description: 'Start of a for loop (auto-paired with a ForLoopEnd). Connect an initial value to the free start input to add an iteration variable; its inter output is the value inside the loop body.',
         inputs: [],  // Dynamically managed by ForLoopStartNode
         outputs: [], // Dynamically managed by ForLoopStartNode
         isForLoopStartNode: true,
+        isDynamicInput: true, // connecting the free start input adds another iteration variable
+        // Iteration variables adopt the type of whatever is connected to their start input
+        prepare: (node, nodeGraph, compiler) => {
+            const varTypes = Array.isArray(node.data.varTypes) ? node.data.varTypes : ['float'];
+            const allowed = ['float', 'int', 'vec2', 'vec3', 'vec4'];
+            let changed = false;
+            for (let i = 0; i < varTypes.length; i++) {
+                const inputIndex = node.inputs.findIndex(p => p.name === `start${i}`);
+                const conn = inputIndex < 0 ? null : nodeGraph.connections.find(c => c.toNode === node && c.toInput === inputIndex);
+                if (!conn) continue;
+                const src = compiler.resolveConnection(conn, nodeGraph, node);
+                if (src && allowed.includes(src.type) && varTypes[i] !== src.type) {
+                    varTypes[i] = src.type;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                node.data.varTypes = varTypes;
+                if (node.updatePorts) node.updatePorts();
+                const pair = node.graph && node.graph.nodes.find(n => n.id === node.data.pairNodeId);
+                if (pair && pair.updatePorts) pair.updatePorts();
+            }
+        },
         minInputs: 1,
         glsl: (node, inputs) => {
             const varTypes = node.data.varTypes || ['float'];
@@ -768,18 +878,24 @@ export const NodeDefinitions = {
     },
 
     'ForLoopEnd': {
-        category: 'control',
-        description: 'End of a for loop. Receives modified values from loop body and outputs final results.',
+        category: 'logic',
+        description: 'End of a for loop: inter inputs receive each variable\'s updated value per iteration, end outputs hold the final values; break (bool) exits early.',
         inputs: [],  // Dynamically managed by ForLoopEndNode
         outputs: [], // Dynamically managed by ForLoopEndNode
-        isForLoopEndNode: true,
+        isForLoopEndNode: true, // ports mirror the paired ForLoopStart (the authoritative source)
+        resolveInputType: (node, input) => {
+            const m = /^inter(\d+)$/.exec(input.name);
+            if (!m || !node.graph) return null;
+            const start = node.graph.nodes.find(n => n.id === node.data.pairNodeId);
+            return start && Array.isArray(start.data.varTypes) ? start.data.varTypes[parseInt(m[1], 10)] : null;
+        },
         minInputs: 1,
         glsl: (node, inputs) => {
             // Get varTypes from paired ForLoopStart (authoritative source)
             let varTypes = ['float'];
             let pairedStartNode = null;
 
-            if (node.data.pairNodeId && node.graph) {
+            if (node.data.pairNodeId != null && node.graph) {
                 pairedStartNode = node.graph.nodes.find(n => n.id === node.data.pairNodeId);
                 if (pairedStartNode && pairedStartNode.isForLoopStartNode) {
                     varTypes = pairedStartNode.data.varTypes || ['float'];
@@ -832,12 +948,12 @@ export const NodeDefinitions = {
     },
 
     'Map': {
-        category: 'math',
+        category: 'logic',
         description: 'Remap a value from one range to another with optional clipping',
         inputs: [
             { name: 'value', type: 'float', default: '0.0' }
         ],
-        outputs: [{ name: 'result', type: 'float' }],
+        outputs: [{ name: 'out', type: 'float' }],
         hasInputFields: true,
         isMapNode: true,
         data: {
@@ -887,151 +1003,11 @@ export const NodeDefinitions = {
     },
 
     // ===== MATH OPERATORS =====
-    'Add': {
-        category: 'math',
-        inputs: [
-            { name: 'a', type: 'any', default: '0.0' },
-            { name: 'b', type: 'any', default: '0.0' }
-        ],
-        outputs: [{ name: 'result', type: 'any' }],
-        validateTypes: (node, inputTypes) => {
-            const typeA = inputTypes.a;
-            const typeB = inputTypes.b;
-
-            // If both disconnected, default to float
-            if (!typeA && !typeB) {
-                return { valid: true, outputType: 'float' };
-            }
-
-            // If one is disconnected, use the other's type
-            if (!typeA) return { valid: true, outputType: typeB };
-            if (!typeB) return { valid: true, outputType: typeA };
-
-            // Both connected - must be same type
-            const validTypes = ['float', 'vec2', 'vec3', 'vec4'];
-            if (!validTypes.includes(typeA) || !validTypes.includes(typeB)) {
-                return { valid: false, error: `Add only supports float, vec2, vec3, vec4. Got ${typeA} and ${typeB}` };
-            }
-
-            if (typeA !== typeB) {
-                return { valid: false, error: `Both inputs must be the same type. Got ${typeA} and ${typeB}` };
-            }
-
-            return { valid: true, outputType: typeA };
-        },
-        glsl: (node, inputs) => {
-            const outputType = node.resolvedOutputType || 'float';
-            return {
-                code: `${outputType} ${node.varName} = ${inputs.a || '0.0'} + ${inputs.b || '0.0'};`,
-                output: node.varName
-            };
-        }
-    },
-
-    'Subtract': {
-        category: 'math',
-        inputs: [
-            { name: 'a', type: 'any', default: '0.0' },
-            { name: 'b', type: 'any', default: '0.0' }
-        ],
-        outputs: [{ name: 'result', type: 'any' }],
-        validateTypes: (node, inputTypes) => {
-            const typeA = inputTypes.a;
-            const typeB = inputTypes.b;
-
-            if (!typeA && !typeB) return { valid: true, outputType: 'float' };
-            if (!typeA) return { valid: true, outputType: typeB };
-            if (!typeB) return { valid: true, outputType: typeA };
-
-            const validTypes = ['float', 'vec2', 'vec3', 'vec4'];
-            if (!validTypes.includes(typeA) || !validTypes.includes(typeB)) {
-                return { valid: false, error: `Subtract only supports float, vec2, vec3, vec4. Got ${typeA} and ${typeB}` };
-            }
-
-            if (typeA !== typeB) {
-                return { valid: false, error: `Both inputs must be the same type. Got ${typeA} and ${typeB}` };
-            }
-
-            return { valid: true, outputType: typeA };
-        },
-        glsl: (node, inputs) => {
-            const outputType = node.resolvedOutputType || 'float';
-            return {
-                code: `${outputType} ${node.varName} = ${inputs.a || '0.0'} - ${inputs.b || '0.0'};`,
-                output: node.varName
-            };
-        }
-    },
-
-    'Multiply': {
-        category: 'math',
-        inputs: [
-            { name: 'a', type: 'any', default: '1.0' },
-            { name: 'b', type: 'any', default: '1.0' }
-        ],
-        outputs: [{ name: 'result', type: 'any' }],
-        validateTypes: (node, inputTypes) => {
-            const typeA = inputTypes.a;
-            const typeB = inputTypes.b;
-
-            if (!typeA && !typeB) return { valid: true, outputType: 'float' };
-            if (!typeA) return { valid: true, outputType: typeB };
-            if (!typeB) return { valid: true, outputType: typeA };
-
-            const validTypes = ['float', 'vec2', 'vec3', 'vec4'];
-            if (!validTypes.includes(typeA) || !validTypes.includes(typeB)) {
-                return { valid: false, error: `Multiply only supports float, vec2, vec3, vec4. Got ${typeA} and ${typeB}` };
-            }
-
-            if (typeA !== typeB) {
-                return { valid: false, error: `Both inputs must be the same type. Got ${typeA} and ${typeB}` };
-            }
-
-            return { valid: true, outputType: typeA };
-        },
-        glsl: (node, inputs) => {
-            const outputType = node.resolvedOutputType || 'float';
-            return {
-                code: `${outputType} ${node.varName} = ${inputs.a || '1.0'} * ${inputs.b || '1.0'};`,
-                output: node.varName
-            };
-        }
-    },
-
-    'Divide': {
-        category: 'math',
-        inputs: [
-            { name: 'a', type: 'any', default: '1.0' },
-            { name: 'b', type: 'any', default: '1.0' }
-        ],
-        outputs: [{ name: 'result', type: 'any' }],
-        validateTypes: (node, inputTypes) => {
-            const typeA = inputTypes.a;
-            const typeB = inputTypes.b;
-
-            if (!typeA && !typeB) return { valid: true, outputType: 'float' };
-            if (!typeA) return { valid: true, outputType: typeB };
-            if (!typeB) return { valid: true, outputType: typeA };
-
-            const validTypes = ['float', 'vec2', 'vec3', 'vec4'];
-            if (!validTypes.includes(typeA) || !validTypes.includes(typeB)) {
-                return { valid: false, error: `Divide only supports float, vec2, vec3, vec4. Got ${typeA} and ${typeB}` };
-            }
-
-            if (typeA !== typeB) {
-                return { valid: false, error: `Both inputs must be the same type. Got ${typeA} and ${typeB}` };
-            }
-
-            return { valid: true, outputType: typeA };
-        },
-        glsl: (node, inputs) => {
-            const outputType = node.resolvedOutputType || 'float';
-            return {
-                code: `${outputType} ${node.varName} = ${inputs.a || '1.0'} / ${inputs.b || '1.0'};`,
-                output: node.varName
-            };
-        }
-    },
+    // Generic: float/int broadcast to vectors (vec3 * float works).
+    'Add': arithmetic('Adds a and b (floats, vectors or colors; a float is broadcast to the vector size).', '+', '0.0', '0.0'),
+    'Subtract': arithmetic('Subtracts b from a (floats, vectors or colors).', '-', '0.0', '0.0'),
+    'Multiply': arithmetic('Multiplies a by b component-wise (e.g. scale a color by a float).', '*', '1.0', '1.0'),
+    'Divide': arithmetic('Divides a by b component-wise.', '/', '1.0', '1.0'),
 
     // ===== GLSL FUNCTION NODES =====
     'Sin': {
@@ -1088,9 +1064,11 @@ export const NodeDefinitions = {
 
     // ===== TYPE CONVERSION =====
     'FloatToVec3': {
-        category: 'convert',
+        category: 'vector',
+        description: 'Broadcasts a float to a vec3 (e.g. grayscale to RGB).',
+        inlineInputs: true,
         inputs: [{ name: 'f', type: 'float', default: '0.0' }],
-        outputs: [{ name: 'vec', type: 'vec3' }],
+        outputs: [{ name: 'out', type: 'vec3' }],
         glsl: (node, inputs) => {
             return {
                 code: `vec3 ${node.varName} = vec3(${inputs.f});`,
@@ -1100,12 +1078,14 @@ export const NodeDefinitions = {
     },
 
     'Vec3ToVec4': {
-        category: 'convert',
+        category: 'vector',
+        description: 'Builds an RGBA vec4 from an RGB color and an alpha value.',
+        inlineInputs: true,
         inputs: [
             { name: 'rgb', type: 'vec3', default: 'vec3(0.0)' },
             { name: 'a', type: 'float', default: '1.0' }
         ],
-        outputs: [{ name: 'rgba', type: 'vec4' }],
+        outputs: [{ name: 'out', type: 'vec4' }],
         glsl: (node, inputs) => {
             return {
                 code: `vec4 ${node.varName} = vec4(${inputs.rgb}, ${inputs.a});`,
@@ -1148,6 +1128,47 @@ export const NodeDefinitions = {
     }
 };
 
+// ===== NODE LIBRARY =====
+// Upgraded versions of legacy nodes replace them in place (same key order and
+// input order, so saved projects keep working); new nodes are appended.
+Object.assign(NodeDefinitions,
+    LegacyMathOverrides,
+    LegacyVectorOverrides,
+    LegacyShapeOverrides,
+    LegacyEffectOverrides
+);
+Object.assign(NodeDefinitions,
+    { 'Pi': libNode({
+        category: 'constant',
+        description: 'The constants pi (3.14159) and tau (2 pi) for angles in radians.',
+        inputs: [],
+        outputs: [{ name: 'pi', type: 'float' }, { name: 'tau', type: 'float' }],
+        body: () => ({ out: { pi: '3.14159265', tau: '6.28318531' } })
+    }) },
+    MathNodes,
+    VectorNodes,
+    UVNodes,
+    NoiseNodes,
+    ShapeNodes,
+    SDF3DNodes,
+    ColorNodes,
+    EffectNodes,
+    LogicNodes,
+    SourceNodes,
+    AudioNodes,
+    ParamNodes,
+    SceneNodes,
+    DebugNodes,
+    ControlNodes,
+    IONodes, // I/O: OSC / serial / MIDI out / Art-Net (src/core/library/io.js)
+    Render3DNodes // Render 3D: meshes, materials, lights (src/core/library/render3d.js)
+);
+// JS twins of the hand-written definitions above (control-rate evaluation; GLSL unchanged)
+installControlTwins(NodeDefinitions);
+// No prototype: a lookup like NodeDefinitions['constructor'] or ['__proto__'] is undefined, never an
+// Object.prototype member (custom node names are checked too, src/core/customNodes.js)
+Object.setPrototypeOf(NodeDefinitions, null);
+
 /**
  * Type system for GLSL types
  */
@@ -1186,39 +1207,45 @@ export const TypeSystem = {
     },
 
     /**
-     * Auto-convert between compatible types
+     * Auto-convert between compatible types.
+     * Scalars broadcast to vectors, vectors pad/truncate, bool/int/float
+     * convert numerically. vecN -> float takes the first component (lossy;
+     * the compiler emits a warning only for conversions listed as lossy).
      */
     canConvert(fromType, toType) {
         if (fromType === toType) return true;
-
-        // Int to float conversion
-        if (fromType === 'int' && toType === 'float') return true;
-
-        // Float to vec conversions
-        if (fromType === 'float' && this.vectors.includes(toType)) return true;
-
-        // Int to vec conversions (via float)
-        if (fromType === 'int' && this.vectors.includes(toType)) return true;
-
-        // Vector conversions (expanding)
-        if (fromType === 'vec3' && toType === 'vec4') return true;
-        if (fromType === 'vec2' && (toType === 'vec3' || toType === 'vec4')) return true;
-
-        // Vector conversions (truncating)
-        if (fromType === 'vec4' && (toType === 'vec3' || toType === 'vec2')) return true;
-        if (fromType === 'vec3' && toType === 'vec2') return true;
-
+        const scalar = ['float', 'int', 'bool'];
+        const vec = ['vec2', 'vec3', 'vec4'];
+        if (scalar.includes(fromType) && (scalar.includes(toType) || vec.includes(toType))) return true;
+        if (vec.includes(fromType) && vec.includes(toType)) return true;
         return false;
+    },
+
+    /** True when canConvert() would be lossy (vector -> scalar). */
+    isLossy(fromType, toType) {
+        return ['vec2', 'vec3', 'vec4'].includes(fromType) && ['float', 'int', 'bool'].includes(toType);
     },
 
     /**
      * Generate conversion code
      */
     convertCode(value, fromType, toType) {
-        if (fromType === toType) return value;
+        if (!fromType || fromType === toType) return value;
+        const wrap = v => (/^[A-Za-z_][\w.]*$/.test(v) ? v : `(${v})`);
+
+        // bool sources
+        if (fromType === 'bool') {
+            if (toType === 'float') return `float(${value})`;
+            if (toType === 'int') return `int(${value})`;
+            if (toType === 'vec2' || toType === 'vec3') return `${toType}(float(${value}))`;
+            if (toType === 'vec4') return `vec4(vec3(float(${value})), 1.0)`;
+        }
 
         // Int to float
         if (fromType === 'int' && toType === 'float') return `float(${value})`;
+        if (fromType === 'float' && toType === 'int') return `int(${value})`;
+        if (fromType === 'float' && toType === 'bool') return `(${value} > 0.5)`;
+        if (fromType === 'int' && toType === 'bool') return `(${value} != 0)`;
 
         // Float to vec
         if (fromType === 'float' && toType === 'vec2') return `vec2(${value})`;
@@ -1236,72 +1263,17 @@ export const TypeSystem = {
         if (fromType === 'vec2' && toType === 'vec4') return `vec4(${value}, 0.0, 1.0)`;
 
         // Vec4 to smaller vectors (truncation)
-        if (fromType === 'vec4' && toType === 'vec3') return `${value}.xyz`;
-        if (fromType === 'vec4' && toType === 'vec2') return `${value}.xy`;
-        if (fromType === 'vec3' && toType === 'vec2') return `${value}.xy`;
+        if (fromType === 'vec4' && toType === 'vec3') return `${wrap(value)}.xyz`;
+        if (fromType === 'vec4' && toType === 'vec2') return `${wrap(value)}.xy`;
+        if (fromType === 'vec3' && toType === 'vec2') return `${wrap(value)}.xy`;
+
+        // Vector to scalar (first component)
+        if (['vec2', 'vec3', 'vec4'].includes(fromType)) {
+            if (toType === 'float') return `${wrap(value)}.x`;
+            if (toType === 'int') return `int(${wrap(value)}.x)`;
+            if (toType === 'bool') return `(${wrap(value)}.x > 0.5)`;
+        }
 
         return value; // Fallback
     }
 };
-
-/**
- * Helper to create node definitions from GLSL function strings
- */
-export function createNodeFromGLSL(name, glslCode, metadata = null) {
-    // Parse GLSL function signature
-    // Example: "vec3 myFunction(vec2 uv, float time)"
-    const funcMatch = glslCode.match(/(\w+)\s+(\w+)\s*\((.*?)\)/);
-    if (!funcMatch) {
-        throw new Error('Invalid GLSL function format');
-    }
-
-    const [, returnType, funcName, params] = funcMatch;
-
-    // Parse parameters
-    const inputs = [];
-    if (params.trim()) {
-        const paramList = params.split(',').map(p => p.trim());
-        for (const param of paramList) {
-            const [type, name] = param.split(/\s+/);
-            const inputDef = { name, type, default: getDefaultValue(type) };
-
-            // Check if metadata has additional info for this input (like defaultNode)
-            if (metadata && metadata.inputs && metadata.inputs[name]) {
-                const inputMetadata = metadata.inputs[name];
-                if (inputMetadata.defaultNode) {
-                    inputDef.defaultNode = inputMetadata.defaultNode;
-                }
-                // Override default if specified in metadata
-                if (inputMetadata.default) {
-                    inputDef.default = inputMetadata.default;
-                }
-            }
-
-            inputs.push(inputDef);
-        }
-    }
-
-    return {
-        category: 'custom',
-        inputs,
-        outputs: [{ name: 'result', type: returnType }],
-        glslFunction: glslCode,
-        glsl: (node, inputs) => {
-            const args = Object.values(inputs).join(', ');
-            return {
-                code: `${returnType} ${node.varName} = ${funcName}(${args});`,
-                output: node.varName,
-                requiresFunction: funcName
-            };
-        }
-    };
-}
-
-function getDefaultValue(type) {
-    if (type === 'float') return '0.0';
-    if (type === 'int') return '0';
-    if (type === 'bool') return 'false';
-    if (type.startsWith('vec')) return `${type}(0.0)`;
-    if (type.startsWith('mat')) return `${type}(1.0)`;
-    return `${type}()`;
-}

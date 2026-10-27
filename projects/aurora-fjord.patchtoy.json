@@ -1,0 +1,7392 @@
+{
+  "name": "Aurora Fjord",
+  "description": "Night fjord under domain-warped aurora curtains: layered FBM mountain silhouettes, twinkling Voronoi stars, a rippled lake mirroring the sky, rendered into a high-res Feedback target with multi-level bloom, chromatic aberration, grain and vignette. Tweak it in the Parameters panel (P): Aurora, Scene, Post and Music.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T07:14:49.116Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 324,
+        "type": "Comment",
+        "x": 80,
+        "y": -264,
+        "data": {
+          "text": "# Aurora Fjord\nA night fjord under domain-warped aurora curtains: layered FBM mountain silhouettes, twinkling Voronoi stars, low mist, and everything mirrored in rippling water. A purely 2D shader, no raymarching.\nReacts to music: open the audio menu → Mic (curtains glow on the mids and ripple on the highs, bright stars twinkle on the beat).\n## Tweak it in the Parameters panel\nPress P (or the sliders button in the top bar): Aurora, Scene, Post and Music settings with pretty names; hover a name for what it does, double-click a slider to reset it.\nDouble-click a group box to open it, Esc to come back.",
+          "width": 420,
+          "height": 296,
+          "color": "orange"
+        }
+      },
+      {
+        "id": 325,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Water Reflection\nBelow the horizon the UV is mirrored and wobbled by FBM ripples (WaveUV), so the whole sky and mountains reflect in the fjord; the water then gets a dark tint.",
+          "width": 320,
+          "height": 136,
+          "color": "blue"
+        }
+      },
+      {
+        "id": 326,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Aurora\nTwo curtains: a domain-warped FBM defines each curtain's wavy bottom edge; above it, exponential falloff × vertical FBM rays × a color ramp (green → violet) give the glowing drapes.",
+          "width": 330,
+          "height": 136,
+          "color": "green"
+        }
+      },
+      {
+        "id": 327,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Mountains\nThree FBM ridgelines (far, mid, near) cut out silhouettes with smoothsteps, each shaded with haze, snow and rim light, layered front to back over the sky.",
+          "width": 320,
+          "height": 136,
+          "color": "violet"
+        }
+      },
+      {
+        "id": 328,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Render Targets\nThe tonemapped frame and a three-buffer bright-pass blur chain (Feedback nodes) for the bloom.",
+          "width": 300,
+          "height": 118,
+          "color": "gray"
+        }
+      },
+      {
+        "id": 342,
+        "type": "Comment",
+        "x": 80,
+        "y": -108,
+        "data": {
+          "text": "## Music\nAudio level gates everything: with the audio off or silent, drive = 0 and the fjord looks exactly as before. drive = music × smoothstep(level).\n- Mids: the aurora curtains glow up to +30%.\n- Highs: the domain warp deepens (strength 0.5 → 0.56), so the drapes ripple with hats and cymbals.\n- Beat: the bright stars twinkle (×2.4, short attack and decay).\nBeat-phase couplings (star twinkle) are also multiplied by the beat tracker's confidence (Beat.confidence = u_beatConfidence: 0 with the audio off, ~1 once the beat locks, 1 with the metronome) and run on the stable beat clock with its certainty gate (Beat.gate / BeatEnvelope gate: fade, u_beatTrust): after a track change the clock holds the old tempo, then glides to the new one without jumps, and these couplings fade out until the new beat is trusted. Level and band couplings (mid glow, high ripple) are not.",
+          "width": 320,
+          "height": 240,
+          "color": "green"
+        }
+      },
+      {
+        "id": 0,
+        "type": "CenteredUV",
+        "x": 358,
+        "y": 406,
+        "data": {}
+      },
+      {
+        "id": 1,
+        "type": "Time",
+        "x": 80,
+        "y": 413,
+        "data": {}
+      },
+      {
+        "id": 2,
+        "type": "Param",
+        "x": 80,
+        "y": 519,
+        "data": {
+          "label": "Time offset",
+          "kind": "float",
+          "value": 40,
+          "default": 40,
+          "min": 0,
+          "max": 200,
+          "step": 0.1,
+          "scale": "linear",
+          "section": "Scene",
+          "order": 6,
+          "description": "Scrubs the whole animation (seconds added to time)."
+        }
+      },
+      {
+        "id": 3,
+        "type": "Add",
+        "x": 358,
+        "y": 556,
+        "data": {}
+      },
+      {
+        "id": 4,
+        "type": "Step",
+        "x": 80,
+        "y": 91,
+        "data": {
+          "edge": 0.5,
+          "x": -0.3
+        }
+      },
+      {
+        "id": 5,
+        "type": "Remap",
+        "x": 80,
+        "y": 213,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.3,
+          "outMax": -1.3
+        }
+      },
+      {
+        "id": 6,
+        "type": "Max",
+        "x": 320,
+        "y": 246,
+        "data": {
+          "a": 0,
+          "b": 0
+        }
+      },
+      {
+        "id": 7,
+        "type": "Remap",
+        "x": 560,
+        "y": 213,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.12,
+          "outMax": 1.12
+        }
+      },
+      {
+        "id": 8,
+        "type": "Pow",
+        "x": 800,
+        "y": 246,
+        "data": {
+          "a": 1,
+          "b": -1
+        }
+      },
+      {
+        "id": 9,
+        "type": "Multiply",
+        "x": 1040,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 10,
+        "type": "Remap",
+        "x": 1280,
+        "y": 171,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.35
+        }
+      },
+      {
+        "id": 11,
+        "type": "Remap",
+        "x": 1040,
+        "y": 164,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 1.3
+        }
+      },
+      {
+        "id": 12,
+        "type": "Remap",
+        "x": 1040,
+        "y": 346,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.25
+        }
+      },
+      {
+        "id": 13,
+        "type": "Add",
+        "x": 1280,
+        "y": 353,
+        "data": {}
+      },
+      {
+        "id": 14,
+        "type": "MakeVec2",
+        "x": 1520,
+        "y": 246,
+        "data": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 15,
+        "type": "FBM",
+        "x": 1760,
+        "y": 213,
+        "data": {
+          "scale": 1,
+          "octaves": 4,
+          "lacunarity": 2.1,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 16,
+        "type": "Remap",
+        "x": 2000,
+        "y": 122,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.5,
+          "outMax": 0.5
+        }
+      },
+      {
+        "id": 17,
+        "type": "Remap",
+        "x": 2000,
+        "y": 304,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.32
+        }
+      },
+      {
+        "id": 18,
+        "type": "Multiply",
+        "x": 2240,
+        "y": 262,
+        "data": {}
+      },
+      {
+        "id": 19,
+        "type": "Remap",
+        "x": 2378,
+        "y": 122,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.25
+        }
+      },
+      {
+        "id": 20,
+        "type": "Remap",
+        "x": 2378,
+        "y": 304,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.6,
+          "outMax": -1.6
+        }
+      },
+      {
+        "id": 21,
+        "type": "Add",
+        "x": 2618,
+        "y": 304,
+        "data": {}
+      },
+      {
+        "id": 22,
+        "type": "Add",
+        "x": 2618,
+        "y": 220,
+        "data": {}
+      },
+      {
+        "id": 23,
+        "type": "MakeVec2",
+        "x": 2756,
+        "y": 246,
+        "data": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 24,
+        "type": "WaveUV",
+        "x": 2996,
+        "y": 224,
+        "data": {
+          "amplitude": 0.0035,
+          "frequency": 70,
+          "uv": "pt_uv()",
+          "t": "u_time"
+        }
+      },
+      {
+        "id": 25,
+        "type": "Mix",
+        "x": 504,
+        "y": 80,
+        "data": {
+          "a": 0,
+          "b": 1,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 26,
+        "type": "Split",
+        "x": 852,
+        "y": 97,
+        "data": {}
+      },
+      {
+        "id": 27,
+        "type": "Remap",
+        "x": 80,
+        "y": 205,
+        "data": {
+          "x": 0.5,
+          "inMin": -0.3,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 1
+        }
+      },
+      {
+        "id": 28,
+        "type": "Saturate",
+        "x": 340,
+        "y": 249,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 29,
+        "type": "Gradient",
+        "x": 600,
+        "y": 80,
+        "data": {
+          "mid": 0.32,
+          "t": "pt_uv().x",
+          "a": [
+            0.03,
+            0.065,
+            0.095
+          ],
+          "b": [
+            0.01,
+            0.018,
+            0.05
+          ],
+          "c": [
+            0.003,
+            0.003,
+            0.016
+          ]
+        }
+      },
+      {
+        "id": 30,
+        "type": "Voronoi",
+        "x": 80,
+        "y": 262,
+        "data": {
+          "scale": 62,
+          "jitter": 0.9,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 31,
+        "type": "Glow",
+        "x": 698,
+        "y": 135,
+        "data": {
+          "d": 0.1,
+          "radius": 0.075,
+          "intensity": 1,
+          "falloff": 2.3
+        }
+      },
+      {
+        "id": 32,
+        "type": "Smoothstep",
+        "x": 698,
+        "y": 295,
+        "data": {
+          "edge0": 0.84,
+          "edge1": 0.995,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 33,
+        "type": "Remap",
+        "x": 320,
+        "y": 149,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 2.3
+        }
+      },
+      {
+        "id": 34,
+        "type": "Remap",
+        "x": 320,
+        "y": 331,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 91
+        }
+      },
+      {
+        "id": 35,
+        "type": "Add",
+        "x": 560,
+        "y": 289,
+        "data": {}
+      },
+      {
+        "id": 36,
+        "type": "Sin",
+        "x": 698,
+        "y": 433,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 37,
+        "type": "Remap",
+        "x": 938,
+        "y": 282,
+        "data": {
+          "x": 0.5,
+          "inMin": -1,
+          "inMax": 1,
+          "outMin": 0.45,
+          "outMax": 1
+        }
+      },
+      {
+        "id": 38,
+        "type": "Multiply",
+        "x": 938,
+        "y": 198,
+        "data": {}
+      },
+      {
+        "id": 39,
+        "type": "Multiply",
+        "x": 1178,
+        "y": 289,
+        "data": {}
+      },
+      {
+        "id": 40,
+        "type": "Voronoi",
+        "x": 1316,
+        "y": 373,
+        "data": {
+          "scale": 21,
+          "jitter": 0.85,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 41,
+        "type": "Glow",
+        "x": 1556,
+        "y": 284,
+        "data": {
+          "d": 0.1,
+          "radius": 0.03,
+          "intensity": 1.8,
+          "falloff": 2
+        }
+      },
+      {
+        "id": 42,
+        "type": "Smoothstep",
+        "x": 1556,
+        "y": 444,
+        "data": {
+          "edge0": 0.9,
+          "edge1": 1,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 43,
+        "type": "Multiply",
+        "x": 1814,
+        "y": 331,
+        "data": {}
+      },
+      {
+        "id": 44,
+        "type": "Add",
+        "x": 1316,
+        "y": 151,
+        "data": {}
+      },
+      {
+        "id": 45,
+        "type": "Smoothstep",
+        "x": 1316,
+        "y": 235,
+        "data": {
+          "edge0": -0.3,
+          "edge1": 0.25,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 46,
+        "type": "Multiply",
+        "x": 1556,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 47,
+        "type": "Param",
+        "x": 1556,
+        "y": 164,
+        "data": {
+          "label": "Star tint",
+          "kind": "color",
+          "value": [
+            0.8,
+            0.88,
+            1
+          ],
+          "default": [
+            0.8,
+            0.88,
+            1
+          ],
+          "alpha": false,
+          "section": "Scene",
+          "order": 7,
+          "description": "Colour of the twinkling stars."
+        }
+      },
+      {
+        "id": 48,
+        "type": "Multiply",
+        "x": 1814,
+        "y": 247,
+        "data": {}
+      },
+      {
+        "id": 49,
+        "type": "Remap",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.45
+        }
+      },
+      {
+        "id": 50,
+        "type": "Remap",
+        "x": 80,
+        "y": 262,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.028
+        }
+      },
+      {
+        "id": 51,
+        "type": "Add",
+        "x": 320,
+        "y": 360,
+        "data": {}
+      },
+      {
+        "id": 52,
+        "type": "Remap",
+        "x": 80,
+        "y": 444,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.08
+        }
+      },
+      {
+        "id": 53,
+        "type": "Remap",
+        "x": 80,
+        "y": 626,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -0.018
+        }
+      },
+      {
+        "id": 54,
+        "type": "Add",
+        "x": 320,
+        "y": 444,
+        "data": {}
+      },
+      {
+        "id": 55,
+        "type": "MakeVec2",
+        "x": 458,
+        "y": 386,
+        "data": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 56,
+        "type": "DomainWarp",
+        "x": 698,
+        "y": 364,
+        "data": {
+          "scale": 1.6,
+          "strength": 0.5,
+          "octaves": 4,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 57,
+        "type": "Param",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "label": "Curtain base",
+          "kind": "color",
+          "value": [
+            0.36,
+            1,
+            0.42
+          ],
+          "default": [
+            0.36,
+            1,
+            0.42
+          ],
+          "alpha": false,
+          "section": "Aurora",
+          "order": 1,
+          "description": "Colour ramp, bottom edge of the curtains."
+        }
+      },
+      {
+        "id": 58,
+        "type": "Param",
+        "x": 80,
+        "y": 200,
+        "data": {
+          "label": "Curtain low",
+          "kind": "color",
+          "value": [
+            0.04,
+            0.92,
+            0.58
+          ],
+          "default": [
+            0.04,
+            0.92,
+            0.58
+          ],
+          "alpha": false,
+          "section": "Aurora",
+          "order": 2,
+          "description": "Colour ramp, lower rays."
+        }
+      },
+      {
+        "id": 59,
+        "type": "Param",
+        "x": 80,
+        "y": 320,
+        "data": {
+          "label": "Curtain high",
+          "kind": "color",
+          "value": [
+            0.3,
+            0.38,
+            1
+          ],
+          "default": [
+            0.3,
+            0.38,
+            1
+          ],
+          "alpha": false,
+          "section": "Aurora",
+          "order": 3,
+          "description": "Colour ramp, upper rays."
+        }
+      },
+      {
+        "id": 60,
+        "type": "Param",
+        "x": 80,
+        "y": 440,
+        "data": {
+          "label": "Curtain top",
+          "kind": "color",
+          "value": [
+            1,
+            0.22,
+            0.8
+          ],
+          "default": [
+            1,
+            0.22,
+            0.8
+          ],
+          "alpha": false,
+          "section": "Aurora",
+          "order": 4,
+          "description": "Colour ramp, the faint tops of the rays."
+        }
+      },
+      {
+        "id": 61,
+        "type": "Param",
+        "x": 1044,
+        "y": 726,
+        "data": {
+          "label": "Aurora brightness",
+          "kind": "float",
+          "value": 1.3,
+          "default": 1.3,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Aurora",
+          "order": 0,
+          "description": "Overall glow of both aurora curtains."
+        }
+      },
+      {
+        "id": 62,
+        "type": "Remap",
+        "x": 80,
+        "y": 213,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.42
+        }
+      },
+      {
+        "id": 63,
+        "type": "Remap",
+        "x": 80,
+        "y": 395,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.018
+        }
+      },
+      {
+        "id": 64,
+        "type": "Add",
+        "x": 320,
+        "y": 353,
+        "data": {}
+      },
+      {
+        "id": 65,
+        "type": "MakeVec2",
+        "x": 458,
+        "y": 337,
+        "data": {
+          "x": 0,
+          "y": 1.7
+        }
+      },
+      {
+        "id": 66,
+        "type": "FBM",
+        "x": 698,
+        "y": 304,
+        "data": {
+          "scale": 1,
+          "octaves": 3,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 67,
+        "type": "Remap",
+        "x": 938,
+        "y": 213,
+        "data": {
+          "x": 0.5,
+          "inMin": 0.25,
+          "inMax": 0.75,
+          "outMin": -0.02,
+          "outMax": 0.32
+        }
+      },
+      {
+        "id": 68,
+        "type": "Remap",
+        "x": 938,
+        "y": 395,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -0.16
+        }
+      },
+      {
+        "id": 69,
+        "type": "Add",
+        "x": 1178,
+        "y": 171,
+        "data": {}
+      },
+      {
+        "id": 70,
+        "type": "Remap",
+        "x": 1178,
+        "y": 255,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.08,
+          "outMax": 0.08
+        }
+      },
+      {
+        "id": 71,
+        "type": "Add",
+        "x": 1418,
+        "y": 295,
+        "data": {}
+      },
+      {
+        "id": 72,
+        "type": "Subtract",
+        "x": 1658,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 73,
+        "type": "Smoothstep",
+        "x": 2618,
+        "y": 152,
+        "data": {
+          "edge0": -0.015,
+          "edge1": 0.05,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 74,
+        "type": "Max",
+        "x": 1898,
+        "y": 113,
+        "data": {
+          "a": 0,
+          "b": 0
+        }
+      },
+      {
+        "id": 75,
+        "type": "Remap",
+        "x": 1178,
+        "y": 437,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 2.2
+        }
+      },
+      {
+        "id": 76,
+        "type": "MakeVec2",
+        "x": 1418,
+        "y": 379,
+        "data": {
+          "x": 0,
+          "y": 4.8
+        }
+      },
+      {
+        "id": 77,
+        "type": "FBM",
+        "x": 1658,
+        "y": 346,
+        "data": {
+          "scale": 1,
+          "octaves": 2,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 78,
+        "type": "Remap",
+        "x": 1898,
+        "y": 411,
+        "data": {
+          "x": 0.5,
+          "inMin": 0.3,
+          "inMax": 0.7,
+          "outMin": 0.12,
+          "outMax": 0.5
+        }
+      },
+      {
+        "id": 79,
+        "type": "Divide",
+        "x": 2138,
+        "y": 295,
+        "data": {}
+      },
+      {
+        "id": 80,
+        "type": "Remap",
+        "x": 2378,
+        "y": 122,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -1
+        }
+      },
+      {
+        "id": 81,
+        "type": "Exp",
+        "x": 2618,
+        "y": 290,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 82,
+        "type": "Remap",
+        "x": 1898,
+        "y": 229,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 62
+        }
+      },
+      {
+        "id": 83,
+        "type": "Remap",
+        "x": 1658,
+        "y": 164,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.9
+        }
+      },
+      {
+        "id": 84,
+        "type": "Remap",
+        "x": 1658,
+        "y": 528,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -0.11
+        }
+      },
+      {
+        "id": 85,
+        "type": "Add",
+        "x": 1898,
+        "y": 593,
+        "data": {}
+      },
+      {
+        "id": 86,
+        "type": "MakeVec2",
+        "x": 2138,
+        "y": 379,
+        "data": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 87,
+        "type": "FBM",
+        "x": 2378,
+        "y": 304,
+        "data": {
+          "scale": 1,
+          "octaves": 3,
+          "lacunarity": 2.3,
+          "gain": 0.6,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 88,
+        "type": "Smoothstep",
+        "x": 2618,
+        "y": 384,
+        "data": {
+          "edge0": 0.3,
+          "edge1": 0.8,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 89,
+        "type": "Remap",
+        "x": 2858,
+        "y": 344,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.25,
+          "outMax": 1.7
+        }
+      },
+      {
+        "id": 90,
+        "type": "Remap",
+        "x": 2378,
+        "y": 486,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 1.1
+        }
+      },
+      {
+        "id": 91,
+        "type": "MakeVec2",
+        "x": 2618,
+        "y": 522,
+        "data": {
+          "x": 0,
+          "y": 9.4
+        }
+      },
+      {
+        "id": 92,
+        "type": "FBM",
+        "x": 2858,
+        "y": 526,
+        "data": {
+          "scale": 1,
+          "octaves": 2,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 93,
+        "type": "Smoothstep",
+        "x": 3098,
+        "y": 550,
+        "data": {
+          "edge0": 0.3,
+          "edge1": 0.55,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 94,
+        "type": "Multiply",
+        "x": 2858,
+        "y": 176,
+        "data": {}
+      },
+      {
+        "id": 95,
+        "type": "Multiply",
+        "x": 3098,
+        "y": 284,
+        "data": {}
+      },
+      {
+        "id": 96,
+        "type": "Multiply",
+        "x": 3338,
+        "y": 353,
+        "data": {}
+      },
+      {
+        "id": 97,
+        "type": "Remap",
+        "x": 3578,
+        "y": 171,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 1
+        }
+      },
+      {
+        "id": 98,
+        "type": "Divide",
+        "x": 2858,
+        "y": 260,
+        "data": {}
+      },
+      {
+        "id": 99,
+        "type": "Remap",
+        "x": 3098,
+        "y": 368,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.45
+        }
+      },
+      {
+        "id": 100,
+        "type": "Saturate",
+        "x": 3338,
+        "y": 437,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 101,
+        "type": "ColorRamp",
+        "x": 3578,
+        "y": 437,
+        "data": {}
+      },
+      {
+        "id": 102,
+        "type": "Multiply",
+        "x": 3818,
+        "y": 262,
+        "data": {}
+      },
+      {
+        "id": 103,
+        "type": "Abs",
+        "x": 2858,
+        "y": 82,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 104,
+        "type": "Remap",
+        "x": 3098,
+        "y": 102,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -70
+        }
+      },
+      {
+        "id": 105,
+        "type": "Exp",
+        "x": 3338,
+        "y": 259,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 106,
+        "type": "Multiply",
+        "x": 3578,
+        "y": 353,
+        "data": {}
+      },
+      {
+        "id": 107,
+        "type": "Remap",
+        "x": 3818,
+        "y": 346,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.3
+        }
+      },
+      {
+        "id": 108,
+        "type": "Remap",
+        "x": 80,
+        "y": 213,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.42
+        }
+      },
+      {
+        "id": 109,
+        "type": "Remap",
+        "x": 80,
+        "y": 395,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.018
+        }
+      },
+      {
+        "id": 110,
+        "type": "Add",
+        "x": 320,
+        "y": 353,
+        "data": {}
+      },
+      {
+        "id": 111,
+        "type": "MakeVec2",
+        "x": 458,
+        "y": 337,
+        "data": {
+          "x": 0,
+          "y": 5.3
+        }
+      },
+      {
+        "id": 112,
+        "type": "FBM",
+        "x": 698,
+        "y": 304,
+        "data": {
+          "scale": 1,
+          "octaves": 3,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 113,
+        "type": "Remap",
+        "x": 938,
+        "y": 213,
+        "data": {
+          "x": 0.5,
+          "inMin": 0.25,
+          "inMax": 0.75,
+          "outMin": 0.42,
+          "outMax": 0.8
+        }
+      },
+      {
+        "id": 114,
+        "type": "Remap",
+        "x": 938,
+        "y": 395,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.22
+        }
+      },
+      {
+        "id": 115,
+        "type": "Add",
+        "x": 1178,
+        "y": 171,
+        "data": {}
+      },
+      {
+        "id": 116,
+        "type": "Remap",
+        "x": 1178,
+        "y": 255,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.08,
+          "outMax": 0.08
+        }
+      },
+      {
+        "id": 117,
+        "type": "Add",
+        "x": 1418,
+        "y": 295,
+        "data": {}
+      },
+      {
+        "id": 118,
+        "type": "Subtract",
+        "x": 1658,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 119,
+        "type": "Smoothstep",
+        "x": 2618,
+        "y": 152,
+        "data": {
+          "edge0": -0.015,
+          "edge1": 0.05,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 120,
+        "type": "Max",
+        "x": 1898,
+        "y": 113,
+        "data": {
+          "a": 0,
+          "b": 0
+        }
+      },
+      {
+        "id": 121,
+        "type": "Remap",
+        "x": 1178,
+        "y": 437,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 2.2
+        }
+      },
+      {
+        "id": 122,
+        "type": "MakeVec2",
+        "x": 1418,
+        "y": 379,
+        "data": {
+          "x": 0,
+          "y": 8.4
+        }
+      },
+      {
+        "id": 123,
+        "type": "FBM",
+        "x": 1658,
+        "y": 346,
+        "data": {
+          "scale": 1,
+          "octaves": 2,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 124,
+        "type": "Remap",
+        "x": 1898,
+        "y": 411,
+        "data": {
+          "x": 0.5,
+          "inMin": 0.3,
+          "inMax": 0.7,
+          "outMin": 0.08,
+          "outMax": 0.28
+        }
+      },
+      {
+        "id": 125,
+        "type": "Divide",
+        "x": 2138,
+        "y": 295,
+        "data": {}
+      },
+      {
+        "id": 126,
+        "type": "Remap",
+        "x": 2378,
+        "y": 122,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -1
+        }
+      },
+      {
+        "id": 127,
+        "type": "Exp",
+        "x": 2618,
+        "y": 290,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 128,
+        "type": "Remap",
+        "x": 1898,
+        "y": 229,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 44
+        }
+      },
+      {
+        "id": 129,
+        "type": "Remap",
+        "x": 1658,
+        "y": 164,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.9
+        }
+      },
+      {
+        "id": 130,
+        "type": "Remap",
+        "x": 1658,
+        "y": 528,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -0.11
+        }
+      },
+      {
+        "id": 131,
+        "type": "Add",
+        "x": 1898,
+        "y": 593,
+        "data": {}
+      },
+      {
+        "id": 132,
+        "type": "MakeVec2",
+        "x": 2138,
+        "y": 379,
+        "data": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 133,
+        "type": "FBM",
+        "x": 2378,
+        "y": 304,
+        "data": {
+          "scale": 1,
+          "octaves": 3,
+          "lacunarity": 2.3,
+          "gain": 0.6,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 134,
+        "type": "Smoothstep",
+        "x": 2618,
+        "y": 384,
+        "data": {
+          "edge0": 0.3,
+          "edge1": 0.8,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 135,
+        "type": "Remap",
+        "x": 2858,
+        "y": 344,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.25,
+          "outMax": 1.7
+        }
+      },
+      {
+        "id": 136,
+        "type": "Remap",
+        "x": 2378,
+        "y": 486,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 1.1
+        }
+      },
+      {
+        "id": 137,
+        "type": "MakeVec2",
+        "x": 2618,
+        "y": 522,
+        "data": {
+          "x": 0,
+          "y": 13
+        }
+      },
+      {
+        "id": 138,
+        "type": "FBM",
+        "x": 2858,
+        "y": 526,
+        "data": {
+          "scale": 1,
+          "octaves": 2,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 139,
+        "type": "Smoothstep",
+        "x": 3098,
+        "y": 550,
+        "data": {
+          "edge0": 0.5,
+          "edge1": 0.68,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 140,
+        "type": "Multiply",
+        "x": 2858,
+        "y": 176,
+        "data": {}
+      },
+      {
+        "id": 141,
+        "type": "Multiply",
+        "x": 3098,
+        "y": 284,
+        "data": {}
+      },
+      {
+        "id": 142,
+        "type": "Multiply",
+        "x": 3338,
+        "y": 353,
+        "data": {}
+      },
+      {
+        "id": 143,
+        "type": "Remap",
+        "x": 3578,
+        "y": 171,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.45
+        }
+      },
+      {
+        "id": 144,
+        "type": "Divide",
+        "x": 2858,
+        "y": 260,
+        "data": {}
+      },
+      {
+        "id": 145,
+        "type": "Remap",
+        "x": 3098,
+        "y": 368,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.45
+        }
+      },
+      {
+        "id": 146,
+        "type": "Saturate",
+        "x": 3338,
+        "y": 437,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 147,
+        "type": "ColorRamp",
+        "x": 3578,
+        "y": 437,
+        "data": {}
+      },
+      {
+        "id": 148,
+        "type": "Multiply",
+        "x": 3818,
+        "y": 262,
+        "data": {}
+      },
+      {
+        "id": 149,
+        "type": "Abs",
+        "x": 2858,
+        "y": 82,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 150,
+        "type": "Remap",
+        "x": 3098,
+        "y": 102,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -70
+        }
+      },
+      {
+        "id": 151,
+        "type": "Exp",
+        "x": 3338,
+        "y": 259,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 152,
+        "type": "Multiply",
+        "x": 3578,
+        "y": 353,
+        "data": {}
+      },
+      {
+        "id": 153,
+        "type": "Remap",
+        "x": 3818,
+        "y": 346,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.135
+        }
+      },
+      {
+        "id": 154,
+        "type": "Add",
+        "x": 818,
+        "y": 277,
+        "data": {}
+      },
+      {
+        "id": 155,
+        "type": "Multiply",
+        "x": 1096,
+        "y": 343,
+        "data": {}
+      },
+      {
+        "id": 156,
+        "type": "Add",
+        "x": 818,
+        "y": 373,
+        "data": {}
+      },
+      {
+        "id": 157,
+        "type": "Param",
+        "x": 818,
+        "y": 469,
+        "data": {
+          "label": "Fringe glow",
+          "kind": "color",
+          "value": [
+            1,
+            0.25,
+            0.55
+          ],
+          "default": [
+            1,
+            0.25,
+            0.55
+          ],
+          "alpha": false,
+          "section": "Aurora",
+          "order": 5,
+          "description": "Tint of the soft glow added along the curtain fringes."
+        }
+      },
+      {
+        "id": 158,
+        "type": "Multiply",
+        "x": 1096,
+        "y": 439,
+        "data": {}
+      },
+      {
+        "id": 159,
+        "type": "Add",
+        "x": 938,
+        "y": 254,
+        "data": {}
+      },
+      {
+        "id": 160,
+        "type": "Add",
+        "x": 1096,
+        "y": 254,
+        "data": {}
+      },
+      {
+        "id": 161,
+        "type": "Add",
+        "x": 1254,
+        "y": 254,
+        "data": {}
+      },
+      {
+        "id": 162,
+        "type": "MakeVec2",
+        "x": 80,
+        "y": 337,
+        "data": {
+          "x": 0,
+          "y": 7.3
+        }
+      },
+      {
+        "id": 163,
+        "type": "FBM",
+        "x": 320,
+        "y": 304,
+        "data": {
+          "scale": 1.9,
+          "octaves": 6,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 164,
+        "type": "Remap",
+        "x": 560,
+        "y": 304,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -1,
+          "outMax": 1
+        }
+      },
+      {
+        "id": 165,
+        "type": "Abs",
+        "x": 800,
+        "y": 348,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 166,
+        "type": "OneMinus",
+        "x": 1040,
+        "y": 348,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 167,
+        "type": "Pow",
+        "x": 1280,
+        "y": 337,
+        "data": {
+          "a": 1,
+          "b": 1.15
+        }
+      },
+      {
+        "id": 168,
+        "type": "Remap",
+        "x": 1520,
+        "y": 304,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.31,
+          "outMax": 0
+        }
+      },
+      {
+        "id": 169,
+        "type": "Remap",
+        "x": 2960,
+        "y": 80,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.0022,
+          "outMax": 0.9978
+        }
+      },
+      {
+        "id": 170,
+        "type": "Remap",
+        "x": 2960,
+        "y": 262,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.0022,
+          "outMax": 1.0022
+        }
+      },
+      {
+        "id": 171,
+        "type": "Smoothstep",
+        "x": 3200,
+        "y": 242,
+        "data": {
+          "edge0": 0,
+          "edge1": 1,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 172,
+        "type": "OneMinus",
+        "x": 3440,
+        "y": 306,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 173,
+        "type": "Subtract",
+        "x": 1760,
+        "y": 171,
+        "data": {}
+      },
+      {
+        "id": 174,
+        "type": "Max",
+        "x": 2000,
+        "y": 279,
+        "data": {
+          "a": 0,
+          "b": 0
+        }
+      },
+      {
+        "id": 175,
+        "type": "MakeVec2",
+        "x": 560,
+        "y": 422,
+        "data": {
+          "x": 0,
+          "y": 3.1
+        }
+      },
+      {
+        "id": 176,
+        "type": "FBM",
+        "x": 800,
+        "y": 444,
+        "data": {
+          "scale": 1.7,
+          "octaves": 7,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 177,
+        "type": "Remap",
+        "x": 1040,
+        "y": 422,
+        "data": {
+          "x": 0.5,
+          "inMin": 0.2,
+          "inMax": 0.8,
+          "outMin": -0.36,
+          "outMax": -0.18
+        }
+      },
+      {
+        "id": 178,
+        "type": "Remap",
+        "x": 80,
+        "y": 262,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.62,
+          "outMax": 0.38
+        }
+      },
+      {
+        "id": 179,
+        "type": "Remap",
+        "x": 320,
+        "y": 262,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 1
+        }
+      },
+      {
+        "id": 180,
+        "type": "Smoothstep",
+        "x": 560,
+        "y": 168,
+        "data": {
+          "edge0": 0,
+          "edge1": 0.55,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 181,
+        "type": "Remap",
+        "x": 800,
+        "y": 80,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.5
+        }
+      },
+      {
+        "id": 182,
+        "type": "MakeVec2",
+        "x": 560,
+        "y": 306,
+        "data": {
+          "x": 0,
+          "y": 5.300000000000001
+        }
+      },
+      {
+        "id": 183,
+        "type": "FBM",
+        "x": 800,
+        "y": 262,
+        "data": {
+          "scale": 5.5,
+          "octaves": 7,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 184,
+        "type": "Remap",
+        "x": 1040,
+        "y": 240,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.2,
+          "outMax": 0.2
+        }
+      },
+      {
+        "id": 185,
+        "type": "Smoothstep",
+        "x": 1040,
+        "y": 102,
+        "data": {
+          "edge0": 0,
+          "edge1": 0.35,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 186,
+        "type": "Multiply",
+        "x": 1280,
+        "y": 269,
+        "data": {}
+      },
+      {
+        "id": 187,
+        "type": "Add",
+        "x": 1280,
+        "y": 353,
+        "data": {}
+      },
+      {
+        "id": 188,
+        "type": "Add",
+        "x": 1418,
+        "y": 311,
+        "data": {}
+      },
+      {
+        "id": 189,
+        "type": "Remap",
+        "x": 2414,
+        "y": 80,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.0022,
+          "outMax": 0.9978
+        }
+      },
+      {
+        "id": 190,
+        "type": "Remap",
+        "x": 2414,
+        "y": 262,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.0022,
+          "outMax": 1.0022
+        }
+      },
+      {
+        "id": 191,
+        "type": "Smoothstep",
+        "x": 2654,
+        "y": 242,
+        "data": {
+          "edge0": 0,
+          "edge1": 1,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 192,
+        "type": "OneMinus",
+        "x": 2894,
+        "y": 264,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 193,
+        "type": "Subtract",
+        "x": 1556,
+        "y": 311,
+        "data": {}
+      },
+      {
+        "id": 194,
+        "type": "Max",
+        "x": 1694,
+        "y": 295,
+        "data": {
+          "a": 0,
+          "b": 0
+        }
+      },
+      {
+        "id": 195,
+        "type": "MakeVec2",
+        "x": 560,
+        "y": 474,
+        "data": {
+          "x": 0,
+          "y": 11.7
+        }
+      },
+      {
+        "id": 196,
+        "type": "FBM",
+        "x": 800,
+        "y": 496,
+        "data": {
+          "scale": 1.3,
+          "octaves": 8,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 197,
+        "type": "Remap",
+        "x": 1040,
+        "y": 474,
+        "data": {
+          "x": 0.5,
+          "inMin": 0.2,
+          "inMax": 0.8,
+          "outMin": -0.34,
+          "outMax": -0.24
+        }
+      },
+      {
+        "id": 198,
+        "type": "Remap",
+        "x": 80,
+        "y": 314,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.66,
+          "outMax": 1.6600000000000001
+        }
+      },
+      {
+        "id": 199,
+        "type": "Remap",
+        "x": 320,
+        "y": 314,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -1
+        }
+      },
+      {
+        "id": 200,
+        "type": "Smoothstep",
+        "x": 560,
+        "y": 220,
+        "data": {
+          "edge0": 0,
+          "edge1": 0.45,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 201,
+        "type": "Remap",
+        "x": 800,
+        "y": 132,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.82
+        }
+      },
+      {
+        "id": 202,
+        "type": "MakeVec2",
+        "x": 560,
+        "y": 358,
+        "data": {
+          "x": 0,
+          "y": 13.899999999999999
+        }
+      },
+      {
+        "id": 203,
+        "type": "FBM",
+        "x": 800,
+        "y": 314,
+        "data": {
+          "scale": 5.5,
+          "octaves": 7,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 204,
+        "type": "Remap",
+        "x": 1040,
+        "y": 292,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.325,
+          "outMax": 0.325
+        }
+      },
+      {
+        "id": 205,
+        "type": "Smoothstep",
+        "x": 1040,
+        "y": 154,
+        "data": {
+          "edge0": 0,
+          "edge1": 0.35,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 206,
+        "type": "Multiply",
+        "x": 1280,
+        "y": 321,
+        "data": {}
+      },
+      {
+        "id": 207,
+        "type": "Add",
+        "x": 1280,
+        "y": 405,
+        "data": {}
+      },
+      {
+        "id": 208,
+        "type": "Add",
+        "x": 1418,
+        "y": 363,
+        "data": {}
+      },
+      {
+        "id": 209,
+        "type": "Remap",
+        "x": 2654,
+        "y": 80,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": -0.0022,
+          "outMax": 0.9978
+        }
+      },
+      {
+        "id": 210,
+        "type": "Remap",
+        "x": 2654,
+        "y": 262,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.0022,
+          "outMax": 1.0022
+        }
+      },
+      {
+        "id": 211,
+        "type": "Smoothstep",
+        "x": 2894,
+        "y": 252,
+        "data": {
+          "edge0": 0,
+          "edge1": 1,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 212,
+        "type": "OneMinus",
+        "x": 3134,
+        "y": 316,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 213,
+        "type": "Subtract",
+        "x": 1556,
+        "y": 363,
+        "data": {}
+      },
+      {
+        "id": 214,
+        "type": "Max",
+        "x": 1694,
+        "y": 165,
+        "data": {
+          "a": 0,
+          "b": 0
+        }
+      },
+      {
+        "id": 215,
+        "type": "Color",
+        "x": 80,
+        "y": 198,
+        "data": {
+          "r": 0.008,
+          "g": 0.015,
+          "b": 0.026
+        }
+      },
+      {
+        "id": 216,
+        "type": "Color",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "r": 0.008,
+          "g": 0.015,
+          "b": 0.026
+        }
+      },
+      {
+        "id": 217,
+        "type": "Color",
+        "x": 80,
+        "y": 316,
+        "data": {
+          "r": 0.002,
+          "g": 0.0035,
+          "b": 0.006
+        }
+      },
+      {
+        "id": 218,
+        "type": "Param",
+        "x": 80,
+        "y": 434,
+        "data": {
+          "label": "Ridge light",
+          "kind": "color",
+          "value": [
+            0.1,
+            0.45,
+            0.35
+          ],
+          "default": [
+            0.1,
+            0.45,
+            0.35
+          ],
+          "alpha": false,
+          "section": "Scene",
+          "order": 8,
+          "description": "Aurora light catching the snow and rims of the three ridges."
+        }
+      },
+      {
+        "id": 219,
+        "type": "Color",
+        "x": 80,
+        "y": 554,
+        "data": {
+          "r": 0.05,
+          "g": 0.13,
+          "b": 0.12
+        }
+      },
+      {
+        "id": 220,
+        "type": "Remap",
+        "x": 1760,
+        "y": 255,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 12
+        }
+      },
+      {
+        "id": 221,
+        "type": "Remap",
+        "x": 1760,
+        "y": 437,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 7
+        }
+      },
+      {
+        "id": 222,
+        "type": "MakeVec2",
+        "x": 2000,
+        "y": 395,
+        "data": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 223,
+        "type": "FBM",
+        "x": 2240,
+        "y": 395,
+        "data": {
+          "scale": 1,
+          "octaves": 4,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 224,
+        "type": "Smoothstep",
+        "x": 2480,
+        "y": 464,
+        "data": {
+          "edge0": 0.45,
+          "edge1": 0.65,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 225,
+        "type": "Remap",
+        "x": 2240,
+        "y": 213,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -14
+        }
+      },
+      {
+        "id": 226,
+        "type": "Exp",
+        "x": 2480,
+        "y": 188,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 227,
+        "type": "Multiply",
+        "x": 2720,
+        "y": 306,
+        "data": {}
+      },
+      {
+        "id": 228,
+        "type": "Multiply",
+        "x": 2960,
+        "y": 444,
+        "data": {}
+      },
+      {
+        "id": 229,
+        "type": "Remap",
+        "x": 2480,
+        "y": 282,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -140
+        }
+      },
+      {
+        "id": 230,
+        "type": "Exp",
+        "x": 2720,
+        "y": 390,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 231,
+        "type": "Remap",
+        "x": 2960,
+        "y": 528,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.55
+        }
+      },
+      {
+        "id": 232,
+        "type": "Multiply",
+        "x": 3200,
+        "y": 464,
+        "data": {}
+      },
+      {
+        "id": 233,
+        "type": "Add",
+        "x": 3200,
+        "y": 380,
+        "data": {}
+      },
+      {
+        "id": 234,
+        "type": "Add",
+        "x": 3440,
+        "y": 400,
+        "data": {}
+      },
+      {
+        "id": 235,
+        "type": "Mix",
+        "x": 3680,
+        "y": 326,
+        "data": {
+          "a": 0,
+          "b": 1,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 236,
+        "type": "Remap",
+        "x": 80,
+        "y": 140,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.3,
+          "outMax": 1.3
+        }
+      },
+      {
+        "id": 237,
+        "type": "Abs",
+        "x": 320,
+        "y": 184,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 238,
+        "type": "Remap",
+        "x": 560,
+        "y": 140,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -16
+        }
+      },
+      {
+        "id": 239,
+        "type": "Exp",
+        "x": 800,
+        "y": 184,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 240,
+        "type": "Param",
+        "x": 1040,
+        "y": 80,
+        "data": {
+          "label": "Horizon glow",
+          "kind": "color",
+          "value": [
+            0.018,
+            0.055,
+            0.058
+          ],
+          "default": [
+            0.018,
+            0.055,
+            0.058
+          ],
+          "alpha": false,
+          "section": "Scene",
+          "order": 9,
+          "description": "Glow along the horizon behind the mountains."
+        }
+      },
+      {
+        "id": 241,
+        "type": "Multiply",
+        "x": 1298,
+        "y": 147,
+        "data": {}
+      },
+      {
+        "id": 242,
+        "type": "Add",
+        "x": 1436,
+        "y": 147,
+        "data": {}
+      },
+      {
+        "id": 243,
+        "type": "Remap",
+        "x": 1934,
+        "y": 262,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -80
+        }
+      },
+      {
+        "id": 244,
+        "type": "Exp",
+        "x": 2174,
+        "y": 306,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 245,
+        "type": "Remap",
+        "x": 2414,
+        "y": 444,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.45
+        }
+      },
+      {
+        "id": 246,
+        "type": "Multiply",
+        "x": 2654,
+        "y": 380,
+        "data": {}
+      },
+      {
+        "id": 247,
+        "type": "Add",
+        "x": 2894,
+        "y": 358,
+        "data": {}
+      },
+      {
+        "id": 248,
+        "type": "Mix",
+        "x": 3134,
+        "y": 284,
+        "data": {
+          "a": 0,
+          "b": 1,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 249,
+        "type": "Remap",
+        "x": 1040,
+        "y": 200,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.35
+        }
+      },
+      {
+        "id": 250,
+        "type": "Multiply",
+        "x": 1298,
+        "y": 231,
+        "data": {}
+      },
+      {
+        "id": 251,
+        "type": "Add",
+        "x": 1436,
+        "y": 231,
+        "data": {}
+      },
+      {
+        "id": 252,
+        "type": "Remap",
+        "x": 1934,
+        "y": 256,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -60
+        }
+      },
+      {
+        "id": 253,
+        "type": "Exp",
+        "x": 2174,
+        "y": 267,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 254,
+        "type": "Remap",
+        "x": 2414,
+        "y": 154,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.3
+        }
+      },
+      {
+        "id": 255,
+        "type": "Multiply",
+        "x": 2654,
+        "y": 444,
+        "data": {}
+      },
+      {
+        "id": 256,
+        "type": "Add",
+        "x": 2894,
+        "y": 390,
+        "data": {}
+      },
+      {
+        "id": 257,
+        "type": "Remap",
+        "x": 1694,
+        "y": 281,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 9
+        }
+      },
+      {
+        "id": 258,
+        "type": "Remap",
+        "x": 1694,
+        "y": 463,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 3
+        }
+      },
+      {
+        "id": 259,
+        "type": "MakeVec2",
+        "x": 1934,
+        "y": 438,
+        "data": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 260,
+        "type": "FBM",
+        "x": 2174,
+        "y": 361,
+        "data": {
+          "scale": 1,
+          "octaves": 5,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 261,
+        "type": "Remap",
+        "x": 2414,
+        "y": 336,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.022
+        }
+      },
+      {
+        "id": 262,
+        "type": "Smoothstep",
+        "x": 2414,
+        "y": 518,
+        "data": {
+          "edge0": -0.3,
+          "edge1": 0.6,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 263,
+        "type": "Multiply",
+        "x": 2654,
+        "y": 528,
+        "data": {}
+      },
+      {
+        "id": 264,
+        "type": "Color",
+        "x": 2654,
+        "y": 612,
+        "data": {
+          "r": 0.35,
+          "g": 0.75,
+          "b": 0.8
+        }
+      },
+      {
+        "id": 265,
+        "type": "Multiply",
+        "x": 2894,
+        "y": 474,
+        "data": {}
+      },
+      {
+        "id": 266,
+        "type": "Add",
+        "x": 3134,
+        "y": 410,
+        "data": {}
+      },
+      {
+        "id": 267,
+        "type": "Mix",
+        "x": 3374,
+        "y": 336,
+        "data": {
+          "a": 0,
+          "b": 1,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 268,
+        "type": "Smoothstep",
+        "x": 80,
+        "y": 84,
+        "data": {
+          "edge0": 0,
+          "edge1": 0.65,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 269,
+        "type": "Remap",
+        "x": 338,
+        "y": 80,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.85,
+          "outMax": 0.32
+        }
+      },
+      {
+        "id": 270,
+        "type": "Param",
+        "x": 80,
+        "y": 222,
+        "data": {
+          "label": "Water tint",
+          "kind": "color",
+          "value": [
+            0.7,
+            0.88,
+            1
+          ],
+          "default": [
+            0.7,
+            0.88,
+            1
+          ],
+          "alpha": false,
+          "section": "Scene",
+          "order": 10,
+          "description": "Tint of the mirrored sky in the fjord."
+        }
+      },
+      {
+        "id": 271,
+        "type": "Multiply",
+        "x": 338,
+        "y": 262,
+        "data": {}
+      },
+      {
+        "id": 272,
+        "type": "Multiply",
+        "x": 578,
+        "y": 171,
+        "data": {}
+      },
+      {
+        "id": 273,
+        "type": "Mix",
+        "x": 852,
+        "y": 269,
+        "data": {
+          "a": 0,
+          "b": 1,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 274,
+        "type": "Remap",
+        "x": 320,
+        "y": 80,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0.3,
+          "outMax": 1.3
+        }
+      },
+      {
+        "id": 275,
+        "type": "Abs",
+        "x": 560,
+        "y": 199,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 276,
+        "type": "Remap",
+        "x": 800,
+        "y": 122,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": -22
+        }
+      },
+      {
+        "id": 277,
+        "type": "Exp",
+        "x": 1040,
+        "y": 188,
+        "data": {
+          "x": 0
+        }
+      },
+      {
+        "id": 278,
+        "type": "Remap",
+        "x": 80,
+        "y": 122,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 1.6
+        }
+      },
+      {
+        "id": 279,
+        "type": "Remap",
+        "x": 80,
+        "y": 304,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 0.04
+        }
+      },
+      {
+        "id": 280,
+        "type": "Add",
+        "x": 320,
+        "y": 262,
+        "data": {}
+      },
+      {
+        "id": 281,
+        "type": "Remap",
+        "x": 320,
+        "y": 346,
+        "data": {
+          "x": 0.5,
+          "inMin": 0,
+          "inMax": 1,
+          "outMin": 0,
+          "outMax": 9
+        }
+      },
+      {
+        "id": 282,
+        "type": "MakeVec2",
+        "x": 560,
+        "y": 293,
+        "data": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 283,
+        "type": "FBM",
+        "x": 800,
+        "y": 304,
+        "data": {
+          "scale": 1,
+          "octaves": 4,
+          "lacunarity": 2,
+          "gain": 0.5,
+          "p": "pt_uv()"
+        }
+      },
+      {
+        "id": 284,
+        "type": "Smoothstep",
+        "x": 1040,
+        "y": 282,
+        "data": {
+          "edge0": 0.3,
+          "edge1": 0.75,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 285,
+        "type": "Multiply",
+        "x": 1280,
+        "y": 202,
+        "data": {}
+      },
+      {
+        "id": 286,
+        "type": "Param",
+        "x": 1280,
+        "y": 286,
+        "data": {
+          "label": "Mist colour",
+          "kind": "color",
+          "value": [
+            0.05,
+            0.16,
+            0.14
+          ],
+          "default": [
+            0.05,
+            0.16,
+            0.14
+          ],
+          "alpha": false,
+          "section": "Scene",
+          "order": 11,
+          "description": "Colour of the low mist over the water."
+        }
+      },
+      {
+        "id": 287,
+        "type": "Multiply",
+        "x": 1538,
+        "y": 262,
+        "data": {}
+      },
+      {
+        "id": 288,
+        "type": "Add",
+        "x": 1676,
+        "y": 262,
+        "data": {}
+      },
+      {
+        "id": 289,
+        "type": "Param",
+        "x": 1044,
+        "y": 80,
+        "data": {
+          "label": "Exposure",
+          "kind": "float",
+          "value": 1.25,
+          "default": 1.25,
+          "min": 0.2,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 12,
+          "description": "ACES tone-mapping exposure."
+        }
+      },
+      {
+        "id": 290,
+        "type": "TonemapACES",
+        "x": 80,
+        "y": 127,
+        "data": {
+          "exposure": 1,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 291,
+        "type": "Vec3ToVec4",
+        "x": 320,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 292,
+        "type": "Feedback",
+        "x": 320,
+        "y": 196,
+        "data": {
+          "width": 1600,
+          "height": 1000
+        }
+      },
+      {
+        "id": 293,
+        "type": "TextureBlur",
+        "x": 80,
+        "y": 254,
+        "data": {
+          "radius": 2,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 294,
+        "type": "Grayscale",
+        "x": 320,
+        "y": 265,
+        "data": {}
+      },
+      {
+        "id": 295,
+        "type": "Smoothstep",
+        "x": 560,
+        "y": 254,
+        "data": {
+          "edge0": 0.15,
+          "edge1": 0.6,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 296,
+        "type": "Multiply",
+        "x": 800,
+        "y": 187,
+        "data": {}
+      },
+      {
+        "id": 297,
+        "type": "Vec3ToVec4",
+        "x": 1040,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 298,
+        "type": "Feedback",
+        "x": 800,
+        "y": 365,
+        "data": {
+          "width": 400,
+          "height": 250
+        }
+      },
+      {
+        "id": 299,
+        "type": "TextureBlur",
+        "x": 1040,
+        "y": 334,
+        "data": {
+          "radius": 2,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 300,
+        "type": "Feedback",
+        "x": 800,
+        "y": 271,
+        "data": {
+          "width": 100,
+          "height": 62
+        }
+      },
+      {
+        "id": 301,
+        "type": "TextureBlur",
+        "x": 1040,
+        "y": 196,
+        "data": {
+          "radius": 2,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 302,
+        "type": "Feedback",
+        "x": 1040,
+        "y": 472,
+        "data": {
+          "width": 32,
+          "height": 20
+        }
+      },
+      {
+        "id": 303,
+        "type": "UV",
+        "x": 80,
+        "y": 152,
+        "data": {
+          "mode": "stretch"
+        }
+      },
+      {
+        "id": 304,
+        "type": "Distance",
+        "x": 370,
+        "y": 141,
+        "data": {
+          "a": 0,
+          "b": 0.5
+        }
+      },
+      {
+        "id": 305,
+        "type": "Multiply",
+        "x": 630,
+        "y": 94,
+        "data": {}
+      },
+      {
+        "id": 306,
+        "type": "Param",
+        "x": 630,
+        "y": 190,
+        "data": {
+          "label": "Aberration",
+          "kind": "float",
+          "value": 0.014,
+          "default": 0.014,
+          "min": 0,
+          "max": 0.05,
+          "step": 0.001,
+          "scale": "linear",
+          "section": "Post",
+          "order": 13,
+          "description": "Chromatic aberration toward the edges."
+        }
+      },
+      {
+        "id": 307,
+        "type": "Multiply",
+        "x": 908,
+        "y": 157,
+        "data": {}
+      },
+      {
+        "id": 308,
+        "type": "ChromaticAberration",
+        "x": 1066,
+        "y": 119,
+        "data": {
+          "amount": 0.006,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()",
+          "center": "vec2(0.5)"
+        }
+      },
+      {
+        "id": 309,
+        "type": "TextureBlur",
+        "x": 80,
+        "y": 164,
+        "data": {
+          "radius": 1.5,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 310,
+        "type": "TextureBlur",
+        "x": 338,
+        "y": 122,
+        "data": {
+          "radius": 1.5,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 311,
+        "type": "TextureBlur",
+        "x": 596,
+        "y": 80,
+        "data": {
+          "radius": 1.5,
+          "tex": "u_camera",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 312,
+        "type": "Param",
+        "x": 80,
+        "y": 302,
+        "data": {
+          "label": "Bloom tight",
+          "kind": "float",
+          "value": 0.3,
+          "default": 0.3,
+          "min": 0,
+          "max": 1.5,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 14,
+          "description": "Smallest bloom level."
+        }
+      },
+      {
+        "id": 313,
+        "type": "Param",
+        "x": 338,
+        "y": 344,
+        "data": {
+          "label": "Bloom medium",
+          "kind": "float",
+          "value": 0.4,
+          "default": 0.4,
+          "min": 0,
+          "max": 1.5,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 15,
+          "description": "Middle bloom level."
+        }
+      },
+      {
+        "id": 314,
+        "type": "Param",
+        "x": 596,
+        "y": 218,
+        "data": {
+          "label": "Bloom wide",
+          "kind": "float",
+          "value": 0.35,
+          "default": 0.35,
+          "min": 0,
+          "max": 1.5,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Post",
+          "order": 16,
+          "description": "Widest bloom level."
+        }
+      },
+      {
+        "id": 315,
+        "type": "Multiply",
+        "x": 338,
+        "y": 260,
+        "data": {}
+      },
+      {
+        "id": 316,
+        "type": "Multiply",
+        "x": 596,
+        "y": 332,
+        "data": {}
+      },
+      {
+        "id": 317,
+        "type": "Multiply",
+        "x": 854,
+        "y": 206,
+        "data": {}
+      },
+      {
+        "id": 318,
+        "type": "Add",
+        "x": 596,
+        "y": 416,
+        "data": {}
+      },
+      {
+        "id": 319,
+        "type": "Add",
+        "x": 854,
+        "y": 290,
+        "data": {}
+      },
+      {
+        "id": 320,
+        "type": "Add",
+        "x": 992,
+        "y": 248,
+        "data": {}
+      },
+      {
+        "id": 321,
+        "type": "Grain",
+        "x": 1664,
+        "y": 130,
+        "data": {
+          "amount": 0.035,
+          "color": "vec3(1.0)",
+          "t": "u_time"
+        }
+      },
+      {
+        "id": 322,
+        "type": "Vignette",
+        "x": 1924,
+        "y": 119,
+        "data": {
+          "radius": 0.95,
+          "softness": 0.6,
+          "color": "vec3(1.0)",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 323,
+        "type": "Preview",
+        "x": 2188,
+        "y": 395,
+        "data": {},
+        "width": 300,
+        "height": 219.5,
+        "isBackground": true
+      },
+      {
+        "id": 329,
+        "type": "Param",
+        "x": 1044,
+        "y": 852,
+        "data": {
+          "label": "Music reactivity",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Music",
+          "order": 17,
+          "description": "0 = ignore the music. Curtains glow on the mids, ripple on the highs, stars twinkle on the beat."
+        }
+      },
+      {
+        "id": 330,
+        "type": "Audio",
+        "x": 80,
+        "y": 240,
+        "data": {}
+      },
+      {
+        "id": 331,
+        "type": "Smoothstep",
+        "x": 320,
+        "y": 80,
+        "data": {
+          "edge0": 0.02,
+          "edge1": 0.12,
+          "x": 0.5
+        }
+      },
+      {
+        "id": 332,
+        "type": "Multiply",
+        "x": 560,
+        "y": 247,
+        "data": {}
+      },
+      {
+        "id": 333,
+        "type": "Multiply",
+        "x": 698,
+        "y": 247,
+        "data": {}
+      },
+      {
+        "id": 334,
+        "type": "Mix",
+        "x": 836,
+        "y": 151,
+        "data": {
+          "a": 1,
+          "b": 1.3,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 335,
+        "type": "Multiply",
+        "x": 1076,
+        "y": 178,
+        "data": {}
+      },
+      {
+        "id": 336,
+        "type": "Multiply",
+        "x": 836,
+        "y": 289,
+        "data": {}
+      },
+      {
+        "id": 337,
+        "type": "Mix",
+        "x": 1076,
+        "y": 262,
+        "data": {
+          "a": 0.5,
+          "b": 0.56,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 338,
+        "type": "BeatEnvelope",
+        "x": 320,
+        "y": 218,
+        "data": {
+          "k": 4,
+          "shape": "ad",
+          "phase": "u_beatPhase",
+          "gate": "fade"
+        }
+      },
+      {
+        "id": 339,
+        "type": "Multiply",
+        "x": 698,
+        "y": 331,
+        "data": {}
+      },
+      {
+        "id": 340,
+        "type": "Mix",
+        "x": 836,
+        "y": 373,
+        "data": {
+          "a": 1,
+          "b": 2.4,
+          "t": 0.5
+        }
+      },
+      {
+        "id": 341,
+        "type": "Multiply",
+        "x": 1076,
+        "y": 400,
+        "data": {}
+      },
+      {
+        "id": 343,
+        "type": "Beat",
+        "x": 320,
+        "y": 356,
+        "data": {
+          "decay": 6,
+          "rate": 1,
+          "threshold": 0.5,
+          "clock": "stable",
+          "gate": "fade"
+        }
+      },
+      {
+        "id": 344,
+        "type": "Multiply",
+        "x": 560,
+        "y": 331,
+        "data": {}
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 1,
+        "fromOutput": 0,
+        "toId": 3,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 2,
+        "fromOutput": 0,
+        "toId": 3,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 4,
+        "toInput": 0,
+        "swizzle": ".y"
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 0,
+        "swizzle": ".y"
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 0,
+        "swizzle": ".x"
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 10,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 11,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 12,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 11,
+        "fromOutput": 0,
+        "toId": 13,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 12,
+        "fromOutput": 0,
+        "toId": 13,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 14,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 13,
+        "fromOutput": 0,
+        "toId": 14,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 14,
+        "fromOutput": 0,
+        "toId": 15,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 15,
+        "fromOutput": 0,
+        "toId": 16,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 17,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 16,
+        "fromOutput": 0,
+        "toId": 18,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 17,
+        "fromOutput": 0,
+        "toId": 18,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 19,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 20,
+        "toInput": 0,
+        "swizzle": ".y"
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 21,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 22,
+        "toInput": 0,
+        "swizzle": ".x"
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 22,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 23,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 23,
+        "fromOutput": 0,
+        "toId": 24,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 24,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 24,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 0,
+        "toId": 25,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 26,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 27,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 27,
+        "fromOutput": 0,
+        "toId": 28,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 28,
+        "fromOutput": 0,
+        "toId": 29,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 30,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 30,
+        "fromOutput": 0,
+        "toId": 31,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 30,
+        "fromOutput": 2,
+        "toId": 32,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 33,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 30,
+        "fromOutput": 2,
+        "toId": 34,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 33,
+        "fromOutput": 0,
+        "toId": 35,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 34,
+        "fromOutput": 0,
+        "toId": 35,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 35,
+        "fromOutput": 0,
+        "toId": 36,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 36,
+        "fromOutput": 0,
+        "toId": 37,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 31,
+        "fromOutput": 0,
+        "toId": 38,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 32,
+        "fromOutput": 0,
+        "toId": 38,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 38,
+        "fromOutput": 0,
+        "toId": 39,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 37,
+        "fromOutput": 0,
+        "toId": 39,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 25,
+        "fromOutput": 0,
+        "toId": 40,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 40,
+        "fromOutput": 0,
+        "toId": 41,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 40,
+        "fromOutput": 2,
+        "toId": 42,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 41,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 42,
+        "fromOutput": 0,
+        "toId": 43,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 39,
+        "fromOutput": 0,
+        "toId": 44,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 45,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 44,
+        "fromOutput": 0,
+        "toId": 46,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 45,
+        "fromOutput": 0,
+        "toId": 46,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 47,
+        "fromOutput": 0,
+        "toId": 48,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 46,
+        "fromOutput": 0,
+        "toId": 48,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 49,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 50,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 49,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 50,
+        "fromOutput": 0,
+        "toId": 51,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 52,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 53,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 52,
+        "fromOutput": 0,
+        "toId": 54,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 53,
+        "fromOutput": 0,
+        "toId": 54,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 51,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 54,
+        "fromOutput": 0,
+        "toId": 55,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 55,
+        "fromOutput": 0,
+        "toId": 56,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 62,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 63,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 62,
+        "fromOutput": 0,
+        "toId": 64,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 63,
+        "fromOutput": 0,
+        "toId": 64,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 64,
+        "fromOutput": 0,
+        "toId": 65,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 65,
+        "fromOutput": 0,
+        "toId": 66,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 66,
+        "fromOutput": 0,
+        "toId": 67,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 68,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 67,
+        "fromOutput": 0,
+        "toId": 69,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 68,
+        "fromOutput": 0,
+        "toId": 69,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 0,
+        "toId": 70,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 69,
+        "fromOutput": 0,
+        "toId": 71,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 70,
+        "fromOutput": 0,
+        "toId": 71,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 72,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 71,
+        "fromOutput": 0,
+        "toId": 72,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 72,
+        "fromOutput": 0,
+        "toId": 73,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 72,
+        "fromOutput": 0,
+        "toId": 74,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 1,
+        "toId": 75,
+        "toInput": 0,
+        "swizzle": ".x"
+      },
+      {
+        "fromId": 75,
+        "fromOutput": 0,
+        "toId": 76,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 76,
+        "fromOutput": 0,
+        "toId": 77,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 77,
+        "fromOutput": 0,
+        "toId": 78,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 74,
+        "fromOutput": 0,
+        "toId": 79,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 78,
+        "fromOutput": 0,
+        "toId": 79,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 79,
+        "fromOutput": 0,
+        "toId": 80,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 80,
+        "fromOutput": 0,
+        "toId": 81,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 1,
+        "toId": 82,
+        "toInput": 0,
+        "swizzle": ".x"
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 83,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 84,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 83,
+        "fromOutput": 0,
+        "toId": 85,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 84,
+        "fromOutput": 0,
+        "toId": 85,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 82,
+        "fromOutput": 0,
+        "toId": 86,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 85,
+        "fromOutput": 0,
+        "toId": 86,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 86,
+        "fromOutput": 0,
+        "toId": 87,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 87,
+        "fromOutput": 0,
+        "toId": 88,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 88,
+        "fromOutput": 0,
+        "toId": 89,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 1,
+        "toId": 90,
+        "toInput": 0,
+        "swizzle": ".x"
+      },
+      {
+        "fromId": 90,
+        "fromOutput": 0,
+        "toId": 91,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 91,
+        "fromOutput": 0,
+        "toId": 92,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 92,
+        "fromOutput": 0,
+        "toId": 93,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 73,
+        "fromOutput": 0,
+        "toId": 94,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 81,
+        "fromOutput": 0,
+        "toId": 94,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 94,
+        "fromOutput": 0,
+        "toId": 95,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 89,
+        "fromOutput": 0,
+        "toId": 95,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 95,
+        "fromOutput": 0,
+        "toId": 96,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 93,
+        "fromOutput": 0,
+        "toId": 96,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 96,
+        "fromOutput": 0,
+        "toId": 97,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 74,
+        "fromOutput": 0,
+        "toId": 98,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 78,
+        "fromOutput": 0,
+        "toId": 98,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 98,
+        "fromOutput": 0,
+        "toId": 99,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 99,
+        "fromOutput": 0,
+        "toId": 100,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 100,
+        "fromOutput": 0,
+        "toId": 101,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 57,
+        "fromOutput": 0,
+        "toId": 101,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 58,
+        "fromOutput": 0,
+        "toId": 101,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 59,
+        "fromOutput": 0,
+        "toId": 101,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 60,
+        "fromOutput": 0,
+        "toId": 101,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 101,
+        "fromOutput": 0,
+        "toId": 102,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 97,
+        "fromOutput": 0,
+        "toId": 102,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 72,
+        "fromOutput": 0,
+        "toId": 103,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 103,
+        "fromOutput": 0,
+        "toId": 104,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 104,
+        "fromOutput": 0,
+        "toId": 105,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 105,
+        "fromOutput": 0,
+        "toId": 106,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 93,
+        "fromOutput": 0,
+        "toId": 106,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 106,
+        "fromOutput": 0,
+        "toId": 107,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 108,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 109,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 108,
+        "fromOutput": 0,
+        "toId": 110,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 109,
+        "fromOutput": 0,
+        "toId": 110,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 110,
+        "fromOutput": 0,
+        "toId": 111,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 111,
+        "fromOutput": 0,
+        "toId": 112,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 112,
+        "fromOutput": 0,
+        "toId": 113,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 114,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 113,
+        "fromOutput": 0,
+        "toId": 115,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 114,
+        "fromOutput": 0,
+        "toId": 115,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 0,
+        "toId": 116,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 115,
+        "fromOutput": 0,
+        "toId": 117,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 116,
+        "fromOutput": 0,
+        "toId": 117,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 118,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 117,
+        "fromOutput": 0,
+        "toId": 118,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 118,
+        "fromOutput": 0,
+        "toId": 119,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 118,
+        "fromOutput": 0,
+        "toId": 120,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 1,
+        "toId": 121,
+        "toInput": 0,
+        "swizzle": ".x"
+      },
+      {
+        "fromId": 121,
+        "fromOutput": 0,
+        "toId": 122,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 122,
+        "fromOutput": 0,
+        "toId": 123,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 123,
+        "fromOutput": 0,
+        "toId": 124,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 120,
+        "fromOutput": 0,
+        "toId": 125,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 124,
+        "fromOutput": 0,
+        "toId": 125,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 125,
+        "fromOutput": 0,
+        "toId": 126,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 126,
+        "fromOutput": 0,
+        "toId": 127,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 1,
+        "toId": 128,
+        "toInput": 0,
+        "swizzle": ".x"
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 129,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 130,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 129,
+        "fromOutput": 0,
+        "toId": 131,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 130,
+        "fromOutput": 0,
+        "toId": 131,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 128,
+        "fromOutput": 0,
+        "toId": 132,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 131,
+        "fromOutput": 0,
+        "toId": 132,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 132,
+        "fromOutput": 0,
+        "toId": 133,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 133,
+        "fromOutput": 0,
+        "toId": 134,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 134,
+        "fromOutput": 0,
+        "toId": 135,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 56,
+        "fromOutput": 1,
+        "toId": 136,
+        "toInput": 0,
+        "swizzle": ".x"
+      },
+      {
+        "fromId": 136,
+        "fromOutput": 0,
+        "toId": 137,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 137,
+        "fromOutput": 0,
+        "toId": 138,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 138,
+        "fromOutput": 0,
+        "toId": 139,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 119,
+        "fromOutput": 0,
+        "toId": 140,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 127,
+        "fromOutput": 0,
+        "toId": 140,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 140,
+        "fromOutput": 0,
+        "toId": 141,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 135,
+        "fromOutput": 0,
+        "toId": 141,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 141,
+        "fromOutput": 0,
+        "toId": 142,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 139,
+        "fromOutput": 0,
+        "toId": 142,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 142,
+        "fromOutput": 0,
+        "toId": 143,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 120,
+        "fromOutput": 0,
+        "toId": 144,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 124,
+        "fromOutput": 0,
+        "toId": 144,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 144,
+        "fromOutput": 0,
+        "toId": 145,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 145,
+        "fromOutput": 0,
+        "toId": 146,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 146,
+        "fromOutput": 0,
+        "toId": 147,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 57,
+        "fromOutput": 0,
+        "toId": 147,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 58,
+        "fromOutput": 0,
+        "toId": 147,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 59,
+        "fromOutput": 0,
+        "toId": 147,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 60,
+        "fromOutput": 0,
+        "toId": 147,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 147,
+        "fromOutput": 0,
+        "toId": 148,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 143,
+        "fromOutput": 0,
+        "toId": 148,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 118,
+        "fromOutput": 0,
+        "toId": 149,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 149,
+        "fromOutput": 0,
+        "toId": 150,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 150,
+        "fromOutput": 0,
+        "toId": 151,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 151,
+        "fromOutput": 0,
+        "toId": 152,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 139,
+        "fromOutput": 0,
+        "toId": 152,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 152,
+        "fromOutput": 0,
+        "toId": 153,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 102,
+        "fromOutput": 0,
+        "toId": 154,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 148,
+        "fromOutput": 0,
+        "toId": 154,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 154,
+        "fromOutput": 0,
+        "toId": 155,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 107,
+        "fromOutput": 0,
+        "toId": 156,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 153,
+        "fromOutput": 0,
+        "toId": 156,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 157,
+        "fromOutput": 0,
+        "toId": 158,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 156,
+        "fromOutput": 0,
+        "toId": 158,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 29,
+        "fromOutput": 0,
+        "toId": 159,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 48,
+        "fromOutput": 0,
+        "toId": 159,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 159,
+        "fromOutput": 0,
+        "toId": 160,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 155,
+        "fromOutput": 0,
+        "toId": 160,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 160,
+        "fromOutput": 0,
+        "toId": 161,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 158,
+        "fromOutput": 0,
+        "toId": 161,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 162,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 162,
+        "fromOutput": 0,
+        "toId": 163,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 163,
+        "fromOutput": 0,
+        "toId": 164,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 164,
+        "fromOutput": 0,
+        "toId": 165,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 165,
+        "fromOutput": 0,
+        "toId": 166,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 166,
+        "fromOutput": 0,
+        "toId": 167,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 167,
+        "fromOutput": 0,
+        "toId": 168,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 168,
+        "fromOutput": 0,
+        "toId": 169,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 168,
+        "fromOutput": 0,
+        "toId": 170,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 169,
+        "fromOutput": 0,
+        "toId": 171,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 170,
+        "fromOutput": 0,
+        "toId": 171,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 171,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 171,
+        "fromOutput": 0,
+        "toId": 172,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 168,
+        "fromOutput": 0,
+        "toId": 173,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 173,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 173,
+        "fromOutput": 0,
+        "toId": 174,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 175,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 175,
+        "fromOutput": 0,
+        "toId": 176,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 176,
+        "fromOutput": 0,
+        "toId": 177,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 178,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 178,
+        "fromOutput": 0,
+        "toId": 179,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 179,
+        "fromOutput": 0,
+        "toId": 180,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 180,
+        "fromOutput": 0,
+        "toId": 181,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 182,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 182,
+        "fromOutput": 0,
+        "toId": 183,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 183,
+        "fromOutput": 0,
+        "toId": 184,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 181,
+        "fromOutput": 0,
+        "toId": 185,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 184,
+        "fromOutput": 0,
+        "toId": 186,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 185,
+        "fromOutput": 0,
+        "toId": 186,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 177,
+        "fromOutput": 0,
+        "toId": 187,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 181,
+        "fromOutput": 0,
+        "toId": 187,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 187,
+        "fromOutput": 0,
+        "toId": 188,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 186,
+        "fromOutput": 0,
+        "toId": 188,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 188,
+        "fromOutput": 0,
+        "toId": 189,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 188,
+        "fromOutput": 0,
+        "toId": 190,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 189,
+        "fromOutput": 0,
+        "toId": 191,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 190,
+        "fromOutput": 0,
+        "toId": 191,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 191,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 191,
+        "fromOutput": 0,
+        "toId": 192,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 188,
+        "fromOutput": 0,
+        "toId": 193,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 193,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 193,
+        "fromOutput": 0,
+        "toId": 194,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 195,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 195,
+        "fromOutput": 0,
+        "toId": 196,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 196,
+        "fromOutput": 0,
+        "toId": 197,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 198,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 198,
+        "fromOutput": 0,
+        "toId": 199,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 199,
+        "fromOutput": 0,
+        "toId": 200,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 200,
+        "fromOutput": 0,
+        "toId": 201,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 202,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 202,
+        "fromOutput": 0,
+        "toId": 203,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 203,
+        "fromOutput": 0,
+        "toId": 204,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 201,
+        "fromOutput": 0,
+        "toId": 205,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 204,
+        "fromOutput": 0,
+        "toId": 206,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 205,
+        "fromOutput": 0,
+        "toId": 206,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 197,
+        "fromOutput": 0,
+        "toId": 207,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 201,
+        "fromOutput": 0,
+        "toId": 207,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 207,
+        "fromOutput": 0,
+        "toId": 208,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 206,
+        "fromOutput": 0,
+        "toId": 208,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 208,
+        "fromOutput": 0,
+        "toId": 209,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 208,
+        "fromOutput": 0,
+        "toId": 210,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 209,
+        "fromOutput": 0,
+        "toId": 211,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 210,
+        "fromOutput": 0,
+        "toId": 211,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 211,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 211,
+        "fromOutput": 0,
+        "toId": 212,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 208,
+        "fromOutput": 0,
+        "toId": 213,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 213,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 213,
+        "fromOutput": 0,
+        "toId": 214,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 220,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 221,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 220,
+        "fromOutput": 0,
+        "toId": 222,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 221,
+        "fromOutput": 0,
+        "toId": 222,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 222,
+        "fromOutput": 0,
+        "toId": 223,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 223,
+        "fromOutput": 0,
+        "toId": 224,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 174,
+        "fromOutput": 0,
+        "toId": 225,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 225,
+        "fromOutput": 0,
+        "toId": 226,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 224,
+        "fromOutput": 0,
+        "toId": 227,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 226,
+        "fromOutput": 0,
+        "toId": 227,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 219,
+        "fromOutput": 0,
+        "toId": 228,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 227,
+        "fromOutput": 0,
+        "toId": 228,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 174,
+        "fromOutput": 0,
+        "toId": 229,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 229,
+        "fromOutput": 0,
+        "toId": 230,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 230,
+        "fromOutput": 0,
+        "toId": 231,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 218,
+        "fromOutput": 0,
+        "toId": 232,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 231,
+        "fromOutput": 0,
+        "toId": 232,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 215,
+        "fromOutput": 0,
+        "toId": 233,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 228,
+        "fromOutput": 0,
+        "toId": 233,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 233,
+        "fromOutput": 0,
+        "toId": 234,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 232,
+        "fromOutput": 0,
+        "toId": 234,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 161,
+        "fromOutput": 0,
+        "toId": 235,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 234,
+        "fromOutput": 0,
+        "toId": 235,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 172,
+        "fromOutput": 0,
+        "toId": 235,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 236,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 236,
+        "fromOutput": 0,
+        "toId": 237,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 237,
+        "fromOutput": 0,
+        "toId": 238,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 238,
+        "fromOutput": 0,
+        "toId": 239,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 240,
+        "fromOutput": 0,
+        "toId": 241,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 239,
+        "fromOutput": 0,
+        "toId": 241,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 235,
+        "fromOutput": 0,
+        "toId": 242,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 241,
+        "fromOutput": 0,
+        "toId": 242,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 194,
+        "fromOutput": 0,
+        "toId": 243,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 243,
+        "fromOutput": 0,
+        "toId": 244,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 244,
+        "fromOutput": 0,
+        "toId": 245,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 218,
+        "fromOutput": 0,
+        "toId": 246,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 245,
+        "fromOutput": 0,
+        "toId": 246,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 216,
+        "fromOutput": 0,
+        "toId": 247,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 246,
+        "fromOutput": 0,
+        "toId": 247,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 242,
+        "fromOutput": 0,
+        "toId": 248,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 247,
+        "fromOutput": 0,
+        "toId": 248,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 192,
+        "fromOutput": 0,
+        "toId": 248,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 239,
+        "fromOutput": 0,
+        "toId": 249,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 240,
+        "fromOutput": 0,
+        "toId": 250,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 249,
+        "fromOutput": 0,
+        "toId": 250,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 248,
+        "fromOutput": 0,
+        "toId": 251,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 250,
+        "fromOutput": 0,
+        "toId": 251,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 214,
+        "fromOutput": 0,
+        "toId": 252,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 252,
+        "fromOutput": 0,
+        "toId": 253,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 253,
+        "fromOutput": 0,
+        "toId": 254,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 218,
+        "fromOutput": 0,
+        "toId": 255,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 254,
+        "fromOutput": 0,
+        "toId": 255,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 217,
+        "fromOutput": 0,
+        "toId": 256,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 255,
+        "fromOutput": 0,
+        "toId": 256,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 0,
+        "toId": 257,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 258,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 257,
+        "fromOutput": 0,
+        "toId": 259,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 258,
+        "fromOutput": 0,
+        "toId": 259,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 259,
+        "fromOutput": 0,
+        "toId": 260,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 260,
+        "fromOutput": 0,
+        "toId": 261,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 26,
+        "fromOutput": 1,
+        "toId": 262,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 261,
+        "fromOutput": 0,
+        "toId": 263,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 262,
+        "fromOutput": 0,
+        "toId": 263,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 264,
+        "fromOutput": 0,
+        "toId": 265,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 263,
+        "fromOutput": 0,
+        "toId": 265,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 256,
+        "fromOutput": 0,
+        "toId": 266,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 265,
+        "fromOutput": 0,
+        "toId": 266,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 251,
+        "fromOutput": 0,
+        "toId": 267,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 266,
+        "fromOutput": 0,
+        "toId": 267,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 212,
+        "fromOutput": 0,
+        "toId": 267,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 268,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 268,
+        "fromOutput": 0,
+        "toId": 269,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 267,
+        "fromOutput": 0,
+        "toId": 271,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 270,
+        "fromOutput": 0,
+        "toId": 271,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 271,
+        "fromOutput": 0,
+        "toId": 272,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 269,
+        "fromOutput": 0,
+        "toId": 272,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 267,
+        "fromOutput": 0,
+        "toId": 273,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 272,
+        "fromOutput": 0,
+        "toId": 273,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 4,
+        "fromOutput": 0,
+        "toId": 273,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 274,
+        "toInput": 0,
+        "swizzle": ".y"
+      },
+      {
+        "fromId": 274,
+        "fromOutput": 0,
+        "toId": 275,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 275,
+        "fromOutput": 0,
+        "toId": 276,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 276,
+        "fromOutput": 0,
+        "toId": 277,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 278,
+        "toInput": 0,
+        "swizzle": ".x"
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 279,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 278,
+        "fromOutput": 0,
+        "toId": 280,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 279,
+        "fromOutput": 0,
+        "toId": 280,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 0,
+        "fromOutput": 0,
+        "toId": 281,
+        "toInput": 0,
+        "swizzle": ".y"
+      },
+      {
+        "fromId": 280,
+        "fromOutput": 0,
+        "toId": 282,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 281,
+        "fromOutput": 0,
+        "toId": 282,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 282,
+        "fromOutput": 0,
+        "toId": 283,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 283,
+        "fromOutput": 0,
+        "toId": 284,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 277,
+        "fromOutput": 0,
+        "toId": 285,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 284,
+        "fromOutput": 0,
+        "toId": 285,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 286,
+        "fromOutput": 0,
+        "toId": 287,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 285,
+        "fromOutput": 0,
+        "toId": 287,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 273,
+        "fromOutput": 0,
+        "toId": 288,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 287,
+        "fromOutput": 0,
+        "toId": 288,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 288,
+        "fromOutput": 0,
+        "toId": 290,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 289,
+        "fromOutput": 0,
+        "toId": 290,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 290,
+        "fromOutput": 0,
+        "toId": 291,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 291,
+        "fromOutput": 0,
+        "toId": 292,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 292,
+        "fromOutput": 0,
+        "toId": 293,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 293,
+        "fromOutput": 0,
+        "toId": 294,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 294,
+        "fromOutput": 1,
+        "toId": 295,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 293,
+        "fromOutput": 0,
+        "toId": 296,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 295,
+        "fromOutput": 0,
+        "toId": 296,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 296,
+        "fromOutput": 0,
+        "toId": 297,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 297,
+        "fromOutput": 0,
+        "toId": 298,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 298,
+        "fromOutput": 0,
+        "toId": 299,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 299,
+        "fromOutput": 0,
+        "toId": 300,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 300,
+        "fromOutput": 0,
+        "toId": 301,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 301,
+        "fromOutput": 0,
+        "toId": 302,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 303,
+        "fromOutput": 0,
+        "toId": 304,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 304,
+        "fromOutput": 0,
+        "toId": 305,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 304,
+        "fromOutput": 0,
+        "toId": 305,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 305,
+        "fromOutput": 0,
+        "toId": 307,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 306,
+        "fromOutput": 0,
+        "toId": 307,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 292,
+        "fromOutput": 0,
+        "toId": 308,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 307,
+        "fromOutput": 0,
+        "toId": 308,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 298,
+        "fromOutput": 0,
+        "toId": 309,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 300,
+        "fromOutput": 0,
+        "toId": 310,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 302,
+        "fromOutput": 0,
+        "toId": 311,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 309,
+        "fromOutput": 0,
+        "toId": 315,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 312,
+        "fromOutput": 0,
+        "toId": 315,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 310,
+        "fromOutput": 0,
+        "toId": 316,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 313,
+        "fromOutput": 0,
+        "toId": 316,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 311,
+        "fromOutput": 0,
+        "toId": 317,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 314,
+        "fromOutput": 0,
+        "toId": 317,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 308,
+        "fromOutput": 0,
+        "toId": 318,
+        "toInput": 0,
+        "swizzle": ".rgb"
+      },
+      {
+        "fromId": 315,
+        "fromOutput": 0,
+        "toId": 318,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 318,
+        "fromOutput": 0,
+        "toId": 319,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 316,
+        "fromOutput": 0,
+        "toId": 319,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 319,
+        "fromOutput": 0,
+        "toId": 320,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 317,
+        "fromOutput": 0,
+        "toId": 320,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 320,
+        "fromOutput": 0,
+        "toId": 321,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 321,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 321,
+        "fromOutput": 0,
+        "toId": 322,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 322,
+        "fromOutput": 0,
+        "toId": 323,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 330,
+        "fromOutput": 0,
+        "toId": 331,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 329,
+        "fromOutput": 0,
+        "toId": 332,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 331,
+        "fromOutput": 0,
+        "toId": 332,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 332,
+        "fromOutput": 0,
+        "toId": 333,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 330,
+        "fromOutput": 2,
+        "toId": 333,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 333,
+        "fromOutput": 0,
+        "toId": 334,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 61,
+        "fromOutput": 0,
+        "toId": 335,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 334,
+        "fromOutput": 0,
+        "toId": 335,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 335,
+        "fromOutput": 0,
+        "toId": 155,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 332,
+        "fromOutput": 0,
+        "toId": 336,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 330,
+        "fromOutput": 3,
+        "toId": 336,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 336,
+        "fromOutput": 0,
+        "toId": 337,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 337,
+        "fromOutput": 0,
+        "toId": 56,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 332,
+        "fromOutput": 0,
+        "toId": 339,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 344,
+        "fromOutput": 0,
+        "toId": 339,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 339,
+        "fromOutput": 0,
+        "toId": 340,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 43,
+        "fromOutput": 0,
+        "toId": 341,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 340,
+        "fromOutput": 0,
+        "toId": 341,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 341,
+        "fromOutput": 0,
+        "toId": 44,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 338,
+        "fromOutput": 0,
+        "toId": 344,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 343,
+        "fromOutput": 6,
+        "toId": 344,
+        "toInput": 1,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 345,
+    "panX": 20.119601328903656,
+    "panY": 272.6478405315614,
+    "zoom": 0.4485049833887043,
+    "groups": [
+      {
+        "id": "g1",
+        "name": "Water Reflection",
+        "parentId": null,
+        "nodeIds": [
+          4,
+          25,
+          26,
+          273,
+          325
+        ],
+        "x": 618,
+        "y": 412,
+        "color": "uv"
+      },
+      {
+        "id": "g2",
+        "name": "Ripple Distortion",
+        "parentId": "g1",
+        "nodeIds": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24
+        ],
+        "x": 80,
+        "y": 226
+      },
+      {
+        "id": "g3",
+        "name": "Water Tint",
+        "parentId": "g1",
+        "nodeIds": [
+          268,
+          269,
+          270,
+          271,
+          272
+        ],
+        "x": 504,
+        "y": 237
+      },
+      {
+        "id": "g4",
+        "name": "Sky & Stars",
+        "parentId": null,
+        "nodeIds": [
+          27,
+          28,
+          29,
+          159,
+          160,
+          161
+        ],
+        "x": 1044,
+        "y": 440,
+        "color": "color"
+      },
+      {
+        "id": "g5",
+        "name": "Stars",
+        "parentId": "g4",
+        "nodeIds": [
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48
+        ],
+        "x": 600,
+        "y": 281
+      },
+      {
+        "id": "g6",
+        "name": "Aurora",
+        "parentId": null,
+        "nodeIds": [
+          154,
+          155,
+          156,
+          157,
+          158,
+          326
+        ],
+        "x": 1830,
+        "y": 423,
+        "color": "noise"
+      },
+      {
+        "id": "g7",
+        "name": "Domain Warp",
+        "parentId": "g6",
+        "nodeIds": [
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56
+        ],
+        "x": 80,
+        "y": 197
+      },
+      {
+        "id": "g8",
+        "name": "Aurora Palette",
+        "parentId": "g6",
+        "nodeIds": [
+          57,
+          58,
+          59,
+          60
+        ],
+        "x": 80,
+        "y": 446
+      },
+      {
+        "id": "g9",
+        "name": "Curtain A",
+        "parentId": "g6",
+        "nodeIds": [
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89,
+          90,
+          91,
+          92,
+          93,
+          94,
+          95,
+          96,
+          97,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107
+        ],
+        "x": 478,
+        "y": 87
+      },
+      {
+        "id": "g10",
+        "name": "Curtain B",
+        "parentId": "g6",
+        "nodeIds": [
+          108,
+          109,
+          110,
+          111,
+          112,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125,
+          126,
+          127,
+          128,
+          129,
+          130,
+          131,
+          132,
+          133,
+          134,
+          135,
+          136,
+          137,
+          138,
+          139,
+          140,
+          141,
+          142,
+          143,
+          144,
+          145,
+          146,
+          147,
+          148,
+          149,
+          150,
+          151,
+          152,
+          153
+        ],
+        "x": 478,
+        "y": 446
+      },
+      {
+        "id": "g11",
+        "name": "Mountains",
+        "parentId": null,
+        "nodeIds": [
+          327
+        ],
+        "x": 1830,
+        "y": 694,
+        "color": "shape"
+      },
+      {
+        "id": "g12",
+        "name": "Far Ridge",
+        "parentId": "g11",
+        "nodeIds": [
+          162,
+          163,
+          164,
+          165,
+          166,
+          167,
+          168,
+          169,
+          170,
+          171,
+          172,
+          173,
+          174,
+          220,
+          221,
+          222,
+          223,
+          224,
+          225,
+          226,
+          227,
+          228,
+          229,
+          230,
+          231,
+          232,
+          233,
+          234,
+          235
+        ],
+        "x": 502,
+        "y": 87
+      },
+      {
+        "id": "g13",
+        "name": "Mid Ridge",
+        "parentId": "g11",
+        "nodeIds": [
+          175,
+          176,
+          177,
+          178,
+          179,
+          180,
+          181,
+          182,
+          183,
+          184,
+          185,
+          186,
+          187,
+          188,
+          189,
+          190,
+          191,
+          192,
+          193,
+          194,
+          243,
+          244,
+          245,
+          246,
+          247,
+          248
+        ],
+        "x": 1228,
+        "y": 98
+      },
+      {
+        "id": "g14",
+        "name": "Near Ridge",
+        "parentId": "g11",
+        "nodeIds": [
+          195,
+          196,
+          197,
+          198,
+          199,
+          200,
+          201,
+          202,
+          203,
+          204,
+          205,
+          206,
+          207,
+          208,
+          209,
+          210,
+          211,
+          212,
+          213,
+          214,
+          252,
+          253,
+          254,
+          255,
+          256,
+          257,
+          258,
+          259,
+          260,
+          261,
+          262,
+          263,
+          264,
+          265,
+          266,
+          267
+        ],
+        "x": 1570,
+        "y": 98
+      },
+      {
+        "id": "g15",
+        "name": "Mountain Palette",
+        "parentId": "g11",
+        "nodeIds": [
+          215,
+          216,
+          217,
+          218,
+          219
+        ],
+        "x": 80,
+        "y": 98
+      },
+      {
+        "id": "g16",
+        "name": "Horizon Glow",
+        "parentId": "g11",
+        "nodeIds": [
+          236,
+          237,
+          238,
+          239,
+          240,
+          241,
+          242,
+          249,
+          250,
+          251
+        ],
+        "x": 846,
+        "y": 120
+      },
+      {
+        "id": "g17",
+        "name": "Low Mist",
+        "parentId": null,
+        "nodeIds": [
+          274,
+          275,
+          276,
+          277,
+          278,
+          279,
+          280,
+          281,
+          282,
+          283,
+          284,
+          285,
+          286,
+          287,
+          288
+        ],
+        "x": 1044,
+        "y": 213,
+        "color": "effect"
+      },
+      {
+        "id": "g18",
+        "name": "Render Targets",
+        "parentId": null,
+        "nodeIds": [
+          328
+        ],
+        "x": 1414,
+        "y": 298,
+        "color": "logic"
+      },
+      {
+        "id": "g19",
+        "name": "Graded Frame",
+        "parentId": "g18",
+        "nodeIds": [
+          290,
+          291,
+          292
+        ],
+        "x": 80,
+        "y": 98
+      },
+      {
+        "id": "g20",
+        "name": "Bright Pass Chain",
+        "parentId": "g18",
+        "nodeIds": [
+          293,
+          294,
+          295,
+          296,
+          297,
+          298,
+          299,
+          300,
+          301,
+          302
+        ],
+        "x": 470,
+        "y": 87
+      },
+      {
+        "id": "g21",
+        "name": "Post FX",
+        "parentId": null,
+        "nodeIds": [
+          303,
+          304,
+          305,
+          306,
+          307,
+          308,
+          321,
+          322
+        ],
+        "x": 1830,
+        "y": 152,
+        "color": "effect"
+      },
+      {
+        "id": "g22",
+        "name": "Bloom",
+        "parentId": "g21",
+        "nodeIds": [
+          309,
+          310,
+          311,
+          312,
+          313,
+          314,
+          315,
+          316,
+          317,
+          318,
+          319,
+          320
+        ],
+        "x": 1326,
+        "y": 87
+      },
+      {
+        "id": "g23",
+        "name": "Music",
+        "parentId": null,
+        "nodeIds": [
+          330,
+          331,
+          332,
+          333,
+          334,
+          335,
+          336,
+          337,
+          338,
+          339,
+          340,
+          341,
+          342,
+          343,
+          344
+        ],
+        "x": 1414,
+        "y": 547,
+        "color": "source"
+      }
+    ]
+  },
+  "customNodes": {},
+  "editorStates": []
+}

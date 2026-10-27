@@ -1,10 +1,16 @@
 import { Node } from './Node.js';
 import { CanvasTextInput } from '../rendering/CanvasTextInput.js';
+import { COLORS, FONTS, CANVAS, NODE_LAYOUT } from '../ui/theme.js';
+import { drawInset, drawLabel, withAlpha } from '../rendering/NodePainter.js';
+
+// Value changes closer than this are a scrub (see ConstantNode.inlineValueChanged)
+const LIVE_EDIT_IDLE_MS = 400;
 
 export class ConstantNode extends Node {
     constructor(id, type, x, y) {
         super(id, type, x, y);
-        this.width = 75; // Half the default width
+        this.width = 104; // Compact module
+        this.fixedWidth = true;
         this.skipParentTextInputDraw = true; // We'll handle text input drawing ourselves
     }
 
@@ -46,55 +52,139 @@ export class ConstantNode extends Node {
                         // If in uniform mode, update the uniform registry
                         if (this.data.useUniform) {
                             this.updateUniformRegistry();
-                        } else if (this.graph && this.graph.onGraphChanged) {
+                        } else {
                             // Otherwise recompile (constant mode with inline values)
-                            this.graph.onGraphChanged();
+                            this.inlineValueChanged();
                         }
                     }
                 };
+                // End of a scrub: compile the inline value back right away
+                this.textInputs[field].onDragEnd = () => this.endLiveEdit();
             }
         }
 
         this.updateTextInputPositions();
+    }
+
+    /**
+     * A value of an inline (non-uniform) constant changed. A single edit recompiles. Changes
+     * in quick succession (scrubbing the field: one per mouse move) would relink the shaders
+     * every frame, so the node compiles as a temporary uniform instead (liveUniform, one
+     * relink) and every further change only updates the uniform. When the scrub ends (or
+     * the changes stop for LIVE_EDIT_IDLE_MS) the inline literal is compiled back, so the
+     * shader ends up exactly as an inline edit would leave it. Float / vector constants only
+     * (an Int may be used where GLSL wants a constant expression).
+     */
+    inlineValueChanged() {
+        const g = this.graph;
+        if (!g || !g.onGraphChanged) return;
+        const now = performance.now();
+        const quick = now - (this._lastInlineChange || -1e9) < LIVE_EDIT_IDLE_MS;
+        this._lastInlineChange = now;
+        if (this.liveUniform) {
+            this.updateUniformRegistry();
+            if (g.onUniformValueChanged) g.onUniformValueChanged();
+        } else if (quick && this.canCompileLive()) {
+            this.liveUniform = true;
+            g.onGraphChanged();
+        } else {
+            g.onGraphChanged();
+        }
+        if (this.liveUniform) this.scheduleLiveEnd();
+    }
+
+    /** Float / vector constant, components not wired, whose GLSL has the live uniform form. */
+    canCompileLive() {
+        const def = this.definition;
+        if (this.fieldType === 'int' || this.fieldType === 'bool' || !def || !def.hasUniformToggle || typeof def.glsl !== 'function') return false;
+        if (this.graph && this.graph.connections.some(c => c.toNode === this)) return false;
+        this.liveUniform = true;
+        try {
+            const r = def.glsl(this, {});
+            return !!(r && r.uniforms && r.uniforms.length);
+        } catch (e) {
+            return false;
+        } finally {
+            this.liveUniform = false;
+        }
+    }
+
+    scheduleLiveEnd() {
+        clearTimeout(this._liveTimer);
+        this._liveTimer = setTimeout(() => {
+            // Mouse held still mid-scrub: keep the uniform until the drag ends
+            if (this.textInputs && Object.values(this.textInputs).some(t => t.isDragging)) this.scheduleLiveEnd();
+            else this.endLiveEdit();
+        }, LIVE_EDIT_IDLE_MS);
+    }
+
+    /** Back to the inline literal (recompiles once). */
+    endLiveEdit() {
+        clearTimeout(this._liveTimer);
+        this._liveTimer = null;
+        if (!this.liveUniform) return;
+        this.liveUniform = false;
+        const g = this.graph;
+        if (g && g.onGraphChanged && g.nodes && g.nodes.includes(this)) g.onGraphChanged();
+    }
+
+    /** Numeric fields in row order (same order as the text inputs). */
+    getFieldNames() {
+        return this.textInputs ? Object.keys(this.textInputs) : [];
+    }
+
+    /** Vec nodes label each row with its component (x, y, z, w). */
+    hasComponentLabels() {
+        return this.inputs.length > 0;
     }
 
     updateTextInputPositions() {
         if (!this.textInputs) return;
 
-        const fields = Object.keys(this.textInputs);
-        let yOffset = 30;
-        const margin = 8; // 8px margin on each side = 16px total horizontal spacing
+        const fields = this.getFieldNames();
+        const fieldH = NODE_LAYOUT.fieldHeight;
+        const left = this.x + (this.hasComponentLabels() ? 22 : 10);
+        const right = this.x + this.width - 12;
 
-        for (const field of fields) {
-            const input = this.textInputs[field];
-            input.x = this.x + margin;
-            input.y = this.y + yOffset;
-            input.width = this.width - (margin * 2); // Full width minus margins
-            yOffset += 25;
+        for (let row = 0; row < fields.length; row++) {
+            const input = this.textInputs[fields[row]];
+            input.x = left;
+            input.y = this.getRowCenterY(row) - fieldH / 2;
+            input.width = right - left;
+            input.height = fieldH;
         }
     }
 
-    // Override draw to position text inputs correctly
-    draw(ctx, options = {}) {
-        // Update text input positions before drawing
+    // Uniform-mode constants get the uniform accent (yellow) instead of the category color
+    getAccentColor() {
+        return this.data.useUniform ? CANVAS.uniform : super.getAccentColor();
+    }
+
+    drawBody(ctx, options = {}) {
         this.updateTextInputPositions();
+        if (!this.hasInputFields) return;
 
-        // Call parent draw
-        super.draw(ctx, options);
-
-        // Draw text inputs (only for unconnected inputs)
-        if (this.hasInputFields && this.textInputs) {
-            for (const field of Object.keys(this.data)) {
-                const input = this.textInputs[field];
-                if (input && !this.isInputConnected(field)) {
-                    input.draw(ctx);
-                }
+        const uniform = !!this.data.useUniform;
+        const fields = this.getFieldNames();
+        for (let row = 0; row < fields.length; row++) {
+            const field = fields[row];
+            const input = this.textInputs[field];
+            const cy = this.getRowCenterY(row);
+            if (this.hasComponentLabels()) {
+                drawLabel(ctx, field, this.x + 11, cy, uniform ? withAlpha(CANVAS.uniform, 0.7) : COLORS.textFaint);
+            }
+            if (this.isInputConnected(field)) {
+                // Driven by a cable: show a dim placeholder instead of the value
+                drawInset(ctx, input.x, input.y, input.width, input.height, { fill: COLORS.nodeBody, flat: true });
+                drawLabel(ctx, 'linked', input.x + input.width / 2, cy, COLORS.textFaint, 'center');
+            } else {
+                input.valueColor = uniform ? CANVAS.uniform : null;
+                input.draw(ctx, options);
             }
         }
 
-        // Draw boolean toggle buttons
-        if (this.hasInputFields && this.fieldType === 'bool') {
-            this.drawBooleanToggles(ctx);
+        if (this.fieldType === 'bool') {
+            this.drawBooleanToggles(ctx, options);
         }
     }
 
@@ -112,78 +202,89 @@ export class ConstantNode extends Node {
         );
     }
 
-    drawBooleanToggles(ctx) {
-        let yOffset = 30;
+    /** Rect of the bool switch on body row `row`. */
+    getBoolToggleRect(row) {
+        return {
+            x: this.x + 10,
+            y: this.getRowCenterY(row) - NODE_LAYOUT.fieldHeight / 2,
+            w: this.width - 22,
+            h: NODE_LAYOUT.fieldHeight
+        };
+    }
 
+    /** Boolean fields (excluding the uniform flag), in row order after numeric fields. */
+    getBoolFieldNames() {
+        const names = [];
         for (const field in this.data) {
-            // Skip 'useUniform' field - that's handled by the [U] button
-            if (field === 'useUniform') continue;
+            if (field !== 'useUniform' && typeof this.data[field] === 'boolean') names.push(field);
+        }
+        return names;
+    }
 
-            if (typeof this.data[field] === 'boolean') {
-                const value = this.data[field];
-                const toggleWidth = this.width - 20;
-                const toggleHeight = 24;
-                const toggleX = this.x + 10;
-                const toggleY = this.y + yOffset;
+    drawBooleanToggles(ctx, options = {}) {
+        const bools = this.getBoolFieldNames();
+        const firstRow = this.getFieldNames().length;
+        const uniform = !!this.data.useUniform;
+        const onColor = uniform ? CANVAS.uniform : this.getAccentColor();
 
-                // Button background
-                ctx.fillStyle = value ? '#007acc' : '#444';
-                ctx.beginPath();
-                ctx.roundRect(toggleX, toggleY, toggleWidth, toggleHeight, 4);
-                ctx.fill();
+        for (let i = 0; i < bools.length; i++) {
+            const value = !!this.data[bools[i]];
+            const r = this.getBoolToggleRect(firstRow + i);
+            const hovered = this.isHoveringRect(options, r);
 
-                // Border
-                ctx.strokeStyle = value ? '#0098ff' : '#666';
-                ctx.lineWidth = 1;
-                ctx.stroke();
+            // Whole row is an inset well; the switch sits on the left
+            drawInset(ctx, r.x, r.y, r.w, r.h, { border: hovered ? CANVAS.insetHover : undefined });
+            const trackX = r.x + 3, trackY = r.y + 3, trackW = 20, trackH = r.h - 6;
+            ctx.fillStyle = value ? withAlpha(onColor, 0.3) : COLORS.raised;
+            ctx.fillRect(trackX, trackY, trackW, trackH);
+            const knob = trackH;
+            ctx.fillStyle = value ? onColor : COLORS.textFaint;
+            ctx.fillRect(value ? trackX + trackW - knob : trackX, trackY, knob, knob);
 
-                // Label
-                ctx.fillStyle = '#fff';
-                ctx.font = '12px -apple-system, sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(value ? 'true' : 'false', toggleX + toggleWidth / 2, toggleY + toggleHeight / 2);
-                ctx.textAlign = 'left';
-                ctx.textBaseline = 'alphabetic';
+            ctx.font = FONTS.value;
+            ctx.fillStyle = value ? (uniform ? CANVAS.uniform : COLORS.text) : COLORS.textDim;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+            ctx.fillText(value ? 'true' : 'false', Math.round(trackX + trackW + 7), Math.round(r.y + r.h / 2 + 3));
+        }
+    }
 
-                yOffset += 30;
+    getControlCursor(x, y) {
+        if (this.fieldType === 'bool') {
+            const bools = this.getBoolFieldNames();
+            const firstRow = this.getFieldNames().length;
+            for (let i = 0; i < bools.length; i++) {
+                const r = this.getBoolToggleRect(firstRow + i);
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return 'pointer';
             }
         }
+        return super.getControlCursor(x, y);
     }
 
     // Override to handle boolean toggle clicks
     _checkTextInputs(x, y) {
         // Check boolean toggles first
         if (this.fieldType === 'bool') {
-            let yOffset = 30;
+            const bools = this.getBoolFieldNames();
+            const firstRow = this.getFieldNames().length;
 
-            for (const field in this.data) {
-                // Skip 'useUniform' field - that's handled by the [U] button
-                if (field === 'useUniform') continue;
+            for (let i = 0; i < bools.length; i++) {
+                const field = bools[i];
+                const r = this.getBoolToggleRect(firstRow + i);
 
-                if (typeof this.data[field] === 'boolean') {
-                    const toggleWidth = this.width - 20;
-                    const toggleHeight = 24;
-                    const toggleX = this.x + 10;
-                    const toggleY = this.y + yOffset;
+                // Check if click is within toggle bounds
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    // Toggle the value
+                    this.data[field] = !this.data[field];
 
-                    // Check if click is within toggle bounds
-                    if (x >= toggleX && x <= toggleX + toggleWidth &&
-                        y >= toggleY && y <= toggleY + toggleHeight) {
-                        // Toggle the value
-                        this.data[field] = !this.data[field];
-
-                        // Trigger graph update
-                        if (this.data.useUniform) {
-                            this.updateUniformRegistry();
-                        } else if (this.graph && this.graph.onGraphChanged) {
-                            this.graph.onGraphChanged();
-                        }
-
-                        return { type: 'TOGGLE_BOOL', node: this, field: field };
+                    // Trigger graph update
+                    if (this.data.useUniform) {
+                        this.updateUniformRegistry();
+                    } else if (this.graph && this.graph.onGraphChanged) {
+                        this.graph.onGraphChanged();
                     }
 
-                    yOffset += 30;
+                    return { type: 'TOGGLE_BOOL', node: this, field: field };
                 }
             }
         }
@@ -207,7 +308,18 @@ export class ConstantNode extends Node {
         if (this.data.useUniform) {
             return null;
         }
-        return super.getInputPortPosition(index);
+        // Align each component input with its value field row
+        const input = this.inputs[index];
+        const row = input ? this.getFieldNames().indexOf(input.name) : -1;
+        return {
+            x: this.x,
+            y: this.getRowCenterY(row >= 0 ? row : index)
+        };
+    }
+
+    // Component names are drawn next to the fields instead
+    getInputPortLabel() {
+        return '';
     }
 
     /**
@@ -231,7 +343,6 @@ export class ConstantNode extends Node {
                 if (glslResult && glslResult.uniforms && glslResult.uniforms.length > 0) {
                     // Get the new value
                     const newValue = glslResult.uniforms[0].value;
-                    console.log('Updating uniform', uniform.name, 'for node', this.id, 'to value:', newValue);
 
                     // Update in registry (using the REMAPPED name)
                     this.graph.uniformRegistry.registerUniform(
@@ -262,31 +373,14 @@ export class ConstantNode extends Node {
     }
 
     updateDimensions() {
-        const baseHeight = 30;
-
-        // Count text input fields (numeric only, not booleans)
-        let textInputCount = 0;
+        // One row per numeric field + one per boolean switch
+        let rows = 0;
         for (const field in this.data) {
-            if (typeof this.data[field] === 'number') {
-                textInputCount++;
-            }
+            const v = this.data[field];
+            if (typeof v === 'number') rows++;
+            else if (field !== 'useUniform' && typeof v === 'boolean') rows++;
         }
-
-        // Count boolean fields for toggle buttons (excluding 'useUniform')
-        let boolInputCount = 0;
-        for (const field in this.data) {
-            if (field !== 'useUniform' && typeof this.data[field] === 'boolean') {
-                boolInputCount++;
-            }
-        }
-
-        const textInputHeight = textInputCount * 25;
-        const boolInputHeight = boolInputCount * 30; // Toggles need more space
-
-        // Small bottom padding to avoid cutting off the last element
-        const bottomPadding = 3;
-
-        this.height = baseHeight + textInputHeight + boolInputHeight + bottomPadding;
+        this.height = this.heightForRows(Math.max(1, rows));
     }
 
     // Override to hide output port labels

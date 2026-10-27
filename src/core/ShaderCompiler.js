@@ -1,5 +1,21 @@
 import { NodeDefinitions, TypeSystem } from './NodeDefinitions.js';
 import { TypeRegistry } from './TypeRegistry.js';
+import { builtinUniformsIn, builtinDeclaration, builtinUniformEntry } from './builtinUniforms.js';
+import { installSceneCompiler } from './scenes.js';
+import { installControlCompiler } from './control/compiler.js';
+
+/** Format a JS number as a GLSL float literal (always has a decimal point). */
+function glslFloat(x) {
+    if (!Number.isFinite(x)) return '0.0';
+    let s = String(x);
+    if (!/[.eE]/.test(s)) s += '.0';
+    return s;
+}
+
+/** Parenthesize an expression unless it is a plain identifier / member chain. */
+function wrapExpr(value) {
+    return /^[A-Za-z_][\w.]*$/.test(value) ? value : `(${value})`;
+}
 
 export class ShaderCompiler {
     constructor() {
@@ -7,18 +23,23 @@ export class ShaderCompiler {
     }
 
     reset() {
+        this._resetCount = (this._resetCount || 0) + 1; // a new compile pass (control plan memo)
         this.errors = [];
         this.warnings = [];
         this.generatedCode = [];
         this.uniforms = new Set();
+        this.uniformNames = new Set(); // dedupe uniforms by name (a node may compile in several scopes)
         this.customFunctions = new Map(); // name -> code
         this.functionHashes = new Map(); // hash -> name (for deduplication)
         this.functionRenames = new Map(); // originalName_nodeId -> newName
         this.compiledNodes = new Map();
+        this.inProgress = new Set(); // cycle guard
+        this.lambdaStack = []; // active function-input scopes (e.g. Raymarch scene SDF)
         this.errorNodeId = null;
         this.codeToNodeMap = new Map(); // Maps line number to node ID
         this.usedStructs = new Set(); // Track which struct types are used
         this.functionCounter = 0; // Counter for renamed functions
+        this._resetScenes(); // SceneSwitcher state (src/core/scenes.js)
         // NOTE: Do NOT reset nodeIdRemap here - it's injected by CompilationManager
         // and must persist across all compilation passes in a single cycle
         if (!this.nodeIdRemap) {
@@ -43,6 +64,28 @@ export class ShaderCompiler {
         return this.nodeIdRemap.has(nodeId) ? this.nodeIdRemap.get(nodeId) : nodeId;
     }
 
+    /** Add a uniform (string name for built-ins, or {name, type, value, ...}) once. */
+    addUniform(uniform) {
+        // u_spectrum / u_waveform / u_spectrogram become texture uniforms (bound like JS textures)
+        if (typeof uniform === 'string') uniform = builtinUniformEntry(uniform);
+        const name = typeof uniform === 'string' ? uniform : uniform && uniform.name;
+        if (!name || this.uniformNames.has(name)) return;
+        this.uniformNames.add(name);
+        this.uniforms.add(uniform);
+    }
+
+    /**
+     * Name of a function-scope parameter (e.g. 'p' inside a Raymarch scene),
+     * or null when compiling in main().
+     */
+    getLambdaParam(name) {
+        for (let i = this.lambdaStack.length - 1; i >= 0; i--) {
+            const param = this.lambdaStack[i].params.find(p => p.name === name);
+            if (param) return param.name;
+        }
+        return null;
+    }
+
     compile(nodeGraph) {
         this.reset();
         // Note: nodeIdRemap is now injected by CompilationManager BEFORE any compilation
@@ -65,58 +108,59 @@ export class ShaderCompiler {
         return this.compileFromOutputNode(previewNode, nodeGraph);
     }
 
-    compileFromNodeAsOutput(node, outputIndex, nodeGraph) {
-        // Compile starting from a specific node and output as if it were the final output
+    /**
+     * Compile starting from a specific node output as if it were the final color.
+     * `accessor` is the swizzle / struct member chain of the cable feeding the
+     * Preview / Feedback node (e.g. ".x" or ".position").
+     */
+    compileFromNodeAsOutput(node, outputIndex, nodeGraph, accessor = null) {
         this.reset();
         // Note: nodeIdRemap is now injected by CompilationManager BEFORE any compilation
         // DO NOT call renumberNodes() here - it would overwrite the global mapping
 
+        const failure = () => ({
+            vertex: this.getVertexShader(),
+            fragment: null,
+            uniformValues: [],
+            errors: this.errors,
+            warnings: this.warnings,
+            errorNodeId: this.errorNodeId
+        });
+
+        this.compileRoot = node; // scenes: nodes main() computes anyway (src/core/scenes.js)
         try {
-            // Compile the node and its dependencies
-            const result = this.compileNode(node, nodeGraph);
-
-            if (!result) {
-                return null;
+            const src = this.resolveConnection(
+                { fromNode: node, fromOutput: outputIndex, accessor },
+                nodeGraph,
+                node
+            );
+            if (!src || this.errors.length > 0) {
+                if (this.errors.length === 0) this.addError(`Could not compile ${node.type}`, node.id);
+                return failure();
             }
 
-            // Convert the output to vec4 for rendering
-            // Check if node has multiple independent outputs (like ForLoopEnd)
-            let outputValue;
-            if (node.outputVars) {
-                const outputPortName = node.outputs[outputIndex].name;
-                outputValue = node.outputVars[outputPortName];
-                if (!outputValue) {
-                    console.error(`Preview: Output '${outputPortName}' not found in outputVars for node ${node.id}`);
-                    outputValue = result.output; // Fallback
-                }
+            let finalColor;
+            if (src.type === 'sampler2D') {
+                // Show a texture directly (e.g. Feedback -> Preview)
+                this.addUniform('u_resolution');
+                finalColor = `texture(${src.value}, gl_FragCoord.xy / u_resolution)`;
+            } else if (TypeRegistry.isStruct(src.type)) {
+                const members = TypeRegistry.getType(src.type).members.map(m => '.' + m.name).join(', ');
+                this.addError(`Cannot preview a ${src.type} struct directly. Add an accessor to the cable (${members}).`, node.id);
+                return failure();
             } else {
-                outputValue = result.output;
+                finalColor = TypeSystem.convertCode(src.value, src.type, 'vec4');
             }
-
-            const sourceType = node.outputs[outputIndex].type;
-            const finalColor = TypeSystem.convertCode(outputValue, sourceType, 'vec4');
 
             // Build the final shader
             const fragmentShader = this.buildFragmentShader(finalColor);
 
-            // Extract uniform values - create completely new objects to avoid shared references
+            // Extract uniform values - create new objects to avoid shared references
             const uniformValues = Array.from(this.uniforms)
                 .filter(u => typeof u === 'object' && (u.value !== undefined || u.feedbackNodeId !== undefined || u.microphoneNodeId !== undefined || u.midiCCNodeId !== undefined))
                 .map(u => {
-                    const uniform = { name: u.name, type: u.type };
-                    if (u.value !== undefined) {
-                        // Deep copy array values to avoid shared references
-                        uniform.value = Array.isArray(u.value) ? [...u.value] : u.value;
-                    }
-                    if (u.feedbackNodeId !== undefined) {
-                        uniform.feedbackNodeId = u.feedbackNodeId;
-                    }
-                    if (u.microphoneNodeId !== undefined) {
-                        uniform.microphoneNodeId = u.microphoneNodeId;
-                    }
-                    if (u.midiCCNodeId !== undefined) {
-                        uniform.midiCCNodeId = u.midiCCNodeId;
-                    }
+                    const uniform = { ...u };
+                    if (Array.isArray(u.value)) uniform.value = [...u.value];
                     return uniform;
                 });
 
@@ -124,6 +168,7 @@ export class ShaderCompiler {
                 vertex: this.getVertexShader(),
                 fragment: fragmentShader,
                 uniformValues: uniformValues,
+                sourceType: src.type, // type before the vec4 conversion (debug probes read raw components)
                 errors: this.errors,
                 warnings: this.warnings,
                 errorNodeId: this.errorNodeId
@@ -131,14 +176,7 @@ export class ShaderCompiler {
         } catch (error) {
             console.error('Shader compilation error:', error);
             this.errors.push(error.message);
-            return {
-                vertex: this.getVertexShader(),
-                fragment: null,
-                uniformValues: [],
-                errors: this.errors,
-                warnings: this.warnings,
-                errorNodeId: this.errorNodeId
-            };
+            return failure();
         }
     }
 
@@ -174,30 +212,190 @@ export class ShaderCompiler {
             }
         }
 
-        // Delegate to compileFromNodeAsOutput - this unifies all compilation logic
+        // Delegate to compileFromNodeAsOutput - this unifies all compilation logic.
+        // Pass the cable's accessor so swizzles / struct members on the cable
+        // into the Preview are honoured.
         return this.compileFromNodeAsOutput(
             outputConnection.fromNode,
             outputConnection.fromOutput,
-            nodeGraph
+            nodeGraph,
+            outputConnection.accessor || null
         );
     }
 
+    /**
+     * Compile the source of a connection and return { value, type } after
+     * applying the cable accessor (struct member and/or swizzle).
+     */
+    resolveConnection(connection, nodeGraph, targetNode) {
+        // Inside a scene function: values main() computes anyway come from main (scenes.js)
+        if (this.sceneSwitchers.size) {
+            const hoisted = this._sceneHoist(connection, nodeGraph, targetNode);
+            if (hoisted !== undefined) return hoisted;
+        }
+        const fromNode = connection.fromNode;
+        const sourceResult = this.compileNode(fromNode, nodeGraph);
+        if (!sourceResult) return null;
+
+        const port = fromNode.outputs[connection.fromOutput];
+        if (!port) {
+            this.addError(`${fromNode.type} has no output #${connection.fromOutput}`, targetNode ? targetNode.id : fromNode.id);
+            return null;
+        }
+
+        // Nodes with several independent outputs (ForLoop, multi-output library nodes)
+        let value;
+        if (fromNode.outputVars) {
+            value = fromNode.outputVars[port.name];
+            if (!value) value = sourceResult.output; // Fallback
+        } else {
+            value = sourceResult.output;
+        }
+        let type = port.type;
+
+        if (connection.accessor) {
+            let resolved;
+            try {
+                resolved = TypeRegistry.resolveAccessorType(type, connection.accessor);
+            } catch (e) {
+                this.addError(`Invalid accessor ${connection.accessor} on ${type}: ${e.message}`, targetNode ? targetNode.id : fromNode.id);
+                return null;
+            }
+            const { structPath, swizzle } = TypeRegistry.parseAccessor(connection.accessor);
+            if ((type === 'float' || type === 'int' || type === 'bool') && structPath.length === 0 && swizzle) {
+                // GLSL ES 3.00 cannot swizzle scalars: ".xxx" on a float -> vec3(x)
+                const scalar = type === 'float' ? value : `float(${value})`;
+                value = swizzle.length === 1 ? scalar : `vec${swizzle.length}(${scalar})`;
+            } else {
+                value = `${wrapExpr(value)}${connection.accessor}`;
+            }
+            type = resolved;
+        }
+
+        return { value, type };
+    }
+
+    /** Convert a connected value to a typed (non-'any') input. */
+    convertForInput(value, fromType, toType, node) {
+        if (!fromType || fromType === toType || TypeRegistry.isAny(fromType)) return value;
+        const isOpaque = t => TypeRegistry.isStruct(t) || t === 'sampler2D' || t === 'samplerCube';
+        if (isOpaque(fromType) || isOpaque(toType)) {
+            this.addError(`Cannot connect ${fromType} to ${toType} input of ${node.type}`, node.id);
+            return value;
+        }
+        if (!TypeSystem.canConvert(fromType, toType)) {
+            this.addWarning(`Type mismatch: connecting ${fromType} to ${toType} in ${node.type}`);
+        } else if (TypeSystem.isLossy && TypeSystem.isLossy(fromType, toType)) {
+            this.addWarning(`${node.type}: ${fromType} connected to a ${toType} input, using its first component`);
+        }
+        return TypeSystem.convertCode(value, fromType, toType);
+    }
+
+    /**
+     * Value used for an unconnected input. Library nodes (definition.inlineInputs)
+     * read node.data[inputName]: a number (inline field), an array of 2-4 numbers
+     * (vecN), a GLSL literal string such as "vec3(1.0, 0.5, 0.0)", or true/false
+     * for bool inputs.
+     */
+    defaultForInput(node, input) {
+        const data = node.data;
+        const value = data && node.definition && node.definition.inlineInputs ? data[input.name] : undefined;
+        if (value !== undefined && value !== null && !input.functionOf) {
+            const t = input.type;
+            if (typeof value === 'boolean') {
+                if (t === 'bool') return value ? 'true' : 'false';
+            } else if (typeof value === 'number' && Number.isFinite(value)) {
+                if (t === 'int') return String(Math.round(value));
+                if (t === 'float' || TypeRegistry.isAny(t)) return glslFloat(value);
+                if (t === 'vec2' || t === 'vec3' || t === 'vec4') return `${t}(${glslFloat(value)})`;
+            } else if (Array.isArray(value) && value.length >= 2 && value.length <= 4 && value.every(Number.isFinite)) {
+                const vt = `vec${value.length}`;
+                if (vt === t || TypeRegistry.isAny(t)) return `${vt}(${value.map(glslFloat).join(', ')})`;
+            } else if (typeof value === 'string' &&
+                /^(vec[234]|float|int)\(\s*-?[\d.]+(e[-+]?\d+)?(\s*,\s*-?[\d.]+(e[-+]?\d+)?)*\s*\)$/i.test(value.trim())) {
+                return value.trim();
+            }
+        }
+        return input.default;
+    }
+
+    /**
+     * Compile an input declared with `functionOf: { params: [{name, type}], returns }`
+     * as a standalone GLSL function. The upstream sub-graph is compiled in its own
+     * scope where nodes can read the parameters via compiler.getLambdaParam(name).
+     * Returns the generated function name (or null on failure).
+     */
+    compileFunctionInput(node, input, connection, nodeGraph) {
+        const sig = input.functionOf;
+        const fnName = `${node.varName}_${input.name}`;
+        const saved = { code: this.generatedCode, cache: this.compiledNodes, map: this.codeToNodeMap };
+        this.generatedCode = [];
+        this.compiledNodes = new Map();
+        this.codeToNodeMap = new Map();
+        this.lambdaStack.push({ params: sig.params, fnName });
+
+        let ret = null;
+        let body = [];
+        try {
+            if (connection) {
+                const src = this.resolveConnection(connection, nodeGraph, node);
+                if (src) ret = this.convertForInput(src.value, src.type, sig.returns, node);
+            } else {
+                ret = input.default;
+            }
+            body = this.generatedCode;
+        } finally {
+            this.generatedCode = saved.code;
+            this.compiledNodes = saved.cache;
+            this.codeToNodeMap = saved.map;
+            this.lambdaStack.pop();
+        }
+
+        if (ret === null || ret === undefined) return null;
+        const params = sig.params.map(p => `${p.type} ${p.name}`).join(', ');
+        const bodyCode = body.map(line => '    ' + line).join('\n');
+        const code = `${sig.returns} ${fnName}(${params}) {\n${bodyCode}${bodyCode ? '\n' : ''}    return ${ret};\n}`;
+        this.addCustomFunction(fnName, code, node.id);
+        return fnName;
+    }
+
     compileNode(node, nodeGraph) {
-        // Return cached result if already compiled (but not for dynamic nodes that need revalidation)
-        if (this.compiledNodes.has(node.id) && !node.isDynamicInput) {
+        // Each node compiles once per scope (main or function input)
+        if (this.compiledNodes.has(node.id)) {
             return this.compiledNodes.get(node.id);
+        }
+        if (this.inProgress.has(node.id)) {
+            this.addError(`Cycle detected at ${node.type}: route loops through a Feedback node`, node.id);
+            return null;
         }
 
         // Temporarily override varName with remapped ID for compact numbering
         const originalVarName = node.varName;
-        const remappedId = this.getRemappedNodeId(node.id);
-        node.varName = `node_${remappedId}`;
+        node.varName = `node_${this.getRemappedNodeId(node.id)}`;
+        this.inProgress.add(node.id);
+        try {
+            return this.compileNodeBody(node, nodeGraph);
+        } catch (error) {
+            this.addError(`${node.type}: ${error.message}`, node.id);
+            console.error(error);
+            return null;
+        } finally {
+            this.inProgress.delete(node.id);
+            node.varName = originalVarName; // Restore
+        }
+    }
 
+    compileNodeBody(node, nodeGraph) {
         const definition = node.definition;
         if (!definition) {
             this.addError(`Node ${node.type} has no definition`, node.id);
-            node.varName = originalVarName; // Restore
             return null;
+        }
+
+        // Control-rate nodes: a uniform updated every frame by the ControlRuntime (control/compiler.js)
+        if (this._compileControlNode) {
+            const ctl = this._compileControlNode(node, nodeGraph);
+            if (ctl !== undefined) return ctl;
         }
 
         // Track struct types used by this node's outputs
@@ -209,38 +407,37 @@ export class ShaderCompiler {
             }
         }
 
-        // Special case: output node
-        if (definition.isOutputNode) {
-            node.varName = originalVarName; // Restore
+        // Special case: output / preview nodes produce no value
+        if (definition.isOutputNode || definition.isPreviewNode) {
+            this.addError(`${node.type} has no outputs`, node.id);
             return null;
         }
 
         // Special case: feedback node - don't traverse inputs, just provide the texture uniform
-        if (definition.isFeedbackNode) {
-            // Generate GLSL for feedback node (provides sampler2D uniform)
-            const result = definition.glsl(node, {});
-
-            // Collect uniforms
+        // (Render 3D nodes too: their inputs compile into their own programs, src/render3d)
+        if (definition.isFeedbackNode || definition.isTextureSourceNode) {
+            const result = definition.glsl(node, {}, this);
             if (result.uniforms) {
-                for (const uniform of result.uniforms) {
-                    this.uniforms.add(uniform);
-                }
+                for (const uniform of result.uniforms) this.addUniform(uniform);
             }
-
-            // Cache and return
             this.compiledNodes.set(node.id, result);
-            node.varName = originalVarName; // Restore
             return result;
+        }
+
+        // Optional per-node setup that may reshape ports (e.g. ForLoopStart adopting connected types)
+        if (typeof definition.prepare === 'function') {
+            definition.prepare(node, nodeGraph, this);
         }
 
         // Collect uniforms needed by this node
         if (definition.uniforms) {
-            definition.uniforms.forEach(u => this.uniforms.add(u));
+            definition.uniforms.forEach(u => this.addUniform(u));
         }
 
         // Compile input connections and collect types for validation
         const inputValues = {};
         const inputTypes = {};
+        let failed = false;
 
         for (let i = 0; i < node.inputs.length; i++) {
             const input = node.inputs[i];
@@ -248,64 +445,47 @@ export class ShaderCompiler {
                 conn => conn.toNode === node && conn.toInput === i
             );
 
+            if (input.sceneInput || input.cpuInput) {
+                // SceneSwitcher: scene inputs become functions, CPU inputs are read by the runtime
+                const value = this.compileSceneSlot(node, input, i, connection, nodeGraph);
+                if (value === false) { failed = true; continue; }
+                inputValues[input.name] = value;
+                inputTypes[input.name] = connection ? (input.cpuInput ? 'cpu' : 'scene') : null;
+                continue;
+            }
+
+            if (input.functionOf) {
+                const fnName = this.compileFunctionInput(node, input, connection, nodeGraph);
+                if (fnName === null) { failed = true; continue; }
+                inputValues[input.name] = fnName;
+                inputTypes[input.name] = connection ? 'function' : null;
+                continue;
+            }
+
             if (connection) {
-                // Recursively compile connected node
-                const sourceResult = this.compileNode(connection.fromNode, nodeGraph);
-                if (sourceResult) {
-                    // Check if source node has multiple independent outputs (like ForLoop)
-                    let sourceValue;
-                    if (connection.fromNode.outputVars) {
-                        const outputPortName = connection.fromNode.outputs[connection.fromOutput].name;
-                        sourceValue = connection.fromNode.outputVars[outputPortName];
-                        if (!sourceValue) {
-                            console.error(`Output '${outputPortName}' not found in outputVars for node ${connection.fromNode.id}. Available:`, Object.keys(connection.fromNode.outputVars));
-                            sourceValue = sourceResult.output; // Fallback
-                        }
-                    } else {
-                        sourceValue = sourceResult.output;
-                    }
-                    let sourceType = connection.fromNode.outputs[connection.fromOutput].type;
-                    console.log(`[Source Type] Reading from ${connection.fromNode.type} (${connection.fromNode.id}) output ${connection.fromOutput}: type=${sourceType}`);
-
-                    // Apply accessor if present (struct member access and/or swizzle)
-                    if (connection.accessor) {
-                        sourceValue = sourceValue + connection.accessor;
-                        // Resolve type after accessor
-                        try {
-                            sourceType = TypeRegistry.resolveAccessorType(sourceType, connection.accessor);
-                        } catch (e) {
-                            this.addError(`Invalid accessor ${connection.accessor} on type ${sourceType}: ${e.message}`, node.id);
-                            sourceType = 'float'; // Fallback
-                        }
-                    }
-
-                    inputTypes[input.name] = sourceType;
-                    const targetType = input.type;
-
-                    // Handle 'any' type inputs - defer type checking to the node
-                    if (TypeRegistry.isAny(targetType)) {
-                        // Store the actual type for validation
-                        inputValues[input.name] = sourceValue;
-                    } else {
-                        // Check type compatibility
-                        if (!TypeSystem.canConvert(sourceType, targetType)) {
-                            this.addWarning(
-                                `Type mismatch: connecting ${sourceType} to ${targetType} in ${node.type}`
-                            );
-                        }
-
-                        // Auto-convert if needed
-                        inputValues[input.name] = TypeSystem.convertCode(
-                            sourceValue,
-                            sourceType,
-                            targetType
-                        );
-                    }
+                const src = this.resolveConnection(connection, nodeGraph, node);
+                if (!src) { failed = true; continue; }
+                inputTypes[input.name] = src.type;
+                if (TypeRegistry.isAny(input.type)) {
+                    // 'any' inputs get the raw value; the node validates / casts
+                    inputValues[input.name] = src.value;
+                } else {
+                    const targetType = (typeof definition.resolveInputType === 'function' && definition.resolveInputType(node, input)) || input.type;
+                    inputValues[input.name] = this.convertForInput(src.value, src.type, targetType, node);
                 }
             } else {
-                // Use default value
-                inputValues[input.name] = input.default;
+                inputValues[input.name] = this.defaultForInput(node, input);
                 inputTypes[input.name] = null; // Not connected
+            }
+        }
+
+        if (failed) return null;
+
+        // A ForLoopEnd whose body doesn't read the loop variables must still open the loop
+        if (definition.isForLoopEndNode && node.data && node.data.pairNodeId !== undefined && node.data.pairNodeId !== null) {
+            const startNode = nodeGraph.nodes.find(n => n.id === node.data.pairNodeId);
+            if (startNode && !this.compiledNodes.has(startNode.id)) {
+                if (!this.compileNode(startNode, nodeGraph)) return null;
             }
         }
 
@@ -313,79 +493,85 @@ export class ShaderCompiler {
         if (definition.validateTypes) {
             const validation = definition.validateTypes(node, inputTypes, this);
             if (!validation.valid) {
-                this.addError(validation.error, node.id);
-                node.varName = originalVarName; // Restore
+                this.addError(`${node.type}: ${validation.error}`, node.id);
                 return null;
             }
-            // Store resolved output type on the node
-            if (validation.outputType) {
-                node.resolvedOutputType = validation.outputType;
-                // Update the output type dynamically (always update for dynamic nodes)
-                if (node.outputs.length > 0 && (TypeRegistry.isAny(node.outputs[0].type) || node.isDynamicInput)) {
-                    console.log(`[Type Resolution] ${node.type} (${node.id}) resolved to ${validation.outputType}, inputTypes:`, inputTypes);
-                    node.outputs[0].type = validation.outputType;
+            node.resolvedOutputType = validation.outputType || null;
+            // Resolve 'any' outputs on this node instance (never on the shared definition)
+            for (let k = 0; k < node.outputs.length; k++) {
+                const declared = definition.outputs && definition.outputs[k] ? definition.outputs[k].type : undefined;
+                const resolved = (validation.outputTypes && validation.outputTypes[k]) || (k === 0 ? validation.outputType : undefined);
+                if (resolved && (declared === undefined || TypeRegistry.isAny(declared) || node.isDynamicInput)) {
+                    if (definition.outputs && node.outputs[k] === definition.outputs[k]) {
+                        node.outputs[k] = { ...node.outputs[k] };
+                    }
+                    if (node.outputs[k].type !== resolved) this.outputTypeChanges = (this.outputTypeChanges || 0) + 1;
+                    node.outputs[k].type = resolved;
                 }
             }
         }
 
         // Generate GLSL code for this node
-        if (typeof definition.glsl === 'function') {
-            const result = definition.glsl(node, inputValues);
-
-            // Collect uniforms from the result
-            if (result.uniforms) {
-                for (const uniform of result.uniforms) {
-                    this.uniforms.add(uniform);
-                }
-            }
-
-            // Add preamble (function definitions for custom nodes)
-            // Preamble contains complete function definitions - add it directly as a block
-            let preambleRenames = {};
-            if (result.preamble) {
-                // Add preamble and get any function renames
-                const preambleResult = this.addCustomFunction(`preamble_node_${node.id}`, result.preamble, node.id);
-                preambleRenames = preambleResult.renames || {};
-            }
-
-            // Add generated code and track which node it came from
-            if (result.code) {
-                // Apply any function renames from preamble to the calling code
-                let codeWithRenames = this.applyFunctionRenames(result.code, preambleRenames);
-
-                const { statements, functions } = this.extractFunctionsFromCode(codeWithRenames);
-
-                // Hoist any function definitions outside of main()
-                for (const func of functions) {
-                    this.addCustomFunction(func.name, func.code, node.id);
-                }
-
-                for (const line of statements) {
-                    const lineIndex = this.generatedCode.length;
-                    this.generatedCode.push(line);
-                    // Map this line to the node that generated it
-                    // Add offset for shader preamble (uniforms, etc.)
-                    this.codeToNodeMap.set(lineIndex, node.id);
-                }
-            }
-
-            // Store custom functions if needed
-            if (result.requiresFunction && definition.glslFunction) {
-                this.addCustomFunction(result.requiresFunction, definition.glslFunction, node.id);
-            }
-
-            // Cache result
-            this.compiledNodes.set(node.id, result);
-            node.varName = originalVarName; // Restore
-            return result;
-        } else {
+        if (typeof definition.glsl !== 'function') {
             this.addError(`Node ${node.type} has invalid glsl generator`, node.id);
-            node.varName = originalVarName; // Restore
             return null;
         }
+
+        const result = definition.glsl(node, inputValues, this);
+        if (!result) {
+            this.addError(`Node ${node.type} produced no code`, node.id);
+            return null;
+        }
+
+        // Collect uniforms from the result
+        if (result.uniforms) {
+            for (const uniform of result.uniforms) {
+                this.addUniform(uniform);
+            }
+        }
+
+        // Add preamble (function definitions) - added directly as a block
+        let preambleRenames = {};
+        if (result.preamble) {
+            const preambleResult = this.addCustomFunction(`preamble_node_${node.id}`, result.preamble, node.id);
+            preambleRenames = preambleResult.renames || {};
+        }
+
+        // Add generated code and track which node it came from
+        if (result.code) {
+            // Apply any function renames from preamble to the calling code
+            const codeWithRenames = this.applyFunctionRenames(result.code, preambleRenames);
+
+            const { statements, functions } = this.extractFunctionsFromCode(codeWithRenames);
+
+            // Hoist any function definitions outside of main()
+            for (const func of functions) {
+                this.addCustomFunction(func.name, func.code, node.id);
+            }
+
+            for (const line of statements) {
+                const lineIndex = this.generatedCode.length;
+                this.generatedCode.push(line);
+                this.codeToNodeMap.set(lineIndex, node.id);
+            }
+        }
+
+        // Store custom functions if needed
+        if (result.requiresFunction && definition.glslFunction) {
+            this.addCustomFunction(result.requiresFunction, definition.glslFunction, node.id);
+        }
+
+        this._trackPositional(node, definition, result, nodeGraph);
+        this.compiledNodes.set(node.id, result);
+        return result;
     }
 
     buildFragmentShader(finalColor) {
+        // Built-in uniforms (u_time, u_beat, u_bass, ...) referenced anywhere in the code are
+        // declared automatically, so custom GLSL and expressions can use them without a node
+        const used = builtinUniformsIn([finalColor, ...this.generatedCode, ...this.customFunctions.values()].join('\n'));
+        for (const name of used) this.addUniform(name);
+
         const uniformDeclarations = Array.from(this.uniforms)
             .map(u => this.getUniformDeclaration(u))
             .join('\n');
@@ -393,8 +579,11 @@ export class ShaderCompiler {
         // Generate struct definitions for all used struct types (with dependencies)
         const structDefinitions = this.generateStructDefinitions();
 
-        const customFunctionCode = Array.from(this.customFunctions.values())
+        let customFunctionCode = Array.from(this.customFunctions.values())
             .join('\n\n');
+        // SceneSwitcher: functions read the (possibly warped) pixel from sc_FragCoord
+        const sceneParts = this._sceneShaderParts(customFunctionCode);
+        if (sceneParts) customFunctionCode = sceneParts.functions;
 
         const mainCode = this.generatedCode
             .map(line => '    ' + line)
@@ -411,7 +600,7 @@ ${structDefinitions}
 
 ${customFunctionCode}
 
-void main() {
+${sceneParts ? sceneParts.mainOpen : 'void main() {'}
 ${mainCode}
     fragColor = ${finalColor};
 }`;
@@ -477,7 +666,7 @@ ${mainCode}
                 'u_mouse': 'uniform vec2 u_mouse;',
                 'u_camera': 'uniform sampler2D u_camera;'
             };
-            return uniformTypes[uniform] || `uniform float ${uniform};`;
+            return uniformTypes[uniform] || builtinDeclaration(uniform) || `uniform float ${uniform};`;
         }
 
         // Handle new-style object uniforms (from Float/Vec nodes)
@@ -537,7 +726,6 @@ void main() {
                 renames[funcName] = newName;
                 functionsToAdd.push({ originalName: funcName, newName, code: funcCode });
 
-                console.log(`Renamed conflicting function '${funcName}' to '${newName}'`);
             } else if (!existingFunc) {
                 // New function - add it
                 renames[funcName] = funcName; // No rename needed
@@ -900,7 +1088,7 @@ void main() {
                     continue;
                 }
 
-                if (functionHeaderRegex.test(trimmed)) {
+                if (functionHeaderRegex.test(trimmed) && !/^(if|else|for|while|switch|return)\b/.test(trimmed)) {
                     capturingFunction = true;
                     waitingForBody = !trimmed.includes('{');
                     braceDepth = countBraceDelta(line);
@@ -963,7 +1151,8 @@ void main() {
         if (nodeId !== null && this.errorNodeId === null) {
             this.errorNodeId = nodeId; // Track first error node
         }
-        console.error('[Shader Compiler Error]', message);
+        // quiet: compiles whose errors are reported elsewhere (debug probes show them on the node)
+        if (!this.quiet) console.error('[Shader Compiler Error]', message);
     }
 
     addWarning(message) {
@@ -1077,3 +1266,7 @@ void main() {
         return sourceType; // Fallback
     }
 }
+
+// SceneSwitcher compilation (scene functions, shared values, sc_FragCoord)
+installSceneCompiler(ShaderCompiler);
+installControlCompiler(ShaderCompiler); // control-rate nodes compile to live uniforms (src/core/control/compiler.js)

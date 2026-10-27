@@ -1,5 +1,8 @@
 import { Node } from './Node.js';
 import { CanvasTextInput } from '../rendering/CanvasTextInput.js';
+import { COLORS, FONTS, LAYOUT, NODE_LAYOUT } from '../ui/theme.js';
+import { drawIconButton, drawVideoWell, fitText } from '../rendering/NodePainter.js';
+import { contentGate } from '../core/contentGate.js';
 
 export class VideoURLNode extends Node {
     constructor(id, type, x, y) {
@@ -21,13 +24,24 @@ export class VideoURLNode extends Node {
         this.data.autoplay = this.data.autoplay !== undefined ? this.data.autoplay : true;
 
         this.width = 200;
-        this.height = 80;
+        this.fixedWidth = true;
+        this.updateDimensions();
 
-        // Auto-load video if URL is already set (e.g., when deserializing)
+        // Auto-load video if URL is already set (e.g., when deserializing). In someone
+        // else's project a remote URL waits for consent (src/core/contentGate.js).
         if (this.data.url && this.data.url.trim()) {
             // Delay slightly to ensure DOM is ready
             setTimeout(() => {
-                this.loadVideo(this.data.url.trim());
+                const url = this.data.url.trim();
+                const now = contentGate.request(this, url, () => {
+                    this.error = null;
+                    this.loadVideo(url);
+                    this.graph?.render?.();
+                });
+                if (!now) {
+                    this.error = 'blocked: click to load';
+                    this.graph?.render?.();
+                }
             }, 100);
         }
     }
@@ -57,99 +71,156 @@ export class VideoURLNode extends Node {
         this.updateTextInputPositions();
     }
 
+    // Layout: row 0 = URL field between the jacks, row 1 = transport, then thumbnail
     updateTextInputPositions() {
         if (!this.textInputs) return;
 
-        let yOffset = 30;
-
-        if (this.textInputs.url) {
-            this.textInputs.url.x = this.x + 10;
-            this.textInputs.url.y = this.y + yOffset;
-            this.textInputs.url.width = this.width - 20;
+        const url = this.textInputs.url;
+        if (url) {
+            const fieldH = NODE_LAYOUT.fieldHeight;
+            url.x = this.x + 12;
+            url.y = this.getRowCenterY(0) - fieldH / 2;
+            url.width = this.width - 24;
+            url.height = fieldH;
+            url.placeholder = 'paste a video URL';
         }
     }
 
-    draw(ctx, options = {}) {
+    getVideoButtonRects() {
+        if (!this._videoButtons) {
+            this._videoButtons = { play: { x: 0, y: 0, w: 22, h: 16 }, stop: { x: 0, y: 0, w: 22, h: 16 } };
+        }
+        const cy = this.getRowCenterY(1);
+        const b = this._videoButtons;
+        b.play.x = this.x + 10;
+        b.play.y = cy - 8;
+        b.stop.x = b.play.x + b.play.w + 3;
+        b.stop.y = cy - 8;
+        return b;
+    }
+
+    getThumbRect() {
+        const w = this.width - 20;
+        return { x: this.x + 10, y: this.getRowCenterY(1) + LAYOUT.portSpacing / 2 + 2, w, h: Math.round(w * 9 / 16) };
+    }
+
+    updateDimensions() {
+        const thumbH = Math.round((this.width - 20) * 9 / 16);
+        this.height = this.heightForRows(2, thumbH + 4);
+    }
+
+    getHeaderIcon() {
+        return 'film';
+    }
+
+    drawHeaderTags(ctx) {
+        const playing = !!(this.videoElement && !this.videoElement.paused && this.isActive);
+        return this.drawHeaderLed(ctx, playing || !!this.error, this.error ? COLORS.error : undefined);
+    }
+
+    // URL field occupies row 0 - port names live in the hover tooltip
+    getInputPortLabel() {
+        return '';
+    }
+
+    getOutputPortLabel() {
+        return '';
+    }
+
+    drawBody(ctx, options = {}) {
         this.updateTextInputPositions();
-        super.draw(ctx, options);
-
-        // Draw label
-        ctx.fillStyle = '#888';
-        ctx.font = '10px -apple-system, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillText('URL', this.x + 10, this.y + 36);
-
-        // Draw control buttons if video is loaded
-        if (this.videoElement && this.data.url) {
-            this.drawControlButtons(ctx);
+        if (this.textInputs && this.textInputs.url) {
+            this.textInputs.url.draw(ctx, options);
         }
 
+        // Transport
+        const hasVideo = !!(this.videoElement && this.data.url);
+        const playing = hasVideo && !this.videoElement.paused;
+        const b = this.getVideoButtonRects();
+        const color = hasVideo ? undefined : COLORS.textFaint;
+        drawIconButton(ctx, b.play, playing ? 'pause' : 'play', {
+            hovered: hasVideo && this.isHoveringRect(options, b.play),
+            active: playing,
+            activeColor: COLORS.success,
+            color
+        });
+        drawIconButton(ctx, b.stop, 'stop', {
+            hovered: hasVideo && this.isHoveringRect(options, b.stop),
+            color
+        });
+
+        // Status text
+        let status = 'no video';
+        let statusColor = COLORS.textFaint;
+        if (this.error) { status = this.error; statusColor = COLORS.error; }
+        else if (this.isLoading) { status = 'loading…'; }
+        else if (playing) { status = 'playing'; statusColor = COLORS.success; }
+        else if (hasVideo) { status = 'paused'; statusColor = COLORS.textDim; }
+        const sx = b.stop.x + b.stop.w + 8;
+        ctx.font = FONTS.title;
+        ctx.fillStyle = statusColor;
         ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(fitText(ctx, FONTS.title, status, this.x + this.width - 10 - sx), Math.round(sx), Math.round(this.getRowCenterY(1) + 3));
+
+        const r = this.getThumbRect();
+        drawVideoWell(ctx, r.x, r.y, r.w, r.h, this.isActive ? this.videoElement : null, {
+            icon: 'film',
+            message: this.isLoading ? 'loading…' : (this.data.url ? 'click to load' : 'no source')
+        });
     }
 
-    drawControlButtons(ctx) {
-        const buttonWidth = 24;
-        const buttonHeight = 16;
-        const buttonY = this.y + this.height - buttonHeight - 6;
-        const spacing = 4;
+    needsContinuousRender() {
+        return !!(this.videoElement && !this.videoElement.paused && this.isActive);
+    }
 
-        // Play/Pause button
-        const playPauseX = this.x + 6;
-        ctx.fillStyle = this.videoElement && !this.videoElement.paused ? '#4caf50' : '#444';
-        ctx.beginPath();
-        ctx.roundRect(playPauseX, buttonY, buttonWidth, buttonHeight, 3);
-        ctx.fill();
-
-        ctx.fillStyle = '#fff';
-        ctx.font = '10px -apple-system, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(this.videoElement && !this.videoElement.paused ? '❚❚' : '▶', playPauseX + buttonWidth / 2, buttonY + buttonHeight / 2);
-
-        // Stop button
-        const stopX = playPauseX + buttonWidth + spacing;
-        ctx.fillStyle = '#444';
-        ctx.beginPath();
-        ctx.roundRect(stopX, buttonY, buttonWidth, buttonHeight, 3);
-        ctx.fill();
-
-        ctx.fillStyle = '#fff';
-        ctx.fillText('⏹', stopX + buttonWidth / 2, buttonY + buttonHeight / 2);
-
-        ctx.textAlign = 'left';
+    getControlCursor(x, y) {
+        if (this.videoElement && this.data.url) {
+            const b = this.getVideoButtonRects();
+            for (const r of [b.play, b.stop]) {
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return 'pointer';
+            }
+        }
+        return super.getControlCursor(x, y);
     }
 
     // Override handleMouseDown to handle control buttons
     handleMouseDown(x, y, event) {
         // Check if clicking on control buttons
         if (this.videoElement && this.data.url) {
-            const buttonWidth = 24;
-            const buttonHeight = 16;
-            const buttonY = this.y + this.height - buttonHeight - 6;
-            const spacing = 4;
+            const b = this.getVideoButtonRects();
 
             // Play/Pause button
-            const playPauseX = this.x + 6;
-            if (x >= playPauseX && x <= playPauseX + buttonWidth &&
-                y >= buttonY && y <= buttonY + buttonHeight) {
+            if (x >= b.play.x && x <= b.play.x + b.play.w &&
+                y >= b.play.y && y <= b.play.y + b.play.h) {
                 this.togglePlayPause();
                 return { type: 'VIDEO_CONTROL', node: this };
             }
 
             // Stop button
-            const stopX = playPauseX + buttonWidth + spacing;
-            if (x >= stopX && x <= stopX + buttonWidth &&
-                y >= buttonY && y <= buttonY + buttonHeight) {
+            if (x >= b.stop.x && x <= b.stop.x + b.stop.w &&
+                y >= b.stop.y && y <= b.stop.y + b.stop.h) {
                 this.stopVideo();
                 return { type: 'VIDEO_CONTROL', node: this };
             }
         }
 
+        // Blocked remote media (someone else's project): a click asks for consent
+        if (contentGate.isPending(this)) {
+            contentGate.prompt();
+            return super.handleMouseDown ? super.handleMouseDown(x, y, event) : null;
+        }
+
         // Auto-load video if not already active and URL is set
-        if (!this.isActive && this.data.url && this.data.url.trim()) {
-            console.log('[Video URL Node] Auto-loading video from user gesture...');
-            this.loadVideo(this.data.url.trim());
+        if (!this.isActive && !this.isLoading && this.data.url && this.data.url.trim()) {
+            const url = this.data.url.trim();
+            // Someone else's project: a remote URL needs consent first (prompt), see contentGate
+            const now = contentGate.request(this, url, () => {
+                this.error = null;
+                this.loadVideo(url);
+                this.graph?.render?.();
+            });
+            if (!now) this.error = 'blocked: allow media to load';
         }
 
         // Call parent to handle normal node interaction
@@ -180,6 +251,7 @@ export class VideoURLNode extends Node {
      * Load and play video from URL
      */
     async loadVideo(url) {
+        if (this._disposed) return false; // deleted (a delayed auto-load / consent callback)
         if (this.isActive && this.videoElement && this.videoElement.src === url) {
             return true;
         }
@@ -197,11 +269,16 @@ export class VideoURLNode extends Node {
                 this.videoElement.loop = this.data.loop;
             }
 
-            // Set up event listeners
+            // One pair of listeners per load: whichever fires first removes both, and a newer
+            // load (or cleanup) drops them, so an old 'error' can never mark a working node failed
+            this._dropLoadListeners();
+            const el = this.videoElement;
+            const token = this._loadToken = (this._loadToken || 0) + 1;
             const onLoaded = () => {
+                if (token !== this._loadToken) return;
+                this._dropLoadListeners();
                 this.isLoading = false;
                 this.isActive = true;
-                console.log('[Video URL Node] Video loaded successfully');
 
                 if (this.data.autoplay) {
                     this.videoElement.play().catch(err => {
@@ -212,17 +289,20 @@ export class VideoURLNode extends Node {
             };
 
             const onError = (e) => {
+                if (token !== this._loadToken) return;
+                this._dropLoadListeners();
                 this.isLoading = false;
                 this.isActive = false;
                 this.error = 'Failed to load';
                 console.error('[Video URL Node] Failed to load video:', e);
             };
 
-            this.videoElement.addEventListener('loadeddata', onLoaded, { once: true });
-            this.videoElement.addEventListener('error', onError, { once: true });
+            el.addEventListener('loadeddata', onLoaded);
+            el.addEventListener('error', onError);
+            this._loadListeners = { el, onLoaded, onError };
 
             // Set source
-            this.videoElement.src = url;
+            el.src = url;
 
             return true;
 
@@ -233,6 +313,14 @@ export class VideoURLNode extends Node {
             this.isActive = false;
             return false;
         }
+    }
+
+    _dropLoadListeners() {
+        const l = this._loadListeners;
+        if (!l) return;
+        this._loadListeners = null;
+        l.el.removeEventListener('loadeddata', l.onLoaded);
+        l.el.removeEventListener('error', l.onError);
     }
 
     /**
@@ -253,11 +341,18 @@ export class VideoURLNode extends Node {
      * Cleanup
      */
     cleanup() {
+        this._disposed = true;
+        this._loadToken = (this._loadToken || 0) + 1; // a load in flight is forgotten
+        this._dropLoadListeners();
         if (this.videoElement) {
-            this.videoElement.pause();
-            this.videoElement.src = '';
+            const el = this.videoElement;
             this.videoElement = null;
+            el.pause();
+            // Release the media without an 'error' event (src = '' fires one)
+            el.removeAttribute('src');
+            try { el.load(); } catch (e) { /* ignore */ }
         }
         this.isActive = false;
+        this.isLoading = false;
     }
 }

@@ -1,0 +1,659 @@
+{
+  "name": "JS Swarm Points",
+  "description": "JavaScript node demo: an orbital swarm of up to 128 points simulated in JS (attractors, swirl, separation, mouse, kick; dt-correct sub-steps) and sent to the GPU with dataTexture(); a GLSL node draws glowing metaballs and links between near points, with Feedback trails. Tweak it in the Parameters panel (P): Swarm, Look and Music.",
+  "version": "1.0",
+  "timestamp": "2026-10-25T07:33:28.957Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": 0,
+        "type": "Comment",
+        "x": 80,
+        "y": -468,
+        "data": {
+          "text": "# JS Swarm Points\nA JavaScript node simulates up to 128 points orbiting drifting attractors, finds the pairs that are close, and sends both lists to the GPU as data textures; a GLSL node draws them as glowing metaballs joined by light links.\nMove the mouse over the preview: the swarm follows it (or flees, see the Mouse param) while it moves. Reacts to music: the kick bursts the orbits outward.\n## What the JS does\n- Setup (runs once): typed arrays in state for positions, velocities and hues, plus the two output buffers.\n- Every frame: forces = spring toward the point's attractor + a perpendicular swirl (orbits) + separation + mouse + kick, integrated with semi-implicit Euler in fixed 1/120 s sub-steps (frame-rate independent).\n- Then it lists links (pairs closer than Link distance, at most 192) and returns { points: dataTexture(pts, 128, 1, 4), links: dataTexture(links, 192, 2, 4), count, linkCount }.\n- In GLSL, point i is texelFetch(points, ivec2(i, 0), 0) = (x, y, speed, hue); link i is texel (i, 0) = (x1, y1, x2, y2) and (i, 1) = (strength, hue1, hue2).\n## Make it yours\nDouble-click the JS node (Swarm Sim group): change the forces (try gravity 1/d² instead of the spring, or flocking), give points other data in the free channels, or raise MAXL for more links. Swarm Field (Render group) is plain GLSL: change the look there.\n## Tweak it in the Parameters panel\nPress P: Swarm, Look and Music settings; hover a name for what it does, double-click a slider to reset it.\nDouble-click a group box to open it, Esc to come back.",
+          "width": 470,
+          "height": 500,
+          "color": "blue"
+        }
+      },
+      {
+        "id": 1,
+        "type": "Comment",
+        "x": 80,
+        "y": -118,
+        "data": {
+          "text": "## Swarm Sim (JS)\nReads params['Points'], ['Attractors'], ['Speed'], ['Swirl'], ['Link distance'], ['Mouse'], ['Kick burst'] by label, plus mouse, dt, time and audio.kick.\nstate keeps the simulation between frames; dt-correct sub-steps keep it stable at any frame rate.",
+          "width": 340,
+          "height": 150,
+          "color": "yellow"
+        }
+      },
+      {
+        "id": 2,
+        "type": "Comment",
+        "x": 80,
+        "y": -118,
+        "data": {
+          "text": "## Render\nSwarm Field loops over the points (metaball field sum r²/d², iso rim, white-hot cores where blobs merge, soft halos) and the links (distance to each segment, glow falloff), then keeps max(new, last frame × Trails) from an rgba16f Feedback. ACES, vignette and grain finish it.",
+          "width": 340,
+          "height": 150,
+          "color": "green"
+        }
+      },
+      {
+        "id": 3,
+        "type": "JS",
+        "x": 80,
+        "y": 80,
+        "data": {
+          "setupCode": "// 128 point slots (the Points param decides how many are alive). World units:\n// y in -0.5..0.5 (screen height = 1), x scaled by the screen aspect.\nconst N = 128, MAXL = 192;\nstate.N = N;\nstate.MAXL = MAXL;\nstate.p = new Float32Array(N * 2);     // positions\nstate.v = new Float32Array(N * 2);     // velocities\nstate.hue = new Float32Array(N);       // 0..1 along the Colour A -> B gradient\nfor (let i = 0; i < N; i++) {\n  const a = Math.random() * Math.PI * 2, r = 0.05 + Math.random() * 0.35;\n  state.p[2 * i] = Math.cos(a) * r;\n  state.p[2 * i + 1] = Math.sin(a) * r * 0.7;\n  state.hue[i] = Math.random();\n}\n// Data textures for the shader:\n//   points: N x 1 texels  (x, y, speed, hue)\n//   links:  MAXL x 2 texels, row 0 = (x1, y1, x2, y2), row 1 = (strength, hue1, hue2, 0)\nstate.pts = new Float32Array(N * 4);\nstate.links = new Float32Array(MAXL * 2 * 4);\nstate.hot = 0;",
+          "code": "// Orbital swarm: every point is pulled by one of a few attractors drifting on slow\n// Lissajous paths, with a sideways swirl (so it orbits), short-range separation and\n// drag. The mouse attracts or repels while it moves. Integration is semi-implicit\n// Euler in fixed 1/120 s sub-steps, so the motion is the same at any frame rate.\nconst { N, MAXL, p, v, hue, pts, links } = state;\nconst n = clamp(Math.round(params['Points'] ?? 96), 2, N);\nconst A = clamp(Math.round(params['Attractors'] ?? 3), 1, 4);\nconst speed = params['Speed'] ?? 1;\nconst swirl = params['Swirl'] ?? 1;\nconst R = params['Link distance'] ?? 0.2;\nconst mode = params['Mouse'] | 0;              // 0 attract, 1 repel, 2 off\nconst burst = (params['Kick burst'] ?? 1) * audio.kick;\nconst aspect = resolution[0] / Math.max(1, resolution[1]);\nconst W = 0.5 * aspect - 0.04, H = 0.46;\n\n// Attractors\nconst att = [];\nfor (let k = 0; k < A; k++) {\n  const t = time * 0.21 * speed + k * 2.4;\n  att.push([W * 0.7 * Math.sin(t * 1.3 + k * 1.7), H * 0.7 * Math.sin(t * 1.9 + k * 0.9)]);\n}\n\n// The mouse counts while it moves, then fades out over ~2 s\nconst mx = (mouse[0] - 0.5) * aspect, my = mouse[1] - 0.5;\nconst moved = state.mx !== undefined && Math.hypot(mx - state.mx, my - state.my) > 1e-4;\nstate.mx = mx; state.my = my;\nstate.hot = moved ? 1 : Math.max(0, state.hot - dt / 2);\nconst hot = mode === 2 ? 0 : state.hot;\n\nconst steps = Math.min(8, Math.max(1, Math.ceil(dt / (1 / 120))));\nconst h = (dt / steps) * speed;\nconst drag = Math.exp(-2.5 * h);\nfor (let s = 0; s < steps; s++) {\n  for (let i = 0; i < n; i++) {\n    const x = p[2 * i], y = p[2 * i + 1];\n    const [cx, cy] = att[i % A];\n    const dx = cx - x, dy = cy - y;\n    const d = Math.hypot(dx, dy) + 1e-4;\n    // spring toward the attractor + a constant sideways push: with the drag this settles\n    // into orbits of radius ~ 0.2 x Swirl around each attractor\n    let ax = 8.0 * dx - swirl * 1.4 * dy / d;\n    let ay = 8.0 * dy + swirl * 1.4 * dx / d;\n    // kick: a burst away from the attractor\n    ax -= burst * 6 * dx / d;\n    ay -= burst * 6 * dy / d;\n    // mouse\n    if (hot > 0) {\n      const ex = mx - x, ey = my - y, e2 = ex * ex + ey * ey;\n      const f = hot * (mode === 0 ? 5 / (1 + 30 * e2) : -1.2 * Math.exp(-e2 * 60) / Math.sqrt(e2 + 1e-4));\n      ax += f * ex;\n      ay += f * ey;\n    }\n    // separation from close neighbours\n    for (let j = 0; j < n; j++) {\n      if (j === i) continue;\n      const qx = x - p[2 * j], qy = y - p[2 * j + 1], q2 = qx * qx + qy * qy;\n      if (q2 < 0.0016 && q2 > 1e-10) {\n        const f = (0.0016 - q2) / 0.0016 * 12 / Math.sqrt(q2);\n        ax += qx * f;\n        ay += qy * f;\n      }\n    }\n    // soft walls\n    if (x > W) ax -= (x - W) * 40; else if (x < -W) ax -= (x + W) * 40;\n    if (y > H) ay -= (y - H) * 40; else if (y < -H) ay -= (y + H) * 40;\n    v[2 * i] = v[2 * i] * drag + ax * h;\n    v[2 * i + 1] = v[2 * i + 1] * drag + ay * h;\n    const sp = Math.hypot(v[2 * i], v[2 * i + 1]);\n    if (sp > 1.5) { v[2 * i] *= 1.5 / sp; v[2 * i + 1] *= 1.5 / sp; }\n  }\n  for (let i = 0; i < n; i++) {\n    p[2 * i] += v[2 * i] * h;\n    p[2 * i + 1] += v[2 * i + 1] * h;\n  }\n}\n\n// Points texture\nfor (let i = 0; i < N; i++) {\n  pts[4 * i] = p[2 * i];\n  pts[4 * i + 1] = p[2 * i + 1];\n  pts[4 * i + 2] = Math.hypot(v[2 * i], v[2 * i + 1]);\n  pts[4 * i + 3] = hue[i];\n}\n// Links between near points (strongest when close), up to MAXL\nlet L = 0;\nfor (let i = 0; i < n && L < MAXL; i++) {\n  for (let j = i + 1; j < n && L < MAXL; j++) {\n    const dx = p[2 * j] - p[2 * i], dy = p[2 * j + 1] - p[2 * i + 1];\n    const d = Math.hypot(dx, dy);\n    if (d < R) {\n      links.set([p[2 * i], p[2 * i + 1], p[2 * j], p[2 * j + 1]], 4 * L);\n      links.set([1 - d / R, hue[i], hue[j], 0], 4 * (MAXL + L));\n      L++;\n    }\n  }\n}\nreturn {\n  points: dataTexture(pts, N, 1, 4),\n  links: dataTexture(links, MAXL, 2, 4),\n  count: float(n),\n  linkCount: float(L),\n};",
+          "outputs": [
+            {
+              "name": "points",
+              "type": "sampler2D",
+              "tex": "data 128x1x4"
+            },
+            {
+              "name": "links",
+              "type": "sampler2D",
+              "tex": "data 192x2x4"
+            },
+            {
+              "name": "count",
+              "type": "float"
+            },
+            {
+              "name": "linkCount",
+              "type": "float"
+            }
+          ]
+        }
+      },
+      {
+        "id": 4,
+        "type": "UV",
+        "x": 80,
+        "y": 93,
+        "data": {
+          "mode": "stretch"
+        }
+      },
+      {
+        "id": 5,
+        "type": "Feedback",
+        "x": 80,
+        "y": 190,
+        "data": {
+          "width": 1280,
+          "height": 800,
+          "format": "rgba16f",
+          "filter": "linear"
+        }
+      },
+      {
+        "id": 6,
+        "type": "SwarmField",
+        "x": 320,
+        "y": 80,
+        "data": {}
+      },
+      {
+        "id": 7,
+        "type": "Vec3ToVec4",
+        "x": 1040,
+        "y": 110,
+        "data": {
+          "a": 1
+        }
+      },
+      {
+        "id": 8,
+        "type": "TonemapACES",
+        "x": 560,
+        "y": 179,
+        "data": {
+          "exposure": 1,
+          "color": "vec3(1.0, 0.5, 0.2)"
+        }
+      },
+      {
+        "id": 9,
+        "type": "Vignette",
+        "x": 800,
+        "y": 157,
+        "data": {
+          "radius": 1.4,
+          "softness": 1,
+          "color": "vec3(1.0)",
+          "uv": "pt_uvStretch()"
+        }
+      },
+      {
+        "id": 10,
+        "type": "Grain",
+        "x": 1040,
+        "y": 226,
+        "data": {
+          "amount": 0.03,
+          "color": "vec3(1.0)",
+          "t": "u_time"
+        }
+      },
+      {
+        "id": 11,
+        "type": "Preview",
+        "x": 762,
+        "y": 80,
+        "data": {},
+        "width": 300,
+        "height": 219.5,
+        "isBackground": false
+      },
+      {
+        "id": 12,
+        "type": "Param",
+        "x": 762,
+        "y": 348,
+        "data": {
+          "label": "Points",
+          "kind": "float",
+          "value": 96,
+          "default": 96,
+          "min": 2,
+          "max": 128,
+          "step": 1,
+          "scale": "linear",
+          "section": "Swarm",
+          "order": 0,
+          "description": "How many points are alive (up to 128)."
+        }
+      },
+      {
+        "id": 13,
+        "type": "Param",
+        "x": 762,
+        "y": 474,
+        "data": {
+          "label": "Attractors",
+          "kind": "float",
+          "value": 3,
+          "default": 3,
+          "min": 1,
+          "max": 4,
+          "step": 1,
+          "scale": "linear",
+          "section": "Swarm",
+          "order": 1,
+          "description": "Number of drifting attractors the points orbit."
+        }
+      },
+      {
+        "id": 14,
+        "type": "Param",
+        "x": 762,
+        "y": 600,
+        "data": {
+          "label": "Speed",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Swarm",
+          "order": 2,
+          "description": "Simulation speed."
+        }
+      },
+      {
+        "id": 15,
+        "type": "Param",
+        "x": 762,
+        "y": 726,
+        "data": {
+          "label": "Swirl",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Swarm",
+          "order": 3,
+          "description": "Sideways push: 0 = points fall into the attractors, higher = wider, faster orbits."
+        }
+      },
+      {
+        "id": 16,
+        "type": "Param",
+        "x": 762,
+        "y": 852,
+        "data": {
+          "label": "Mouse",
+          "kind": "enum",
+          "value": 0,
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Swarm",
+          "order": 4,
+          "description": "What the mouse does while it moves over the preview.",
+          "options": [
+            "Attract",
+            "Repel",
+            "Off"
+          ]
+        }
+      },
+      {
+        "id": 17,
+        "type": "Param",
+        "x": 762,
+        "y": 978,
+        "data": {
+          "label": "Link distance",
+          "kind": "float",
+          "value": 0.2,
+          "default": 0.2,
+          "min": 0,
+          "max": 0.4,
+          "step": 0.005,
+          "scale": "linear",
+          "section": "Look",
+          "order": 5,
+          "description": "Points closer than this are joined by a link (at most 192 links)."
+        }
+      },
+      {
+        "id": 18,
+        "type": "Param",
+        "x": 80,
+        "y": 199,
+        "data": {
+          "label": "Blob size",
+          "kind": "float",
+          "value": 0.014,
+          "default": 0.014,
+          "min": 0.004,
+          "max": 0.05,
+          "step": 0.0005,
+          "scale": "linear",
+          "section": "Look",
+          "order": 6,
+          "description": "Metaball radius."
+        }
+      },
+      {
+        "id": 19,
+        "type": "Param",
+        "x": 80,
+        "y": 325,
+        "data": {
+          "label": "Glow",
+          "kind": "float",
+          "value": 1.2,
+          "default": 1.2,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 7,
+          "description": "Brightness of blobs, halos and links."
+        }
+      },
+      {
+        "id": 20,
+        "type": "Param",
+        "x": 80,
+        "y": 451,
+        "data": {
+          "label": "Trails",
+          "kind": "float",
+          "value": 0.7,
+          "default": 0.7,
+          "min": 0,
+          "max": 0.97,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 8,
+          "description": "How much of the last frame stays."
+        }
+      },
+      {
+        "id": 21,
+        "type": "Param",
+        "x": 80,
+        "y": 577,
+        "data": {
+          "label": "Colour A",
+          "kind": "color",
+          "value": [
+            0.098,
+            0.8275,
+            1
+          ],
+          "default": [
+            0.098,
+            0.8275,
+            1
+          ],
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 9,
+          "description": "One end of the point colour gradient.",
+          "alpha": false
+        }
+      },
+      {
+        "id": 22,
+        "type": "Param",
+        "x": 80,
+        "y": 709,
+        "data": {
+          "label": "Colour B",
+          "kind": "color",
+          "value": [
+            1,
+            0.2392,
+            0.6039
+          ],
+          "default": [
+            1,
+            0.2392,
+            0.6039
+          ],
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 10,
+          "description": "Other end of the point colour gradient.",
+          "alpha": false
+        }
+      },
+      {
+        "id": 23,
+        "type": "Param",
+        "x": 80,
+        "y": 841,
+        "data": {
+          "label": "Exposure",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0.3,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Look",
+          "order": 11,
+          "description": "Tone-mapping exposure."
+        }
+      },
+      {
+        "id": 24,
+        "type": "Param",
+        "x": 762,
+        "y": 1104,
+        "data": {
+          "label": "Kick burst",
+          "kind": "float",
+          "value": 1,
+          "default": 1,
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "scale": "linear",
+          "section": "Music",
+          "order": 12,
+          "description": "How hard the kick drum bursts the orbits outward (audio menu: Metronome, Mic or a music file)."
+        }
+      }
+    ],
+    "connections": [
+      {
+        "fromId": 4,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 1,
+        "toId": 6,
+        "toInput": 2,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 2,
+        "toId": 6,
+        "toInput": 3,
+        "swizzle": null
+      },
+      {
+        "fromId": 3,
+        "fromOutput": 3,
+        "toId": 6,
+        "toInput": 4,
+        "swizzle": null
+      },
+      {
+        "fromId": 5,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 5,
+        "swizzle": null
+      },
+      {
+        "fromId": 18,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 6,
+        "swizzle": null
+      },
+      {
+        "fromId": 19,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 7,
+        "swizzle": null
+      },
+      {
+        "fromId": 20,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 8,
+        "swizzle": null
+      },
+      {
+        "fromId": 21,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 9,
+        "swizzle": null
+      },
+      {
+        "fromId": 22,
+        "fromOutput": 0,
+        "toId": 6,
+        "toInput": 10,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 7,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 7,
+        "fromOutput": 0,
+        "toId": 5,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 6,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 23,
+        "fromOutput": 0,
+        "toId": 8,
+        "toInput": 1,
+        "swizzle": null
+      },
+      {
+        "fromId": 8,
+        "fromOutput": 0,
+        "toId": 9,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 9,
+        "fromOutput": 0,
+        "toId": 10,
+        "toInput": 0,
+        "swizzle": null
+      },
+      {
+        "fromId": 10,
+        "fromOutput": 0,
+        "toId": 11,
+        "toInput": 0,
+        "swizzle": null
+      }
+    ],
+    "nextNodeId": 25,
+    "panX": 352.37333333333333,
+    "panY": 269.68,
+    "zoom": 0.4266666666666667,
+    "groups": [
+      {
+        "id": "g1",
+        "name": "Swarm Sim",
+        "parentId": null,
+        "nodeIds": [
+          3,
+          1
+        ],
+        "x": 80,
+        "y": 974,
+        "color": "source"
+      },
+      {
+        "id": "g2",
+        "name": "Render",
+        "parentId": null,
+        "nodeIds": [
+          6,
+          5,
+          7,
+          8,
+          9,
+          10,
+          2
+        ],
+        "x": 424,
+        "y": 460,
+        "color": "effect"
+      }
+    ]
+  },
+  "customNodes": {
+    "SwarmField": {
+      "category": "custom",
+      "inputs": [
+        {
+          "name": "uv",
+          "type": "vec2",
+          "paramName": "uv"
+        },
+        {
+          "name": "points",
+          "type": "sampler2D",
+          "paramName": "points"
+        },
+        {
+          "name": "links",
+          "type": "sampler2D",
+          "paramName": "links"
+        },
+        {
+          "name": "count",
+          "type": "float",
+          "paramName": "count"
+        },
+        {
+          "name": "linkCount",
+          "type": "float",
+          "paramName": "linkCount"
+        },
+        {
+          "name": "prev",
+          "type": "sampler2D",
+          "paramName": "prev"
+        },
+        {
+          "name": "blobSize",
+          "type": "float",
+          "paramName": "blobSize"
+        },
+        {
+          "name": "glow",
+          "type": "float",
+          "paramName": "glow"
+        },
+        {
+          "name": "trails",
+          "type": "float",
+          "paramName": "trails"
+        },
+        {
+          "name": "colorA",
+          "type": "vec3",
+          "paramName": "colorA"
+        },
+        {
+          "name": "colorB",
+          "type": "vec3",
+          "paramName": "colorB"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "vec3"
+        }
+      ],
+      "customGLSL": "// @node swarmField\n// @title Swarm Field\n// @category custom\n// @description Renders the JS swarm: points (N x 1 data texture: x, y, speed, hue) as glowing metaballs with a bright iso rim, and links (MAXL x 2: row 0 = x1 y1 x2 y2, row 1 = strength hue1 hue2) as glowing lines. Coordinates: y in -0.5..0.5, x scaled by the aspect. Keeps max(new, last frame x trails) from prev (a Feedback of its own output). Returns HDR color.\nvec3 sf_col(vec3 a, vec3 b, float t) {\n    return mix(a, b, smoothstep(0.0, 1.0, t));\n}\n\nvec3 swarmField(vec2 uv, sampler2D points, sampler2D links, float count, float linkCount, sampler2D prev, float blobSize, float glow, float trails, vec3 colorA, vec3 colorB) {\n    float aspect = u_resolution.x / max(u_resolution.y, 1.0);\n    vec2 p = (uv - 0.5) * vec2(aspect, 1.0);\n    float field = 0.0;\n    float wsum = 0.0;\n    vec3 tint = vec3(0.0);\n    vec3 halo = vec3(0.0);\n    float r0 = blobSize * blobSize;\n    for (int i = 0; i < 128; i++) {\n        if (float(i) >= count) break;\n        vec4 q = texelFetch(points, ivec2(i, 0), 0);\n        vec2 d = p - q.xy;\n        float r2 = dot(d, d);\n        // Compact metaball kernel (1 - r²/R²)³ with R = 2.2 x blob size: blobs only merge when close\n        float k = max(1.0 - r2 / (r0 * 4.84), 0.0);\n        float f = k * k * k * 2.0;\n        vec3 c = sf_col(colorA, colorB, q.w) * (1.0 + 0.6 * clamp(q.z, 0.0, 1.5));\n        field += f;\n        tint += c * f;\n        wsum += f;\n        halo += c * r0 * 0.12 / (r2 + r0 * 0.6);\n    }\n    vec3 lines = vec3(0.0);\n    for (int i = 0; i < 192; i++) {\n        if (float(i) >= linkCount) break;\n        vec4 e = texelFetch(links, ivec2(i, 0), 0);\n        vec4 m = texelFetch(links, ivec2(i, 1), 0);\n        vec2 pa = p - e.xy;\n        vec2 ba = e.zw - e.xy;\n        float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0.0, 1.0);\n        float dl = length(pa - ba * h);\n        vec3 c = mix(sf_col(colorA, colorB, m.y), sf_col(colorA, colorB, m.z), h);\n        float core = 1.0 - smoothstep(0.0, 0.002, dl);\n        lines += c * m.x * (core * 0.8 + 0.00002 / (dl * dl + 0.00002) * 0.6);\n    }\n    vec3 base = tint / max(wsum, 1e-6);\n    float aa = fwidth(field) + 1e-4;\n    float body = smoothstep(1.0 - aa, 1.0 + aa, field);\n    float rim = exp(-abs(field - 1.0) * 4.0) * step(0.02, field);\n    // Background: deep blue-black with a soft vertical gradient\n    vec3 col = mix(vec3(0.006, 0.008, 0.02), vec3(0.02, 0.012, 0.04), uv.y);\n    col += lines * glow;\n    col += halo * glow;\n    col += base * (body * (0.3 + 0.2 * min(field, 4.0)) + rim * 0.9) * glow;\n    col += vec3(1.0) * body * smoothstep(2.5, 6.0, field) * 0.35;   // white-hot cores where blobs merge\n    // Trails\n    vec2 pu = uv;\n    vec3 old = texture(prev, pu).rgb * trails;\n    return max(col, old);\n}"
+    }
+  },
+  "editorStates": []
+}
