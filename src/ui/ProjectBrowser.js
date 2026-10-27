@@ -816,7 +816,7 @@ export class ProjectBrowser {
             const n = st.items.length;
             meta.appendChild(h('span', { text: `${n}${st.cursor ? '+' : ''} public project${n === 1 ? '' : 's'}` }));
             const views = st.items.reduce((s, p) => s + (p.views || 0), 0);
-            if (views) meta.appendChild(h('span', { text: `${compact(views)} views` }));
+            if (views) meta.appendChild(h('span', { text: `${compact(views)} view${views === 1 ? '' : 's'}` }));
         }
         info.appendChild(meta);
 
@@ -829,10 +829,9 @@ export class ProjectBrowser {
         }
 
         el.append(back, h('div', { className: 'pb-user-row' }, [av, info, actions]));
-        if (u?.displayName) {
-            this.setHeading('User', u.displayName, '');
-            setMeta({ title: `${u.displayName} (@${name})`, description: `Public PatchToy patches by @${name}.` });
-        }
+        // The owner's spelling, whatever case the link used
+        this.setHeading('User', u?.displayName || `@${name}`, '');
+        if (u?.displayName) setMeta({ title: `${u.displayName} (@${name})`, description: `Public PatchToy patches by @${name}.` });
     }
 
     /* ---------------- Cards ---------------- */
@@ -911,7 +910,7 @@ export class ProjectBrowser {
             s.append(iconNode(iconName, 12), h('span', { text: compact(value) }));
             return s;
         };
-        if (p.views !== undefined || !this.api.isLegacy()) meta.appendChild(stat('eye', p.views || 0, `${p.views || 0} views`)); // 1.x: no views
+        if (p.views !== undefined || !this.api.isLegacy()) meta.appendChild(stat('eye', p.views || 0, `${p.views || 0} view${p.views === 1 ? '' : 's'}`)); // 1.x: no views
         if (p.forks) meta.appendChild(stat('fork', p.forks, `${p.forks} forks`));
         meta.appendChild(h('span', { className: 'pb-date', text: relativeDate(p.updatedAt), title: new Date(p.updatedAt).toLocaleString() }));
         if (p.hasJS) meta.appendChild(h('span', { className: 'pt-badge dg-tag pb-js', text: 'JS', title: 'Contains JavaScript nodes (asks before running them)' }));
