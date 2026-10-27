@@ -323,27 +323,6 @@ class PatchToy {
             await UIHelpers.enableAllCameras(this.nodeGraph);
         });
 
-        // Microphone button
-        // The mic drives the global audio / beat uniforms (AudioEngine) and any Microphone nodes
-        document.getElementById('micBtn').addEventListener('click', async () => {
-            const micNodes = this.nodeGraph.nodes.filter(n => n.isMicrophoneNode);
-            if (audioEngine.mic.stream) {
-                micNodes.forEach(n => n.disable());
-                if (audioEngine.source === 'mic') await audioEngine.setSource('off');
-                this.shell?.syncNow();
-                return;
-            }
-            try {
-                await audioEngine.setSource('mic');
-                for (const n of micNodes) if (!n.isActive) await n.enable();
-                this.shell?.activity('Listening to the microphone — beat lock takes a few seconds', { local: true });
-            } catch (error) {
-                UIHelpers.setDeviceButtonState('micBtn', { state: 'error', tip: 'Microphone error: ' + (audioEngine.error || error.message) });
-                UIHelpers.toast(audioEngine.error || error.message, 'error', { title: 'Microphone unavailable' });
-            }
-            this.shell?.syncNow();
-        });
-
         // MIDI button
         document.getElementById('midiBtn').addEventListener('click', async () => {
             await UIHelpers.enableMIDI();

@@ -74,7 +74,7 @@ export class AudioEngine {
         this.file = { el: null, node: null, name: '', url: '', objectUrl: null, error: null };
         this.tab = { stream: null, node: null, label: '' };
 
-        this.settings = { offsetMs: 0, metronomeBpm: 120, locked: false };
+        this.settings = { offsetMs: 0, metronomeBpm: 120, locked: false, micDeviceId: '' };
         this.loadSettings();
 
         // Per-frame outputs (read by the Clock)
@@ -129,6 +129,7 @@ export class AudioEngine {
             if (s && typeof s === 'object') {
                 if (Number.isFinite(s.offsetMs)) this.settings.offsetMs = clamp(s.offsetMs, -200, 200);
                 if (s.metronomeBpm > 0) this.settings.metronomeBpm = clamp(s.metronomeBpm, 20, 400);
+                if (typeof s.micDeviceId === 'string') this.settings.micDeviceId = s.micDeviceId;
             }
         } catch (e) { /* ignore */ }
     }
@@ -137,7 +138,8 @@ export class AudioEngine {
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify({
                 offsetMs: this.settings.offsetMs,
-                metronomeBpm: this.settings.metronomeBpm
+                metronomeBpm: this.settings.metronomeBpm,
+                micDeviceId: this.settings.micDeviceId
             }));
         } catch (e) { /* ignore */ }
     }
@@ -392,9 +394,16 @@ export class AudioEngine {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 throw new Error('Microphone access is not available (needs https or localhost)');
             }
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
-            });
+            const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
+            const wanted = this.settings.micDeviceId;
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ audio: wanted ? { ...audio, deviceId: { exact: wanted } } : audio });
+            } catch (e) {
+                // The chosen device is gone (unplugged interface): fall back to the default input
+                if (!wanted || !e || (e.name !== 'OverconstrainedError' && e.name !== 'NotFoundError')) throw e;
+                stream = await navigator.mediaDevices.getUserMedia({ audio });
+            }
             const track = stream.getAudioTracks()[0];
             const s = track && track.getSettings ? track.getSettings() : {};
             this.mic.latencyMs = Number.isFinite(s.latency) && s.latency > 0 ? s.latency * 1000 : DEFAULT_INPUT_LATENCY_MS;
@@ -429,6 +438,41 @@ export class AudioEngine {
         }
         this.mic.users.clear();
         if (this.source === 'mic') this.setSource('off');
+        this.emit('source');
+    }
+
+    /**
+     * Audio inputs for the device menu: [{ id, label }]. Labels are only known once the
+     * page has had microphone permission (before that they are generic).
+     */
+    async listMicDevices() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
+        const all = await navigator.mediaDevices.enumerateDevices();
+        return all.filter(d => d.kind === 'audioinput' && d.deviceId !== 'communications')
+            .map((d, i) => ({ id: d.deviceId === 'default' ? '' : d.deviceId, label: d.label || (d.deviceId === 'default' ? 'System default' : `Input ${i + 1}`) }));
+    }
+
+    /** Device id of the open mic ('' = not open / unknown). */
+    currentMicDeviceId() {
+        const track = this.mic.stream && this.mic.stream.getAudioTracks()[0];
+        const s = track && track.getSettings ? track.getSettings() : {};
+        return s.deviceId || '';
+    }
+
+    /** Pick the microphone ('' = system default); an open mic is reopened on the new device. */
+    async setMicDevice(deviceId) {
+        this.settings.micDeviceId = deviceId || '';
+        this.saveSettings();
+        if (!this.mic.stream) { this.emit('source'); return; }
+        // Reopen: swap the stream under the analysis input and the Microphone node meters
+        const wasInput = this.inputNode === this.mic.node;
+        if (wasInput) this.detachInput();
+        try { this.mic.node.disconnect(); } catch (e) { /* ignore */ }
+        this.mic.stream.getTracks().forEach(t => t.stop());
+        this.mic.stream = null;
+        this.mic.node = null;
+        await this.openMic();
+        if (wasInput || this.source === 'mic') this.attachInput(this.mic.node);
         this.emit('source');
     }
 

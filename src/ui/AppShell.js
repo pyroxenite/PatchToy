@@ -373,7 +373,6 @@ export class AppShell {
 
         // Devices
         this.syncDevice('cameraBtn', g.nodes.filter(n => n.isCameraNode), 'Camera');
-        this.syncMic(g.nodes.filter(n => n.isMicrophoneNode));
         const midiNodes = g.nodes.filter(n => n.isMidiCCNode);
         const midiBtn = document.getElementById('midiBtn');
         const midiOn = !!midiService.isEnabled;
@@ -386,18 +385,6 @@ export class AppShell {
 
         // Compile pill (paused state depends on autoCompile)
         this.renderCompileState();
-    }
-
-    /** The mic feeds the global audio uniforms (AudioEngine) and any Microphone nodes. */
-    syncMic(nodes) {
-        const btn = document.getElementById('micBtn');
-        if (!btn) return;
-        const on = !!audioEngine.mic.stream || nodes.some(n => n.isActive);
-        const error = !on && btn.classList.contains('is-error');
-        const tip = on
-            ? (audioEngine.source === 'mic' ? 'Microphone live — drives audio & beat uniforms (click to stop)' : 'Microphone live (click to stop)')
-            : error ? (btn.getAttribute('data-tip') || 'Microphone error') : 'Listen with the microphone (audio & beat uniforms)';
-        UIHelpers.setDeviceButtonState(btn, { state: on ? 'on' : error ? 'error' : 'off', available: true, tip });
     }
 
     syncDevice(id, nodes, label) {

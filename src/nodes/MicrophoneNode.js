@@ -63,16 +63,7 @@ export class MicrophoneNode extends Node {
         // Auto-enable microphone if not already enabled (uses user gesture from this click);
         // clicks while the permission prompt is open join the pending request
         if (!this.isActive && !this._enabling) {
-            this.enable().then(success => {
-                if (success) {
-                    const btn = document.getElementById('micBtn');
-                    if (btn) {
-                        btn.classList.add('is-on');
-                        btn.classList.remove('is-error');
-                        btn.setAttribute('data-tip', 'Microphone live');
-                    }
-                }
-            });
+            this.enable();
         }
 
         // Call parent to handle normal node interaction

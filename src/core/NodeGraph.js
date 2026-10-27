@@ -611,7 +611,6 @@ export class NodeGraph {
             btn.removeAttribute('title');
         };
         reset('cameraBtn', this.nodes.some(n => n.isCameraNode));
-        reset('micBtn', this.nodes.some(n => n.isMicrophoneNode));
         reset('midiBtn', this.nodes.some(n => n.isMidiCCNode));
         reset('screenCaptureBtn', this.nodes.some(n => n.isScreenCaptureNode));
     }

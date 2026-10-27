@@ -435,6 +435,7 @@ export class AudioPanel {
             els.time = null;
         }
         if (src === 'mic') {
+            d.appendChild(this.micDeviceRow());
             els.micInfo = h('div', { className: 'ap-hint' });
             d.appendChild(els.micInfo);
         } else {
@@ -461,6 +462,29 @@ export class AudioPanel {
         els.offset.value = String(audioEngine.settings.offsetMs);
         els.offsetVal.textContent = `${audioEngine.settings.offsetMs > 0 ? '+' : ''}${audioEngine.settings.offsetMs} ms`;
         this.pop.reposition?.();
+    }
+
+    /** Input device menu for the Mic source (Minifuse, display mic...). */
+    micDeviceRow() {
+        const sel = h('select', { className: 'pt-input pp-select ap-mic-select', 'aria-label': 'Microphone' });
+        const fill = async () => {
+            let list = [];
+            try { list = await audioEngine.listMicDevices(); } catch (e) { /* no device list */ }
+            const chosen = audioEngine.settings.micDeviceId;
+            const open = audioEngine.currentMicDeviceId();
+            sel.textContent = '';
+            if (!list.some(d => d.id === '')) list.unshift({ id: '', label: 'System default' });
+            for (const d of list) sel.appendChild(h('option', { value: d.id, text: d.label }));
+            // The chosen device, else the one actually open, else the default
+            sel.value = list.some(d => d.id === chosen) ? chosen : list.some(d => d.id === open) ? open : '';
+        };
+        sel.addEventListener('change', () => this.run(() => audioEngine.setMicDevice(sel.value), 'Microphone unavailable'));
+        fill();
+        if (!this._deviceWatch && navigator.mediaDevices?.addEventListener) {
+            this._deviceWatch = true;
+            navigator.mediaDevices.addEventListener('devicechange', () => this.renderPopover());
+        }
+        return h('div', { className: 'ap-row' }, [h('span', { className: 'ap-row-label', text: 'Input' }), sel]);
     }
 
     /** Per-frame parts of the popover (meters, status, transport position). */

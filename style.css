@@ -5504,3 +5504,4 @@ button.pt-crumb:hover .pt-i {
     border-color: var(--text-faint);
     box-shadow: none;
 }
+.ap-mic-select { flex: 1; min-width: 0; height: 24px; }
